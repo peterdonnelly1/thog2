@@ -71,6 +71,12 @@ class BasisKernel:
     def raw_basis(self, coordinates: Tensor, order: int) -> Tensor:
         raise NotImplementedError
 
+    # vvv THOG certify the exact registered version, including parameterised kernels
+    def raw_basis_for_version(self, coordinates: Tensor, order: int, version: str) -> Tensor:
+        self.normalize_version(version)
+        return self.raw_basis(coordinates, order)
+    # ^^^ THOG
+
     def stabilize(self, raw_basis: Tensor) -> Tensor:
         raise NotImplementedError
 
@@ -113,6 +119,9 @@ class BasisDefinition:
     supports_weight_basis: bool
     supports_native_products: bool
     kernel: BasisKernel
+    # vvv THOG explicit width capability; numeric certification remains mandatory
+    supports_width_basis: bool = True
+    # ^^^ THOG
 
     def __post_init__(self) -> None:
         family = self.family.strip().lower()
@@ -148,6 +157,7 @@ class BasisDefinition:
             "basis_version": self.version,
             "artifact_tag": self.artifact_tag,
             "supports_weight_basis": self.supports_weight_basis,
+            "supports_width_basis": self.supports_width_basis,
             "supports_native_products": self.supports_native_products,
             **self.kernel.metadata(),
         }

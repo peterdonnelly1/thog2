@@ -232,6 +232,10 @@ For more questions/discussions feel free to stop by **#nanoGPT** on Discord:
 
 [![](https://dcbadge.vercel.app/api/server/3zy8kqD9Cp?compact=true&style=flat)](https://discord.gg/3zy8kqD9Cp)
 
+## THOG residual stream compression
+
+The authoritative attached residual-stream spectral reparameterisation specification is implemented on `residuals_compression` as `width-type-I`, with independently selectable fixed depth compression. See [configuration and workflow](docs/residual_width/README.md), [acceptance and regression results](docs/residual_width/acceptance.md), and the [142-item requirement matrix](docs/residual_width/requirements.csv).
+
 ## acknowledgements
 
 All nanoGPT experiments are powered by GPUs on [Lambda labs](https://lambdalabs.com), my favorite Cloud GPU provider. Thank you Lambda labs for sponsoring nanoGPT!

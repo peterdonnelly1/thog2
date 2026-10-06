@@ -28,6 +28,7 @@ assert.deepEqual(active_assets, [
   "dashboard_oct03_controls.js",
   "dashboard_run_logs.js",
   "dashboard_demand_runtime.js",
+  "dashboard_width.js",                                                                                                                                    // <<< THOG width charts compose with the single demand-driven owner
 ]);
 
 for (const obsolete_owner of [

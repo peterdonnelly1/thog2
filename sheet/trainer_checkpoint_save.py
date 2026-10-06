@@ -51,6 +51,10 @@ class TrainerCheckpointSaveMixin:
             # ^^^ THOG
             "batch_source": self.batch_source.state_dict(),
             "rng_state": capture_rng_state(),
+            # vvv THOG deterministic width probes and bounded history survive resume
+            **({"width_instrumentation": self._width_instrumentation.state_dict()}
+               if vars(self).get("_width_instrumentation") is not None else {}),
+            # ^^^ THOG
             "parameter_report": {**self.parameter_report, "compact_identity": compact_identity},
             "distributed_training": self.distributed.report(),
             "lifecycle": getattr(self, "lifecycle_metadata", None),                                                                                       # <<< THOG persist logical-run identity, lineage, W&B identity, target and LR phases

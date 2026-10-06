@@ -6,7 +6,7 @@
   if (!view) return;
   const list = by_id("runner_list"), detail = by_id("runner_detail"), message = by_id("runner_message");
   const multiview = by_id("runner_multiview_panel");
-  const categories = ["GPT-2 Hyperparameters", "Resume and Fork", "Run Control Parameters", "Geometry", "Premat", "NSIGHT",
+  const categories = ["GPT-2 Hyperparameters", "Resume and Fork", "Run Control Parameters", "Geometry", "Width Activation Curves", "Premat", "NSIGHT",
     "Coarse", "Layer Spacing", "Variable Depth", "Chaos Bumps", "Instrumentation"];
   const main_table_order = ["--geometry-preset", "--optimizer", "--n-layer", "DEPTH.order", "--warmup-iters",
     "--block-size", "--n-embd", "--n-head", "--gradient-accumulation-steps", "--checkpoint-segment-size",

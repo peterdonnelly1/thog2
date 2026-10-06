@@ -1,0 +1,116 @@
+{
+  "baseline_commit": "a88cafffa6055cbe75f937a1d1692b10a8e224ee",
+  "scope": "exact configuration, structure, initial/final model, optimizer, RNG/batch source, first update, checkpoint fields and events",
+  "rows": [
+    {
+      "path": "dense",
+      "exact_match": true,
+      "different_fields": [],
+      "master_fingerprint_sha256": "5a076e4eb745efc66f14b39fd84a6c7c315acfb37d8b89a4d80177e23a0f05a2",
+      "current_fingerprint_sha256": "5a076e4eb745efc66f14b39fd84a6c7c315acfb37d8b89a4d80177e23a0f05a2",
+      "compared_fields": [
+        "checkpoint_keys",
+        "checkpoint_trainer_config",
+        "event_names",
+        "final_batch_source",
+        "final_model",
+        "final_optimizer",
+        "initial_batch_source",
+        "initial_model",
+        "initial_optimizer",
+        "persistent_config",
+        "structure_signature",
+        "trainer_state",
+        "update_metrics"
+      ]
+    },
+    {
+      "path": "chebyshev",
+      "exact_match": true,
+      "different_fields": [],
+      "master_fingerprint_sha256": "c3b09c7fba23c32da55ae2c1d5395dc18744f8fdc8763c9752ba3a0302ece0e4",
+      "current_fingerprint_sha256": "c3b09c7fba23c32da55ae2c1d5395dc18744f8fdc8763c9752ba3a0302ece0e4",
+      "compared_fields": [
+        "checkpoint_keys",
+        "checkpoint_trainer_config",
+        "event_names",
+        "final_batch_source",
+        "final_model",
+        "final_optimizer",
+        "initial_batch_source",
+        "initial_model",
+        "initial_optimizer",
+        "persistent_config",
+        "structure_signature",
+        "trainer_state",
+        "update_metrics"
+      ]
+    },
+    {
+      "path": "dct",
+      "exact_match": true,
+      "different_fields": [],
+      "master_fingerprint_sha256": "f4aacdabd8e7bdc44115f21993f49e66e6bd4af566c06ff84e22eb33ecdc230e",
+      "current_fingerprint_sha256": "f4aacdabd8e7bdc44115f21993f49e66e6bd4af566c06ff84e22eb33ecdc230e",
+      "compared_fields": [
+        "checkpoint_keys",
+        "checkpoint_trainer_config",
+        "event_names",
+        "final_batch_source",
+        "final_model",
+        "final_optimizer",
+        "initial_batch_source",
+        "initial_model",
+        "initial_optimizer",
+        "persistent_config",
+        "structure_signature",
+        "trainer_state",
+        "update_metrics"
+      ]
+    },
+    {
+      "path": "haar",
+      "exact_match": true,
+      "different_fields": [],
+      "master_fingerprint_sha256": "2206eab1264b100950b6876b4a3c235b7f9a075e0f0c96346b6a36f5ad8f2b38",
+      "current_fingerprint_sha256": "2206eab1264b100950b6876b4a3c235b7f9a075e0f0c96346b6a36f5ad8f2b38",
+      "compared_fields": [
+        "checkpoint_keys",
+        "checkpoint_trainer_config",
+        "event_names",
+        "final_batch_source",
+        "final_model",
+        "final_optimizer",
+        "initial_batch_source",
+        "initial_model",
+        "initial_optimizer",
+        "persistent_config",
+        "structure_signature",
+        "trainer_state",
+        "update_metrics"
+      ]
+    },
+    {
+      "path": "lapped_cosine",
+      "exact_match": true,
+      "different_fields": [],
+      "master_fingerprint_sha256": "9fc01414745e325e5f94ee664e320fb3d3c0663bc46159d43f3b1f56a4d6a5cf",
+      "current_fingerprint_sha256": "9fc01414745e325e5f94ee664e320fb3d3c0663bc46159d43f3b1f56a4d6a5cf",
+      "compared_fields": [
+        "checkpoint_keys",
+        "checkpoint_trainer_config",
+        "event_names",
+        "final_batch_source",
+        "final_model",
+        "final_optimizer",
+        "initial_batch_source",
+        "initial_model",
+        "initial_optimizer",
+        "persistent_config",
+        "structure_signature",
+        "trainer_state",
+        "update_metrics"
+      ]
+    }
+  ]
+}

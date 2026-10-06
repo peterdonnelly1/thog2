@@ -14,6 +14,9 @@ import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
 
+# vvv THOG residual width integration
+from .width import WIDTH_PRESET, WIDTH_CONFIG_FIELDS, WIDTH_CAPTURE_DEFAULTS, WIDTH_CAPTURE_PREFIX, validate_width_configuration, width_identity
+# ^^^ THOG
 from .basis import BASIS_VERSION
 from .block_trajectory import BlockTrajectory
 from .compact_identity import (
@@ -176,7 +179,20 @@ class SheetGPTConfig:
     # ^^^ THOG
     vectorise_per_head_materialisation: bool = field(default_factory=lambda: _env_bool("THOG2_VECTORISE_PER_HEAD_MATERIALISATION", True))                    # <<< THOG default-on selectable batched head-aware materialisation
 
+    # vvv THOG independently selected residual representation
+    width_enabled: bool = False
+    width_order: Optional[int] = None
+    width_compressor: str = "chebyshev"
+    width_compressor_version: str = "auto"
+    width_depth_enabled: bool = False
+    # ^^^ THOG
+
     def __post_init__(self) -> None:
+        # vvv THOG validate width before any model allocation
+        validate_width_configuration(self)
+        from .width_instrumentation import validate_width_capture_configuration
+        validate_width_capture_configuration(self)
+        # ^^^ THOG
         for name in ("block_size", "vocab_size"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
@@ -407,11 +423,13 @@ class SheetGPTConfig:
         else:
             # vvv THOG DEPTH is controlled only by P and the LayerNorm/bias participation switch; row/axis orders are semantically irrelevant.
             selectors = self.compact_selectors()
-            if selectors.geometry_preset != GEOMETRY_PRESET_DEPTH and self.depth_compress_layer_norm_and_bias:
+            # if selectors.geometry_preset != GEOMETRY_PRESET_DEPTH and self.depth_compress_layer_norm_and_bias:
+            if selectors.geometry_preset not in (GEOMETRY_PRESET_DEPTH, WIDTH_PRESET) and self.depth_compress_layer_norm_and_bias:
                 raise ValueError(
                     "depth_compress_layer_norm_and_bias may be enabled only for geometry_preset='depth'"
                 )
-            if selectors.geometry_preset == GEOMETRY_PRESET_DEPTH:
+            # if selectors.geometry_preset == GEOMETRY_PRESET_DEPTH:
+            if selectors.geometry_preset in (GEOMETRY_PRESET_DEPTH, WIDTH_PRESET):
                 # vvv THOG PLASTIC DEPTH v0.1 is defined only for the continuous Chebyshev DEPTH field
                 if self.plastic__enabled and selectors.basis_family != "chebyshev":
                     raise ValueError(
@@ -510,6 +528,12 @@ class SheetGPT(nn.Module):
     def __init__(self, config: SheetGPTConfig) -> None:
         super().__init__()
         self.config = config
+        # vvv THOG compact residual path owns no full-width embeddings or matrix materializer
+        if config.width_enabled:
+            from .width import initialize_width_model
+            initialize_width_model(self, config)
+            return
+        # ^^^ THOG
         self.transformer = nn.ModuleDict(
             {
                 "wte": nn.Embedding(config.vocab_size, config.n_embd),
@@ -521,7 +545,8 @@ class SheetGPT(nn.Module):
         # vvv THOG preserve the pre-HYPERBLOCK trajectory-selection branch headers for source history
         # elif selectors.attention_geometry == ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK:
         # elif selectors.geometry_preset == GEOMETRY_PRESET_MLP_BLOCK:
-        # elif selectors.geometry_preset == GEOMETRY_PRESET_DEPTH:
+        # # elif selectors.geometry_preset == GEOMETRY_PRESET_DEPTH:
+        # elif selectors.geometry_preset in (GEOMETRY_PRESET_DEPTH, WIDTH_PRESET):
         # ^^^ THOG
         # vvv THOG HYPERBLOCK is a separate trajectory and leaves every legacy selector path unchanged
         if config.hyperblock_enabled:
@@ -561,7 +586,8 @@ class SheetGPT(nn.Module):
                 basis_version=config.basis_version,
                 basis_family=selectors.basis_family,
             )
-        elif selectors is not None and selectors.geometry_preset == GEOMETRY_PRESET_DEPTH:
+        # elif selectors is not None and selectors.geometry_preset == GEOMETRY_PRESET_DEPTH:
+        elif selectors is not None and selectors.geometry_preset in (GEOMETRY_PRESET_DEPTH, WIDTH_PRESET):
             self.trajectory = DepthTrajectory(
                 config.sheet_geometry(),
                 runtime_dtype=torch.float32,
@@ -1055,6 +1081,11 @@ class SheetGPT(nn.Module):
 
     # def _logical_block(self, inputs: Tensor, layer_index: int) -> Tensor:                                                                              # <<< THOG preserved pre-loop block entry point
     def _logical_block(self, inputs: Tensor, layer_index: int) -> Tensor:
+        # vvv THOG width blocks use direct compact contractions
+        if self.config.width_enabled:
+            from .width import width_logical_block
+            return width_logical_block(self, inputs, layer_index)
+        # ^^^ THOG
         if self._premat_runtime is not None and self._premat_runtime.active:
             self._premat_runtime.layer_start(layer_index)
             self._premat_forensic_layer_start(layer_index)                                                             # <<< THOG time Main Stream layer body only when explicit GPU diagnostic is enabled
@@ -1150,6 +1181,11 @@ class SheetGPT(nn.Module):
     # ^^^ THOG
 
     def forward(self, idx: Tensor, targets: Optional[Tensor] = None) -> Tuple[Tensor, Optional[Tensor]]:
+        # vvv THOG inference and direct model calls share compact execution
+        if self.config.width_enabled:
+            from .width import width_forward
+            return width_forward(self, idx, targets)
+        # ^^^ THOG
         if idx.ndim != 2:
             raise ValueError(f"idx must have shape [batch, time]; got {tuple(idx.shape)}")
         if self.config.premat == "enabled" and idx.device.type != "cuda":
@@ -1192,6 +1228,11 @@ class SheetGPT(nn.Module):
     # ^^^ THOG
 
     def parameter_report(self) -> Dict[str, object]:
+        # vvv THOG report actual stored width dimensions and byte classes
+        if self.config.width_enabled:
+            from .width import width_parameter_report
+            return width_parameter_report(self)
+        # ^^^ THOG
         total_persistent = sum(parameter.numel() for parameter in self.parameters())
         sheet_coefficients = self.trajectory.sheet_parameter_count()
         # vvv THOG PLASTIC DEPTH geometry is compact PE state, neither a DEPTH coefficient nor a conventional GPT parameter
@@ -1308,6 +1349,10 @@ class SheetGPT(nn.Module):
         return torch.optim.AdamW(self.optimizer_parameter_groups(weight_decay), lr=learning_rate, betas=betas, fused=use_fused)
 
     def compact_state_violations(self) -> Tuple[str, ...]:
+        # vvv THOG only compact banks, r-wide tables, reference affine vectors, and one basis are permitted
+        if self.config.width_enabled:
+            return tuple(name for name, _ in self.named_parameters() if not name.startswith(("trajectory.", "transformer.", "lm_head.")))
+        # ^^^ THOG
         violations: List[str] = []
         compact_coefficient_prefixes = (
             "trajectory.coefficients.",

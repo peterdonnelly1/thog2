@@ -363,7 +363,8 @@
       "jpeg_like_v1",
       "head_aware_block",
       "mlp_block",
-      "full_block"
+      "full_block",
+      "width-type-I"
     ],
     "default": null,
     "help": "dense | legacy_sheet_col | depth | jpeg_like_v1 | head_aware_block | mlp_block | full_block",
@@ -506,7 +507,7 @@
       "linear"
     ],
     "default": null,
-    "help": "absolute-layer observational \u0394loss heatmap; absent means disabled",
+    "help": "absolute-layer observational Δloss heatmap; absent means disabled",
     "kind": "dimension",
     "type": "string"
   },
@@ -1553,5 +1554,129 @@
     "help": "DEPTH coefficient order selected through --option DEPTH.order=N",
     "kind": "dimension",
     "type": "int"
+  },
+  "--select-width": {
+    "category": "Geometry",
+    "type": "flag",
+    "default": false,
+    "choices": [],
+    "kind": "fixed",
+    "help": "Activate width-type-I compact residuals; pair with WIDTH.order."
+  },
+  "WIDTH.order": {
+    "category": "Geometry",
+    "type": "int",
+    "default": null,
+    "choices": [],
+    "kind": "dimension",
+    "help": "Retained residual coefficients r; explicit 2 <= r <= D. Attention and MLP remain reference-wide."
+  },
+  "WIDTH.compressor": {
+    "category": "Geometry",
+    "type": "str",
+    "default": "chebyshev",
+    "choices": [],
+    "kind": "fixed",
+    "help": "Independent width basis from the shared registry; family@version is accepted."
+  },
+  "WIDTH.compressor_version": {
+    "category": "Geometry",
+    "type": "str",
+    "default": "auto",
+    "choices": [],
+    "kind": "fixed",
+    "help": "Resolved exact width basis version; saved version controls compatible resume."
+  },
+  "DEPTH.compressor": {
+    "category": "Geometry",
+    "type": "str",
+    "default": "chebyshev",
+    "choices": [],
+    "kind": "fixed",
+    "help": "Independent fixed depth basis, used with select-depth."
+  },
+  "DEPTH.compressor_version": {
+    "category": "Geometry",
+    "type": "str",
+    "default": "auto",
+    "choices": [],
+    "kind": "fixed",
+    "help": "Exact independent depth basis version."
+  },
+  "--instrumentation__width_activation_curves__mode": {
+    "category": "Width Activation Curves",
+    "type": "str",
+    "default": "off",
+    "choices": [
+      "off",
+      "basic",
+      "probes"
+    ],
+    "kind": "fixed",
+    "help": "Bounded residual-width capture: mode"
+  },
+  "--instrumentation__width_activation_curves__log_every_n_steps": {
+    "category": "Width Activation Curves",
+    "type": "int",
+    "default": 100,
+    "choices": [],
+    "kind": "fixed",
+    "help": "Bounded residual-width capture: log every n steps"
+  },
+  "--instrumentation__width_activation_curves__probe_every_n_steps": {
+    "category": "Width Activation Curves",
+    "type": "int",
+    "default": 1000,
+    "choices": [],
+    "kind": "fixed",
+    "help": "Bounded residual-width capture: probe every n steps"
+  },
+  "--instrumentation__width_activation_curves__history_length": {
+    "category": "Width Activation Curves",
+    "type": "int",
+    "default": 20,
+    "choices": [],
+    "kind": "fixed",
+    "help": "Bounded residual-width capture: history length"
+  },
+  "--instrumentation__width_activation_curves__sample_tokens_per_layer": {
+    "category": "Width Activation Curves",
+    "type": "int",
+    "default": 8,
+    "choices": [],
+    "kind": "fixed",
+    "help": "Bounded residual-width capture: sample tokens per layer"
+  },
+  "--instrumentation__width_activation_curves__feature_evaluation_points": {
+    "category": "Width Activation Curves",
+    "type": "int",
+    "default": 256,
+    "choices": [],
+    "kind": "fixed",
+    "help": "Bounded residual-width capture: feature evaluation points"
+  },
+  "--instrumentation__width_activation_curves__probe_orders": {
+    "category": "Width Activation Curves",
+    "type": "str",
+    "default": "auto",
+    "choices": [],
+    "kind": "fixed",
+    "help": "Bounded residual-width capture: probe orders"
+  },
+  "--instrumentation__width_activation_curves__start_step": {
+    "category": "Width Activation Curves",
+    "type": "int",
+    "default": 0,
+    "choices": [],
+    "kind": "fixed",
+    "help": "Bounded residual-width capture: start step"
+  },
+  "--instrumentation__width_activation_curves__end_step": {
+    "category": "Width Activation Curves",
+    "type": "int",
+    "default": -1,
+    "choices": [],
+    "kind": "fixed",
+    "help": "Bounded residual-width capture: end step"
   }
 }

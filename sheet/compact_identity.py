@@ -24,6 +24,9 @@ GEOMETRY_PRESET_MLP_BLOCK = "mlp_block"
 GEOMETRY_PRESET_HEAD_AWARE_BLOCK = "head_aware_block"
 GEOMETRY_PRESET_FULL_BLOCK = "full_block"
 GEOMETRY_PRESET_CONVENTIONAL = "conventional"
+# vvv THOG new explicitly selected residual architecture
+GEOMETRY_PRESET_WIDTH = "width-type-I"
+# ^^^ THOG
 
 ATTENTION_GEOMETRY_LEGACY_SHEET_COL = "legacy_sheet_col"
 ATTENTION_GEOMETRY_DEPTH = "depth"
@@ -54,6 +57,7 @@ DEFAULT_MLP_HIDDEN_GROUP_SIZE = 256
 DEFAULT_MLP_HIDDEN_COMPRESSOR = BASIS_FAMILY_DCT
 
 GEOMETRY_PRESETS = (
+    GEOMETRY_PRESET_WIDTH,
     GEOMETRY_PRESET_LEGACY_SHEET_COL,
     GEOMETRY_PRESET_DEPTH,
     GEOMETRY_PRESET_JPEG_LIKE_V1,
@@ -78,6 +82,7 @@ MLP_GEOMETRIES = (
 BASIS_FAMILIES = (*REGISTERED_BASIS_FAMILIES, BASIS_FAMILY_CONVENTIONAL)
 
 _PRESET_DEFAULTS: Mapping[str, Tuple[str, str]] = {
+    GEOMETRY_PRESET_WIDTH: (ATTENTION_GEOMETRY_DEPTH, MLP_GEOMETRY_DEPTH),
     GEOMETRY_PRESET_LEGACY_SHEET_COL: (ATTENTION_GEOMETRY_LEGACY_SHEET_COL, MLP_GEOMETRY_LEGACY_SHEET_COL),
     GEOMETRY_PRESET_DEPTH: (ATTENTION_GEOMETRY_DEPTH, MLP_GEOMETRY_DEPTH),
     GEOMETRY_PRESET_JPEG_LIKE_V1: (ATTENTION_GEOMETRY_DEPTH, MLP_GEOMETRY_JPEG_LIKE_V1),
@@ -150,6 +155,10 @@ def _canonical_optional_string(name: str, value: Optional[str]) -> Optional[str]
 
 def _require_member(name: str, value: Optional[str], allowed: Tuple[str, ...]) -> Optional[str]:
     normalized = _canonical_optional_string(name, value)
+    # vvv THOG preserve the registered mixed-case width variant spelling
+    if normalized == "width-type-i":
+        normalized = GEOMETRY_PRESET_WIDTH
+    # ^^^ THOG
     if normalized is not None and normalized not in allowed:
         raise ValueError(f"{name} must be one of {allowed} or None; got {value!r}")
     return normalized
@@ -212,6 +221,7 @@ def resolve_compact_selectors(
 
 def compact_materialization_version(selectors: ResolvedCompactSelectors) -> str:
     versions = {
+        GEOMETRY_PRESET_WIDTH: "width_type_I_direct_v1",
         GEOMETRY_PRESET_LEGACY_SHEET_COL: LEGACY_SHEET_COL_MATERIALIZATION_VERSION,
         GEOMETRY_PRESET_DEPTH: DEPTH_MATERIALIZATION_VERSION,
         GEOMETRY_PRESET_JPEG_LIKE_V1: JPEG_LIKE_V1_MATERIALIZATION_VERSION,
@@ -232,6 +242,10 @@ def normalize_compact_basis_version(selectors: ResolvedCompactSelectors, basis_v
 
 
 def validate_current_sheet_support(selectors: ResolvedCompactSelectors) -> None:
+    # vvv THOG width execution is validated by its independent architecture contract
+    if selectors.geometry_preset == GEOMETRY_PRESET_WIDTH:
+        return
+    # ^^^ THOG
     supported_basis = selectors.basis_family in REGISTERED_BASIS_FAMILIES
     legacy = selectors.geometry_preset == GEOMETRY_PRESET_LEGACY_SHEET_COL and selectors.attention_geometry == ATTENTION_GEOMETRY_LEGACY_SHEET_COL and selectors.mlp_geometry == MLP_GEOMETRY_LEGACY_SHEET_COL and supported_basis
     depth = selectors.geometry_preset == GEOMETRY_PRESET_DEPTH and selectors.attention_geometry == ATTENTION_GEOMETRY_DEPTH and selectors.mlp_geometry == MLP_GEOMETRY_DEPTH and supported_basis

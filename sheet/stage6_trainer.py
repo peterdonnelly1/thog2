@@ -323,6 +323,10 @@ class Stage6Trainer(Stage4Trainer):
         result = function()
         self._synchronize()
         elapsed = time.perf_counter() - started
+        # vvv THOG capture overhead is separately reported, outside complete training-update time
+        if isinstance(result, dict):
+            elapsed = max(0.0, elapsed - float(result.get("width_instrumentation_seconds", 0.0)))
+        # ^^^ THOG
         if getattr(function, "__name__", "") == "train_one_update":
             self._console_exact_training_seconds += elapsed
         return result, elapsed

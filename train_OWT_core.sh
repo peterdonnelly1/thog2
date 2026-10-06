@@ -207,7 +207,7 @@ usage() {
 Usage: $0 [options] [-- extra ${RUN_MODULE} args]
 
 Model/run:
-  -p PRESET=${GEOMETRY_PRESET}                       dense | legacy_sheet_col | depth | jpeg_like_v1 | head_aware_block | mlp_block | full_block
+  -p PRESET=${GEOMETRY_PRESET}                       dense | legacy_sheet_col | depth | jpeg_like_v1 | head_aware_block | mlp_block | full_block | width-type-I
                                                    single value, comma list, or quoted space list
   -q RUN_MODE=${RUN_MODE}                        fresh | resume
   -g RUN_NAME=${RUN_NAME:-auto}
@@ -243,6 +243,18 @@ Schedule/logging:
 
 Systematic geometry (repeat --select-element as needed):
   --select-depth
+  --select-width                                    width-type-I; requires --option WIDTH.order=r; r is a coefficient count
+  --option WIDTH.compressor=chebyshev|dct|haar|lapped_cosine  independent of DEPTH.compressor
+  --option WIDTH.compressor_version=auto            exact version or family@version is also supported
+  --instrumentation__width_activation_curves__mode off|basic|probes  default off
+  --instrumentation__width_activation_curves__log_every_n_steps 100
+  --instrumentation__width_activation_curves__probe_every_n_steps 1000
+  --instrumentation__width_activation_curves__history_length 20
+  --instrumentation__width_activation_curves__sample_tokens_per_layer 8
+  --instrumentation__width_activation_curves__feature_evaluation_points 256
+  --instrumentation__width_activation_curves__probe_orders auto|comma-separated-prefixes
+  --instrumentation__width_activation_curves__start_step 0
+  --instrumentation__width_activation_curves__end_step -1
   --select-element SELECTOR
   --option TARGET.PROPERTY=VALUE
   --explain-geometry
@@ -384,6 +396,8 @@ EOF_USAGE
 # vvv THOG accept long optimizer, geometry, and layer-dropout controls without disturbing established short-option parsing
 OPTIMIZER_FILTERED_ARGS=()
 GEOMETRY_UI_EXTRA_ARGS=()
+WIDTH_CAPTURE_EXTRA_ARGS=()
+WIDTH_LEGACY_BASIS_EXPLICIT=false                                                                                                                          # <<< THOG reject explicit global families even when equal to defaults
 DENSE_SNAPSHOT_EXTRA_ARGS=()
 THOGOPT_EXTRA_ARGS=()  # <<< THOG forward independent optimizer history budgets
 EXPLAIN_GEOMETRY=false
@@ -412,6 +426,30 @@ while (( $# > 0 )); do
       DENSE_SNAPSHOT_EXTRA_ARGS+=("--initialise-from-dense-snapshot=$INITIALISE_FROM_DENSE_SNAPSHOT")
       shift
       ;;
+    # vvv THOG width selector and bounded capture use exact canonical namespaces
+    --geometry-preset)
+      (( $# >= 2 )) || { echo "$1 requires a value" >&2; exit 2; }
+      GEOMETRY_PRESET="$2"
+      shift 2
+      ;;
+    --geometry-preset=*)
+      GEOMETRY_PRESET="${1#*=}"
+      shift
+      ;;
+    --select-width)
+      GEOMETRY_UI_EXTRA_ARGS+=("--select-width")
+      shift
+      ;;
+    --instrumentation__width_activation_curves__*=*)
+      WIDTH_CAPTURE_EXTRA_ARGS+=("$1")
+      shift
+      ;;
+    --instrumentation__width_activation_curves__*)
+      (( $# >= 2 )) || { echo "$1 requires a value" >&2; exit 2; }
+      WIDTH_CAPTURE_EXTRA_ARGS+=("$1" "$2")
+      shift 2
+      ;;
+    # ^^^ THOG
     --select-depth)
       GEOMETRY_UI_EXTRA_ARGS+=("--select-depth")
       shift
@@ -785,7 +823,13 @@ while getopts ":q:g:n:b:c:f:y:A:G:u:e:l:w:k:I:F:N:U:V:p:B:v:W:i:a:m:L:s:M:H:D:C:
     n) STEPS="$OPTARG" ;; b) BATCH_SIZE="$OPTARG" ;; c) LEARNING_RATE_CODES="$OPTARG"; OPTIMIZER_LR_EXPLICIT=true ;; f) MIN_LR_CODE="$OPTARG"; OPTIMIZER_MIN_LR_EXPLICIT=true ;; y) OPTIMIZER="$OPTARG" ;; A) GRADIENT_ACCUMULATION_STEPS="$OPTARG" ;; G) NUM_GPUS="$OPTARG" ;;
     u) EVAL_ITERS="$OPTARG" ;; e) EVAL_INTERVAL="$OPTARG" ;; l) LOG_INTERVAL="$OPTARG" ;; w) WARMUP_ITERS="$OPTARG" ;; k) CHECKPOINT_INTERVAL="$OPTARG" ;;
     I) INSTRUMENTATION="$OPTARG" ;; F) DEPTH_CURVE_PLOTS="$OPTARG" ;; N) DEPTH_CURVE_SAMPLE_ELEMENTS="$OPTARG" ;; U) DEPTH_CURVE_RENDERER="$OPTARG" ;; V) DEPTH_CURVE_LOCAL_HTML="$OPTARG" ;;
-    p) GEOMETRY_PRESET="$OPTARG" ;; B) BASIS_FAMILY="$OPTARG" ;; v) BASIS_VERSION="$OPTARG" ;; W) LAPPED_COSINE_WINDOW_LENGTH="$OPTARG" ;; i) LAPPED_COSINE_OVERLAP_FRACTION="$OPTARG" ;; a) ATTENTION_GEOMETRY="$OPTARG" ;; m) MLP_GEOMETRY="$OPTARG" ;;
+    # vvv THOG retain legacy short options while identifying explicit globals for width rejection
+    # p) GEOMETRY_PRESET="$OPTARG" ;; B) BASIS_FAMILY="$OPTARG" ;; v) BASIS_VERSION="$OPTARG" ;; W) LAPPED_COSINE_WINDOW_LENGTH="$OPTARG" ;; i) LAPPED_COSINE_OVERLAP_FRACTION="$OPTARG" ;; a) ATTENTION_GEOMETRY="$OPTARG" ;; m) MLP_GEOMETRY="$OPTARG" ;;
+    p) GEOMETRY_PRESET="$OPTARG" ;;
+    B) BASIS_FAMILY="$OPTARG"; WIDTH_LEGACY_BASIS_EXPLICIT=true ;;
+    v) BASIS_VERSION="$OPTARG"; WIDTH_LEGACY_BASIS_EXPLICIT=true ;;
+    W) LAPPED_COSINE_WINDOW_LENGTH="$OPTARG" ;; i) LAPPED_COSINE_OVERLAP_FRACTION="$OPTARG" ;; a) ATTENTION_GEOMETRY="$OPTARG" ;; m) MLP_GEOMETRY="$OPTARG" ;;
+    # ^^^ THOG
     L) N_LAYER="$OPTARG"; N_LAYER_EXPLICIT=true ;; s) LAYER_DROPOUT_STRATUM_SIZE="$OPTARG" ;; M) LAYER_DROPOUT_ACTIVE_PER_STRATUM="$OPTARG" ;; H) N_HEAD="$OPTARG"; N_HEAD_EXPLICIT=true ;; D) N_EMBD="$OPTARG"; N_EMBD_EXPLICIT=true ;;
     C) BLOCK_SIZE="$OPTARG" ;; P) O_DEPTH="$OPTARG" ;; Q) O_ATTN_D_MODEL="$OPTARG" ;; J) O_ATTN_QKV_PER_CHANNEL="$OPTARG" ;; O) O_ATTN_OUT_PER_CHANNEL="$OPTARG" ;; X) O_MLP_D_MODEL="$OPTARG" ;; Y) O_MLP_HIDDEN="$OPTARG" ;; S) CHECKPOINT_SEGMENT_SIZE="$OPTARG" ;;
     E) FAST_DISCARD="$OPTARG"; FAST_DISCARD_EXPLICIT=true ;; T) DTYPE="$OPTARG" ;; K) ATTENTION_BACKEND="$OPTARG" ;;                                    # <<< THOG track ignored -E when premat owns discard lifetime
@@ -799,6 +843,7 @@ done
 shift $((OPTIND - 1))
 if [[ "${1:-}" == "--" ]]; then shift; fi
 EXTRA_ARGS=("$@")
+EXTRA_ARGS+=("${WIDTH_CAPTURE_EXTRA_ARGS[@]}")
 EXTRA_ARGS+=("${GEOMETRY_UI_EXTRA_ARGS[@]}")
 EXTRA_ARGS+=("${DENSE_SNAPSHOT_EXTRA_ARGS[@]}")
 EXTRA_ARGS+=("${THOGOPT_EXTRA_ARGS[@]}")
@@ -959,6 +1004,7 @@ parse_geometry_preset_values() {
     case "$value" in
       dense) PRESET_VALUES+=("$value"); HAS_DENSE_PRESET=true ;;
       depth) PRESET_VALUES+=("$value"); HAS_COMPACT_PRESET=true ;;
+      width-type-I) PRESET_VALUES+=("$value"); HAS_COMPACT_PRESET=true ;;
       legacy_sheet_col|head_aware_block|mlp_block|full_block) PRESET_VALUES+=("$value"); HAS_COMPACT_PRESET=true; HAS_NON_DEPTH_COMPACT_PRESET=true ;;
       jpeg_like_v1) PRESET_VALUES+=("$value"); HAS_COMPACT_PRESET=true; HAS_NON_DEPTH_COMPACT_PRESET=true; HAS_JPEG_LIKE_PRESET=true ;;
       hyperblock) PRESET_VALUES+=("$value"); HAS_COMPACT_PRESET=true; HAS_NON_DEPTH_COMPACT_PRESET=true ;;
@@ -1388,6 +1434,21 @@ run_grid_point() {
     shape_summary="L${n_layer_value} H${n_head_value} D${n_embd_value} C${BLOCK_SIZE}"
     orders_summary="n/a"
     compact_order_args=(--o-depth "$o_depth_value" --o-attn-d-model "$O_ATTN_D_MODEL" --o-attn-qkv-per-channel "$O_ATTN_QKV_PER_CHANNEL" --o-attn-out-per-channel "$O_ATTN_OUT_PER_CHANNEL" --o-mlp-d-model "$O_MLP_D_MODEL" --o-mlp-hidden "$O_MLP_HIDDEN")
+  # vvv THOG width preserves reference dimensions and delegates independent basis resolution to scoped options
+  elif [[ "$geometry_preset_value" == width-type-I ]]; then
+    if [[ "$WIDTH_LEGACY_BASIS_EXPLICIT" == true || -n "$ATTENTION_GEOMETRY" || -n "$MLP_GEOMETRY" ]]; then
+      echo 'width-type-I rejects explicit -B/-v/-a/-m controls; use scoped WIDTH/DEPTH options.' >&2
+      exit 2
+    fi
+    run_model_type="sheet"; display_model_type="spectral"; preset_tag="WIDTH"; run_tag="WIDTH"
+    compact_args=(--geometry-preset "$geometry_preset_value")
+    compact_order_args=(--o-depth "$o_depth_value")
+    shape_summary="L${n_layer_value} H${n_head_value} D${n_embd_value} C${BLOCK_SIZE}"
+    orders_summary="WIDTH.order from scoped --option; fixed DEPTH only when selected"
+    if [[ "$DEPTH_COMPRESS_LAYER_NORM_AND_BIAS" == true ]]; then
+      optional_args+=(--depth-compress-layer-norm-and-bias)
+    fi
+  # ^^^ THOG
   elif [[ "$geometry_preset_value" == hyperblock ]]; then
     run_model_type="sheet"; display_model_type="hyperblock"; preset_tag="HYPERBLOCK"; run_tag="HB_${HYPERBLOCK_COMPRESSOR^^}"
     compact_args=(

@@ -181,6 +181,15 @@ def expand(recipe, *, stable_preview=False):
             raise ValueError("DEPTH.order cannot also appear in --option")
         if values.get("--learning-rate") is not None and values.get("--min-lr") is not None and float(values["--min-lr"]) > float(values["--learning-rate"]):
             raise ValueError("--min-lr must not exceed --learning-rate")
+        # vvv THOG validate explicit residual selection and scoped controls before scheduling
+        if values.get("--select-width") or values.get("--geometry-preset") == "width-type-I" or any(name.startswith("WIDTH.") for name in values):
+            if not values.get("--select-width") or values.get("--geometry-preset") != "width-type-I":
+                raise ValueError("width-type-I requires --select-width and WIDTH.order")
+            from run_thog2_owt_core import build_parser, geometry_plan_from_arguments, config_from_arguments
+            check_run = {"parameters": values, "grid_tag": "G-00000", "run_id": "width-validation", "profiler": "none"}
+            arguments = build_parser().parse_args(command_for(check_run, {})[3:])
+            config_from_arguments(arguments, geometry_plan=geometry_plan_from_arguments(arguments))
+        # ^^^ THOG
         identity = json.dumps(values, sort_keys=True, separators=(",", ":"))
         if identity in seen:
             continue
@@ -212,7 +221,11 @@ def command_for(run, gpu, *, python="python", entry="run_thog2_owt", host_label=
             and "--plastic__enabled" not in values and "--no-plastic__enabled" not in values):
         args.append("--plastic__enabled")
     for name, value in values.items():
-        if name == "DEPTH.order":
+        # vvv THOG scoped basis controls share existing --option forwarding
+        if name.startswith("WIDTH.") or name.startswith("DEPTH.") and name != "DEPTH.order":
+            args += ["--option", f"{name}={value}"]
+        # ^^^ THOG
+        elif name == "DEPTH.order":
             args += ["--select-depth", "--option", f"DEPTH.order={value}"]
         elif name in {"--model-type", "--experiment-prefix", "--cuda-expandable-segment", *WRAPPER_ENV_OPTIONS} or (name == "--geometry-preset" and value == "dense"):
             continue

@@ -5,6 +5,9 @@ from dataclasses import asdict, dataclass
 import math
 from typing import Any, Dict, Mapping, Optional
 
+# vvv THOG residual width integration
+from .width import WIDTH_PRESET, WIDTH_CONFIG_FIELDS, WIDTH_CAPTURE_DEFAULTS, WIDTH_CAPTURE_PREFIX, validate_width_configuration, width_identity
+# ^^^ THOG
 from .basis import BASIS_VERSION
 # vvv THOG lapped cosine controls survive training config and checkpoints
 from .bases import normalize_registered_basis_family
@@ -370,7 +373,31 @@ class TrainingConfig:
     dtype: str = "float32"
     out_dir: str = "out-thog2"
 
+    # vvv THOG independently selected residual representation
+    width_enabled: bool = False
+    width_order: Optional[int] = None
+    width_compressor: str = "chebyshev"
+    width_compressor_version: str = "auto"
+    width_depth_enabled: bool = False
+    # ^^^ THOG
+    # vvv THOG bounded width-activation instrumentation, disabled by default
+    instrumentation__width_activation_curves__mode: str = "off"
+    instrumentation__width_activation_curves__log_every_n_steps: int = 100
+    instrumentation__width_activation_curves__probe_every_n_steps: int = 1000
+    instrumentation__width_activation_curves__history_length: int = 20
+    instrumentation__width_activation_curves__sample_tokens_per_layer: int = 8
+    instrumentation__width_activation_curves__feature_evaluation_points: int = 256
+    instrumentation__width_activation_curves__probe_orders: str = "auto"
+    instrumentation__width_activation_curves__start_step: int = 0
+    instrumentation__width_activation_curves__end_step: int = -1
+    # ^^^ THOG
+
     def __post_init__(self) -> None:
+        # vvv THOG validate width before any model allocation
+        validate_width_configuration(self)
+        from .width_instrumentation import validate_width_capture_configuration
+        validate_width_capture_configuration(self)
+        # ^^^ THOG
         if not isinstance(self.save_dense_initialisation_snapshot, bool):
             raise ValueError("save_dense_initialisation_snapshot must be bool")
         if self.save_dense_initialisation_snapshot and self.initialise_from_dense_snapshot is not None:
@@ -711,7 +738,8 @@ class TrainingConfig:
                     mlp_geometry=self.mlp_geometry,
                     basis_family=self.basis_family,
                 )
-                if selectors.geometry_preset == GEOMETRY_PRESET_DEPTH:
+                # if selectors.geometry_preset == GEOMETRY_PRESET_DEPTH:
+                if selectors.geometry_preset in (GEOMETRY_PRESET_DEPTH, WIDTH_PRESET):
                     if self.plastic__enabled and selectors.basis_family != "chebyshev":
                         raise ValueError(
                             "PLASTIC DEPTH v0.1 requires the Chebyshev DEPTH compressor; "
@@ -724,13 +752,15 @@ class TrainingConfig:
                     self.o_attn_out_per_channel = 1
                     self.o_mlp_d_model = 1
                     self.o_mlp_hidden = 1
-                elif self.depth_compress_layer_norm_and_bias:
+                # elif self.depth_compress_layer_norm_and_bias:
+                elif self.depth_compress_layer_norm_and_bias and not self.width_enabled:
                     raise ValueError(
                         "depth_compress_layer_norm_and_bias may be enabled only for geometry_preset='depth'"
                     )
                 if self.plastic__enabled and selectors.geometry_preset != GEOMETRY_PRESET_DEPTH:
                     raise ValueError("PLASTIC DEPTH requires geometry_preset='depth'")
-            elif self.depth_compress_layer_norm_and_bias:
+            # elif self.depth_compress_layer_norm_and_bias:
+            elif self.depth_compress_layer_norm_and_bias and not self.width_enabled:
                 raise ValueError(
                     "depth_compress_layer_norm_and_bias may be enabled only for geometry_preset='depth'"
                 )
@@ -912,7 +942,11 @@ class TrainingConfig:
                     self.lapped_cosine_overlap_fraction,
                 )
             identity = self.compact_identity_metadata()
-            self.basis_version = str(identity["basis_version"])
+            # vvv THOG the width identity must not replace the independently selected depth version
+            # self.basis_version = str(identity["basis_version"])
+            if not self.width_enabled:
+                self.basis_version = str(identity["basis_version"])
+            # ^^^ THOG
             # ^^^ THOG
         if self.initialise_from_dense_snapshot is not None and self.model_type == "thog2_sheet":
             if self.hyperblock_enabled:
@@ -1049,10 +1083,22 @@ class TrainingConfig:
         if not self.premat_enable_gpu_timing_diagnostic:
             values.pop("premat_enable_gpu_timing_diagnostic", None)
         # ^^^ THOG
+        # vvv THOG preserve legacy default checkpoint dictionaries byte for byte
+        if not self.width_enabled:
+            for name in (*WIDTH_CONFIG_FIELDS, *(WIDTH_CAPTURE_PREFIX + suffix for suffix in WIDTH_CAPTURE_DEFAULTS)):
+                values.pop(name, None)
+        # ^^^ THOG
         return values
     # ^^^ THOG
 
     def model_arguments(self) -> Dict[str, Any]:
+        # vvv THOG explicit width dimensions; attention and hidden sizes remain reference-wide
+        if self.width_enabled:
+            names = ("block_size", "vocab_size", "n_layer", "n_head", "n_embd", "dropout", "bias", "geometry_preset", "basis_family", "basis_version", "depth_order", "depth_compress_layer_norm_and_bias", "fast_discard")
+            values = {name: vars(self)[name] for name in names if name in vars(self)}
+            values.update({name: vars(self)[name] for name in WIDTH_CONFIG_FIELDS})
+            return values
+        # ^^^ THOG
         arguments: Dict[str, Any] = {
             "block_size": self.block_size,
             "vocab_size": self.vocab_size,
@@ -1151,6 +1197,10 @@ class TrainingConfig:
         return arguments
 
     def compact_identity_metadata(self) -> Dict[str, Any]:
+        # vvv THOG width/depth basis identities are independent checkpoint authority
+        if self.width_enabled:
+            return width_identity(self)
+        # ^^^ THOG
         if self.model_type == "dense":
             return conventional_identity_metadata(n_layer=self.n_layer, n_embd=self.n_embd, n_head=self.n_head)
         if self.hyperblock_enabled:
@@ -1283,6 +1333,11 @@ class TrainingConfig:
 
     # vvv THOG schema-2 checkpoint signatures must stay available after execution-only fields such as max_wall_minutes are added
     def compatibility_signature(self) -> Dict[str, Any]:
+        # vvv THOG reject width reinterpretation before loading tensors
+        if self.width_enabled:
+            names = ("model_type", "vocab_size", "block_size", "n_layer", "n_head", "n_embd", "bias", "dropout")
+            return {**{name: vars(self)[name] for name in names}, "width": width_identity(self)}
+        # ^^^ THOG
         values = asdict(self)
         if self.model_type == "thog2_sheet" and not self.hyperblock_enabled:
             values.update(

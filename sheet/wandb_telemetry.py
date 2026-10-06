@@ -911,6 +911,10 @@ class WandbTelemetry:
 
 
 def attach_telemetry(trainer: Any, telemetry: WandbTelemetry) -> None:
+    # vvv THOG width metrics use this run's existing local/W&B destinations
+    if vars(trainer.config).get("width_enabled", False):
+        trainer._width_telemetry = telemetry
+    # ^^^ THOG
     """Attach event logging without moving telemetry into clean train/eval timers."""
 
     original_progress = trainer._print_progress

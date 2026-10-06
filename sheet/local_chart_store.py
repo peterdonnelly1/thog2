@@ -503,6 +503,18 @@ class LocalChartStore:
         self.connection.commit()
         return len(rows)
 
+    # vvv THOG width observations share the existing bounded per-run chart database
+    def append_width_snapshot(self, snapshot: Mapping[str, Any], *, history_length: int) -> None:
+        if history_length < 1:
+            raise ValueError("width history_length must be positive")
+        self.connection.execute("CREATE TABLE IF NOT EXISTS width_snapshots (optimizer_update INTEGER PRIMARY KEY, payload BLOB NOT NULL)")
+        self.connection.execute("INSERT OR REPLACE INTO width_snapshots VALUES (?, ?)",
+                                (int(snapshot["optimizer_update"]), _encode_payload(_json_compatible(snapshot))))
+        self.connection.execute("DELETE FROM width_snapshots WHERE optimizer_update NOT IN (SELECT optimizer_update FROM width_snapshots ORDER BY optimizer_update DESC LIMIT ?)", (int(history_length),))
+        self._touch()
+        self.connection.commit()
+    # ^^^ THOG
+
     def append_depth_weight_snapshot(
         self,
         snapshot: Mapping[str, Any],
@@ -759,6 +771,17 @@ class LocalChartReader:
         finally:
             connection.close()
         return {str(row["key"]): str(row["value"]) for row in rows}
+
+    # vvv THOG absent width tables are valid legacy run data
+    def width_snapshots(self) -> Tuple[Dict[str, Any], ...]:
+        connection = self._connection()
+        try:
+            present = connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='width_snapshots'").fetchone()
+            rows = connection.execute("SELECT payload FROM width_snapshots ORDER BY optimizer_update").fetchall() if present else ()
+        finally:
+            connection.close()
+        return tuple(_decode_payload(row["payload"]) for row in rows)
+    # ^^^ THOG
 
     def latest_recorded_loss(self) -> Optional[float]:
         """Read the latest training loss, including runs without layer probes."""

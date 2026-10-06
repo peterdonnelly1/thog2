@@ -276,6 +276,11 @@ def generated_weight_report(
 
 @torch.no_grad()
 def stage6_sheet_diagnostics(model: TrainingSheetGPT) -> Dict[str, Any]:
+    # vvv THOG width end-of-run reporting inspects compact banks without synthesizing layer matrices
+    if vars(model.config).get("width_enabled", False):
+        from .width import width_parameter_diagnostics
+        return width_parameter_diagnostics(model)
+    # ^^^ THOG
     return {
         "coefficient_utilization": coefficient_utilization_report(model),
         "generated_weights": generated_weight_report(model),

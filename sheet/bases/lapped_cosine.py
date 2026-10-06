@@ -371,6 +371,14 @@ class LappedCosineOrthonormalBasisKernel(BasisKernel):
     def raw_basis(self, coordinates: Tensor, order: int) -> Tensor:
         return lapped_cosine_orthonormal_raw_basis(coordinates, order)
 
+    # vvv THOG width diagnostics use the resolved window, rather than the default version
+    def raw_basis_for_version(self, coordinates: Tensor, order: int, version: str) -> Tensor:
+        window_length, overlap_fraction = parse_lapped_cosine_basis_version(self.normalize_version(version))
+        return lapped_cosine_orthonormal_raw_basis(
+            coordinates, order, window_length=window_length, overlap_fraction=overlap_fraction,
+        )
+    # ^^^ THOG
+
     def stabilize(self, raw_basis: Tensor) -> Tensor:
         if raw_basis.ndim != 2:
             raise ValueError(

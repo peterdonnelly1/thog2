@@ -285,6 +285,22 @@ def validate_compatibility(payload: Mapping[str, Any], expected: TrainingConfig)
     # ^^^ THOG
     checkpoint_signature = payload.get("compatibility_signature", {})
     expected_signature = expected.compatibility_signature()
+    # vvv THOG width representation identity is checked before any tensor load or legacy conversion
+    saved_identity = payload.get("compact_identity") or {}
+    if vars(expected).get("width_enabled", False) or saved_identity.get("representation") == "width-type-I":
+        if not expected.width_enabled or saved_identity != expected.compact_identity_metadata():
+            raise ValueError("incompatible width checkpoint representation, basis, dimensions, or depth configuration; legacy conversion is unsupported")
+        if checkpoint_signature != expected_signature:
+            raise ValueError("incompatible width checkpoint model signature")
+        basis = payload.get("model", {}).get("width_basis.analysis")
+        if basis is None:
+            raise ValueError("width checkpoint is missing its shared basis")
+        from .width import build_width_basis
+        deterministic, _ = build_width_basis(expected.n_embd, expected.width_order, expected.width_compressor, expected.width_compressor_version)
+        if tuple(basis.shape) != tuple(deterministic.shape) or not torch.equal(basis.cpu(), deterministic.to(basis.dtype)):
+            raise ValueError("width checkpoint basis buffer disagrees with its deterministic fingerprint")
+        return
+    # ^^^ THOG
     mismatches = []
     for name in MODEL_COMPATIBILITY_FIELDS:
         # if checkpoint_signature.get(name) != expected_signature[name]:

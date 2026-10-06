@@ -9,6 +9,9 @@ import re
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+# vvv THOG residual width integration
+from .width import WIDTH_PRESET, WIDTH_CONFIG_FIELDS, WIDTH_CAPTURE_DEFAULTS, WIDTH_CAPTURE_PREFIX, validate_width_configuration, width_identity
+# ^^^ THOG
 from .basis import BASIS_VERSION
 from .bases import basis_version_for_family, normalize_registered_basis_family
 # vvv THOG lapped cosine run controls and version identity
@@ -321,7 +324,31 @@ class OwtRunConfig:
     artifact_suffix: Optional[str] = None
     artifact_name_limit: int = DEFAULT_COMPONENT_LIMIT
 
+    # vvv THOG independently selected residual representation
+    width_enabled: bool = False
+    width_order: Optional[int] = None
+    width_compressor: str = "chebyshev"
+    width_compressor_version: str = "auto"
+    width_depth_enabled: bool = False
+    # ^^^ THOG
+    # vvv THOG bounded width-activation instrumentation, disabled by default
+    instrumentation__width_activation_curves__mode: str = "off"
+    instrumentation__width_activation_curves__log_every_n_steps: int = 100
+    instrumentation__width_activation_curves__probe_every_n_steps: int = 1000
+    instrumentation__width_activation_curves__history_length: int = 20
+    instrumentation__width_activation_curves__sample_tokens_per_layer: int = 8
+    instrumentation__width_activation_curves__feature_evaluation_points: int = 256
+    instrumentation__width_activation_curves__probe_orders: str = "auto"
+    instrumentation__width_activation_curves__start_step: int = 0
+    instrumentation__width_activation_curves__end_step: int = -1
+    # ^^^ THOG
+
     def __post_init__(self) -> None:
+        # vvv THOG validate width before any model allocation
+        validate_width_configuration(self)
+        from .width_instrumentation import validate_width_capture_configuration
+        validate_width_capture_configuration(self)
+        # ^^^ THOG
         if not isinstance(self.save_dense_initialisation_snapshot, bool):
             raise ValueError("save_dense_initialisation_snapshot must be bool")
         if self.save_dense_initialisation_snapshot and self.initialise_from_dense_snapshot is not None:
@@ -711,7 +738,8 @@ class OwtRunConfig:
                 mlp_geometry=self.mlp_geometry,
                 basis_family=self.basis_family,
             )
-            if selectors.geometry_preset == GEOMETRY_PRESET_DEPTH:
+            # if selectors.geometry_preset == GEOMETRY_PRESET_DEPTH:
+            if selectors.geometry_preset in (GEOMETRY_PRESET_DEPTH, WIDTH_PRESET):
                 if self.plastic__enabled and selectors.basis_family != BASIS_FAMILY_CHEBYSHEV:
                     raise ValueError(
                         "PLASTIC DEPTH v0.1 requires the Chebyshev DEPTH compressor; "
@@ -722,13 +750,15 @@ class OwtRunConfig:
                 object.__setattr__(self, "o_attn_out_per_channel", 1)
                 object.__setattr__(self, "o_mlp_d_model", 1)
                 object.__setattr__(self, "o_mlp_hidden", 1)
-            elif self.depth_compress_layer_norm_and_bias:
+            # elif self.depth_compress_layer_norm_and_bias:
+            elif self.depth_compress_layer_norm_and_bias and not self.width_enabled:
                 raise ValueError(
                     "depth_compress_layer_norm_and_bias may be enabled only for geometry_preset='depth'"
                 )
             if self.plastic__enabled and selectors.geometry_preset != GEOMETRY_PRESET_DEPTH:
                 raise ValueError("PLASTIC DEPTH requires geometry_preset='depth'")
-        elif self.depth_compress_layer_norm_and_bias:
+        # elif self.depth_compress_layer_norm_and_bias:
+        elif self.depth_compress_layer_norm_and_bias and not self.width_enabled:
             raise ValueError(
                 "depth_compress_layer_norm_and_bias may be enabled only for geometry_preset='depth'"
             )
@@ -836,7 +866,11 @@ class OwtRunConfig:
                     raise ValueError(f"{name} must be a positive integer")
                 if value > limit:
                     raise ValueError(f"{name} must not exceed {limit}")
-            object.__setattr__(self, "basis_version", str(self.compact_identity()["basis_version"]))
+            # vvv THOG width and depth keep independently resolved registry versions
+            # object.__setattr__(self, "basis_version", str(self.compact_identity()["basis_version"]))
+            if not self.width_enabled:
+                object.__setattr__(self, "basis_version", str(self.compact_identity()["basis_version"]))
+            # ^^^ THOG
         residual_init = self.residual_init_config()
         object.__setattr__(self, "residual_init_depth_source", residual_init.depth_source)
         if self.model_type == "dense" and residual_init.depth_source == "dof_implied_depth":
@@ -957,6 +991,10 @@ class OwtRunConfig:
         return "DENSE2" if self.model_type == "dense" else "SHEET"
 
     def compact_identity(self) -> Dict[str, Any]:
+        # vvv THOG width/depth basis identities are independent checkpoint authority
+        if self.width_enabled:
+            return width_identity(self)
+        # ^^^ THOG
         if self.model_type != "sheet":
             raise ValueError("compact identity is only defined for SHEET runs")
         if self.hyperblock_enabled:
@@ -1087,6 +1125,11 @@ class OwtRunConfig:
         return f"G0_{basis_family}_{normalize_component(preset)}"                                                                                          # <<< THOG legacy presets wither as resolved-ish compatibility labels
 
     def compact_artifact_fragment(self) -> Optional[str]:
+        # vvv THOG width runs cannot collide with same-D depth or dense descriptors
+        if self.width_enabled:
+            depth = f"_DEPTH_{self.basis_family}_P{self.o_depth}" if self.width_depth_enabled else ""
+            return f"WIDTH_{self.width_compressor}_r{self.width_order}{depth}"
+        # ^^^ THOG
         if self.model_type != "sheet":
             return None
         if self.hyperblock_enabled:
@@ -1139,6 +1182,10 @@ class OwtRunConfig:
         raise ValueError(f"no descriptor order label for {element}.{axis}")
 
     def _resolved_order_fields(self, plan: Dict[str, Any]) -> list[str]:
+        # vvv THOG scoped width counts are not within-tensor legacy axis orders
+        if self.width_enabled:
+            return [f"R_{self.width_order}"] + ([f"P_{self.o_depth}", f"DLB_{int(self.depth_compress_layer_norm_and_bias)}"] if self.width_depth_enabled else [])
+        # ^^^ THOG
         fields: list[str] = []
         if plan.get("depth_enabled"):
             fields.append(f"P_{self.o_depth}")
@@ -1455,6 +1502,9 @@ class OwtRunConfig:
                 "resolved_geometry_plan": None,
             }
         return TrainingConfig(
+            # vvv THOG carry width identity and bounded capture controls through existing wrappers
+            **{name: vars(self)[name] for name in (*WIDTH_CONFIG_FIELDS, *(WIDTH_CAPTURE_PREFIX + suffix for suffix in WIDTH_CAPTURE_DEFAULTS))},
+            # ^^^ THOG
             instrumentation__optimizer_histories__full_matrix_every_n_steps=self.instrumentation__optimizer_histories__full_matrix_every_n_steps,
             thogopt__momentum_history_coefficients=self.thogopt__momentum_history_coefficients,
             thogopt__scaling_history_coefficients=self.thogopt__scaling_history_coefficients,

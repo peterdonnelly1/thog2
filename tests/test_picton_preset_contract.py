@@ -16,6 +16,7 @@ from sheet.compact_identity import (
     GEOMETRY_PRESET_JPEG_LIKE_V1,
     GEOMETRY_PRESET_LEGACY_SHEET_COL,
     GEOMETRY_PRESET_MLP_BLOCK,
+    GEOMETRY_PRESET_WIDTH,  # THOG authoritative residual-width preset extends the registry
     GEOMETRY_PRESETS,
     HEAD_AWARE_BLOCK_MATERIALIZATION_VERSION,
     JPEG_LIKE_V1_MATERIALIZATION_VERSION,
@@ -86,6 +87,7 @@ def test_picton_final_preset_maps_to_exact_subsystem_geometries(
 
 def test_picton_preset_registry_contains_only_final_names_plus_internal_conventional() -> None:
     assert GEOMETRY_PRESETS == (
+        GEOMETRY_PRESET_WIDTH,  # THOG preserve every existing preset and add the width path
         GEOMETRY_PRESET_LEGACY_SHEET_COL,
         GEOMETRY_PRESET_DEPTH,
         GEOMETRY_PRESET_JPEG_LIKE_V1,

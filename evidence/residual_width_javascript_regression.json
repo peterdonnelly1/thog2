@@ -1,0 +1,446 @@
+{
+  "test_count": 40,
+  "rows": [
+    {
+      "test": "instra_aug30_enhancements_regression.js",
+      "master": {
+        "exit_code": 0,
+        "output_tail": "instra August 30 enhancements regression: PASS\n"
+      },
+      "residuals_compression": {
+        "exit_code": 0,
+        "output_tail": "instra August 30 enhancements regression: PASS\n"
+      }
+    },
+    {
+      "test": "instra_dashboard_consistency_final_regression.js",
+      "master": {
+        "exit_code": 0,
+        "output_tail": "instra dashboard consistency final regression: PASS\n"
+      },
+      "residuals_compression": {
+        "exit_code": 0,
+        "output_tail": "instra dashboard consistency final regression: PASS\n"
+      }
+    },
+    {
+      "test": "instra_dashboard_feature_regression.js",
+      "master": {
+        "exit_code": 0,
+        "output_tail": "PASS palette, trash, no-data chart, dual throughput z and reset-zoom regressions\n"
+      },
+      "residuals_compression": {
+        "exit_code": 0,
+        "output_tail": "PASS palette, trash, no-data chart, dual throughput z and reset-zoom regressions\n"
+      }
+    },
+    {
+      "test": "instra_dashboard_performance_regression.js",
+      "master": {
+        "exit_code": 0,
+        "output_tail": "instra dashboard performance regression: PASS\n"
+      },
+      "residuals_compression": {
+        "exit_code": 0,
+        "output_tail": "instra dashboard performance regression: PASS\n"
+      }
+    },
+    {
+      "test": "instra_further_enhancements_regression.js",
+      "master": {
+        "exit_code": 0,
+        "output_tail": "instra further enhancements regression: PASS\n"
+      },
+      "residuals_compression": {
+        "exit_code": 0,
+        "output_tail": "instra further enhancements regression: PASS\n"
+      }
+    },
+    {
+      "test": "instra_grid_chart_regression.js",
+      "master": {
+        "exit_code": 0,
+        "output_tail": "PASS Grid shades, independent eyes and multi-Grid loss merge\n"
+      },
+      "residuals_compression": {
+        "exit_code": 0,
+        "output_tail": "PASS Grid shades, independent eyes and multi-Grid loss merge\n"
+      }
+    },
+    {
+      "test": "instra_heatmap_performance_regression.js",
+      "master": {
+        "exit_code": 0,
+        "output_tail": "instra heatmap performance regression: PASS\n"
+      },
+      "residuals_compression": {
+        "exit_code": 0,
+        "output_tail": "instra heatmap performance regression: PASS\n"
+      }
+    },
+    {
+      "test": "instra_host_grid_identity_regression.js",
+      "master": {
+        "exit_code": 0,
+        "output_tail": "PASS host-qualified legacy eyes/colours and shared durable Grid UUIDs\n"
+      },
+      "residuals_compression": {
+        "exit_code": 0,
+        "output_tail": "PASS host-qualified legacy eyes/colours and shared durable Grid UUIDs\n"
+      }
+    },
+    {
+      "test": "instra_legacy_heatmap_repair_regression.js",
+      "master": {
+        "exit_code": 0,
+        "output_tail": "instra legacy heatmap repair regression: PASS\n"
+      },
+      "residuals_compression": {
+        "exit_code": 0,
+        "output_tail": "instra legacy heatmap repair regression: PASS\n"
+      }
+    },
+    {
+      "test": "instra_metric_group_state_regression.js",
+      "master": {
+        "exit_code": 0,
+        "output_tail": "instra metric group state regression: PASS\n"
+      },
+      "residuals_compression": {
+        "exit_code": 0,
+        "output_tail": "instra metric group state regression: PASS\n"
+      }
+    },
+    {
+      "test": "instra_network_host_controls_regression.js",
+      "master": {
+        "exit_code": 0,
+        "output_tail": "PASS Networks discovery, host removal with Master, local-only Master and masked SSH reconnect\n"
+      },
+      "residuals_compression": {
+        "exit_code": 0,
+        "output_tail": "PASS Networks discovery, host removal with Master, local-only Master and masked SSH reconnect\n"
+      }
+    },
+    {
+      "test": "instra_oct01_history_downloads_regression.js",
+      "master": {
+        "exit_code": 0,
+        "output_tail": "PASS parallel/retry/live/legacy elapsed clocks and immutable estimate ranges\nPASS HSL Grid and hex override picker initialization/reset\n"
+      },
+      "residuals_compression": {
+        "exit_code": 0,
+        "output_tail": "PASS parallel/retry/live/legacy elapsed clocks and immutable estimate ranges\nPASS HSL Grid and hex override picker initialization/reset\n"
+      }
+    },
+    {
+      "test": "instra_processing_pair_state_regression.js",
+      "master": {
+        "exit_code": 0,
+        "output_tail": "PASS full startup pairing, sticky first claims, fallback companions, throughput-only runs and explicit unpairing\n"
+      },
+      "residuals_compression": {
+        "exit_code": 0,
+        "output_tail": "PASS full startup pairing, sticky first claims, fallback companions, throughput-only runs and explicit unpairing\n"
+      }
+    },
+    {
+      "test": "instra_processing_quiescence_regression.js",
+      "master": {
+        "exit_code": 0,
+        "output_tail": "PASS Processing redraw batching and hidden-tab quiescence\n"
+      },
+      "residuals_compression": {
+        "exit_code": 0,
+        "output_tail": "PASS Processing redraw batching and hidden-tab quiescence\n"
+      }
+    },
+    {
+      "test": "instra_processing_update_timing_regression.js",
+      "master": {
+        "exit_code": 0,
+        "output_tail": "PASS complete-update pair labels, ordering, matching, PREMAT parsing and cache invalidation\n"
+      },
+      "residuals_compression": {
+        "exit_code": 0,
+        "output_tail": "PASS complete-update pair labels, ordering, matching, PREMAT parsing and cache invalidation\n"
+      }
+    },
+    {
+      "test": "instra_processing_user_fixes_regression.js",
+      "master": {
+        "exit_code": 0,
+        "output_tail": "PASS paired downloads, resource headings, maximize controls, dynamic comparison refresh and compact chart geometry\n"
+      },
+      "residuals_compression": {
+        "exit_code": 0,
+        "output_tail": "PASS paired downloads, resource headings, maximize controls, dynamic comparison refresh and compact chart geometry\n"
+      }
+    },
+    {
+      "test": "instra_run_sort_and_poll_regression.js",
+      "master": {
+        "exit_code": 0,
+        "output_tail": "PASS ordinal heading sorting and bounded catalogue polling\n"
+      },
+      "residuals_compression": {
+        "exit_code": 0,
+        "output_tail": "PASS ordinal heading sorting and bounded catalogue polling\n"
+      }
+    },
+    {
+      "test": "instra_runner_current_grid_regression.js",
+      "master": {
+        "exit_code": 0,
+        "output_tail": "PASS Runner ordering, retained History/Log, active scoped Multiview, grey icons and maximized chart selection\n"
+      },
+      "residuals_compression": {
+        "exit_code": 0,
+        "output_tail": "PASS Runner ordering, retained History/Log, active scoped Multiview, grey icons and maximized chart selection\n"
+      }
+    },
+    {
+      "test": "instra_runner_followup_regression.js",
+      "master": {
+        "exit_code": 0,
+        "output_tail": "PASS Runner automatic placement and required-field diagnostics, History visibility, Runs S segment value\n"
+      },
+      "residuals_compression": {
+        "exit_code": 0,
+        "output_tail": "PASS Runner automatic placement and required-field diagnostics, History visibility, Runs S segment value\n"
+      }
+    },
+    {
+      "test": "instra_sep01_enhancements_regression.js",
+      "master": {
+        "exit_code": 0,
+        "output_tail": "instra September 1 behaviour regression: PASS\n"
+      },
+      "residuals_compression": {
+        "exit_code": 0,
+        "output_tail": "instra September 1 behaviour regression: PASS\n"
+      }
+    },
+    {
+      "test": "instra_sep01_repair_regression.js",
+      "master": {
+        "exit_code": 0,
+        "output_tail": "instra September 1 refresh/range repair regression: PASS\n"
+      },
+      "residuals_compression": {
+        "exit_code": 0,
+        "output_tail": "instra September 1 refresh/range repair regression: PASS\n"
+      }
+    },
+    {
+      "test": "instra_sep02_enhancements_regression.js",
+      "master": {
+        "exit_code": 0,
+        "output_tail": "instra September 2 columns/metric controls regression: PASS\n"
+      },
+      "residuals_compression": {
+        "exit_code": 0,
+        "output_tail": "instra September 2 columns/metric controls regression: PASS\n"
+      }
+    },
+    {
+      "test": "instra_sep02_followup_regression.js",
+      "master": {
+        "exit_code": 0,
+        "output_tail": "instra follow-up percentage/navigation/icons regression: PASS\n"
+      },
+      "residuals_compression": {
+        "exit_code": 0,
+        "output_tail": "instra follow-up percentage/navigation/icons regression: PASS\n"
+      }
+    },
+    {
+      "test": "instra_sep20_runtime_owner_regression.js",
+      "master": {
+        "exit_code": 0,
+        "output_tail": "PASS bounded September runtime owners, stable redraw path and trash restoration\n"
+      },
+      "residuals_compression": {
+        "exit_code": 0,
+        "output_tail": "PASS bounded September runtime owners, stable redraw path and trash restoration\n"
+      }
+    },
+    {
+      "test": "instra_sep21_user_requests_regression.js",
+      "master": {
+        "exit_code": 0,
+        "output_tail": "PASS September 21 Instra user-request contracts\n"
+      },
+      "residuals_compression": {
+        "exit_code": 0,
+        "output_tail": "PASS September 21 Instra user-request contracts\n"
+      }
+    },
+    {
+      "test": "instra_sep30_feedback_regression.js",
+      "master": {
+        "exit_code": 0,
+        "output_tail": "PASS category enables/order/search membership, progressive loss and cancellation of obsolete 40-run selections\n"
+      },
+      "residuals_compression": {
+        "exit_code": 0,
+        "output_tail": "PASS category enables/order/search membership, progressive loss and cancellation of obsolete 40-run selections\n"
+      }
+    },
+    {
+      "test": "instra_sep30_ui_regression.js",
+      "master": {
+        "exit_code": 0,
+        "output_tail": "PASS duration units, all field options, immediate syntax/choice validation, History outcomes and distinct persistent Grid hues\nPASS string axis titles and 1000 unchanged layout passes without redraw\n"
+      },
+      "residuals_compression": {
+        "exit_code": 0,
+        "output_tail": "PASS duration units, all field options, immediate syntax/choice validation, History outcomes and distinct persistent Grid hues\nPASS string axis titles and 1000 unchanged layout passes without redraw\n"
+      }
+    },
+    {
+      "test": "instra_system_visibility_regression.js",
+      "master": {
+        "exit_code": 1,
+        "output_tail": "om'\nRequire stack:\n- /workspace/scratch/96b033f15391/baseline/tests/instra_system_visibility_regression.js\n    at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)\n    at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)\n    at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1095:10)\n    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)\n    at Module._load (node:internal/modules/cjs/loader:1294:5)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)\n    at Module.require (node:internal/modules/cjs/loader:1617:12)\n    at require (node:internal/modules/helpers:153:16)\n    at Object.<anonymous> (/workspace/scratch/96b033f15391/baseline/tests/instra_system_visibility_regression.js:5:17)\n    at Module._compile (node:internal/modules/cjs/loader:1872:14) {\n  code: 'MODULE_NOT_FOUND',\n  requireStack: [\n    '/workspace/scratch/96b033f15391/baseline/tests/instra_system_visibility_regression.js'\n  ]\n}\n\nNode.js v24.19.0\n"
+      },
+      "residuals_compression": {
+        "exit_code": 1,
+        "output_tail": "dule 'jsdom'\nRequire stack:\n- /workspace/scratch/96b033f15391/thog2/tests/instra_system_visibility_regression.js\n    at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)\n    at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)\n    at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1095:10)\n    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)\n    at Module._load (node:internal/modules/cjs/loader:1294:5)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)\n    at Module.require (node:internal/modules/cjs/loader:1617:12)\n    at require (node:internal/modules/helpers:153:16)\n    at Object.<anonymous> (/workspace/scratch/96b033f15391/thog2/tests/instra_system_visibility_regression.js:5:17)\n    at Module._compile (node:internal/modules/cjs/loader:1872:14) {\n  code: 'MODULE_NOT_FOUND',\n  requireStack: [\n    '/workspace/scratch/96b033f15391/thog2/tests/instra_system_visibility_regression.js'\n  ]\n}\n\nNode.js v24.19.0\n"
+      }
+    },
+    {
+      "test": "instra_thogopt_regression.js",
+      "master": {
+        "exit_code": 1,
+        "output_tail": "Error: Cannot find module 'jsdom'\nRequire stack:\n- /workspace/scratch/96b033f15391/baseline/tests/instra_thogopt_regression.js\n    at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)\n    at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)\n    at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1095:10)\n    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)\n    at Module._load (node:internal/modules/cjs/loader:1294:5)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)\n    at Module.require (node:internal/modules/cjs/loader:1617:12)\n    at require (node:internal/modules/helpers:153:16)\n    at Object.<anonymous> (/workspace/scratch/96b033f15391/baseline/tests/instra_thogopt_regression.js:6:17)\n    at Module._compile (node:internal/modules/cjs/loader:1872:14) {\n  code: 'MODULE_NOT_FOUND',\n  requireStack: [\n    '/workspace/scratch/96b033f15391/baseline/tests/instra_thogopt_regression.js'\n  ]\n}\n\nNode.js v24.19.0\n"
+      },
+      "residuals_compression": {
+        "exit_code": 1,
+        "output_tail": "rr;\n  ^\n\nError: Cannot find module 'jsdom'\nRequire stack:\n- /workspace/scratch/96b033f15391/thog2/tests/instra_thogopt_regression.js\n    at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)\n    at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)\n    at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1095:10)\n    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)\n    at Module._load (node:internal/modules/cjs/loader:1294:5)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)\n    at Module.require (node:internal/modules/cjs/loader:1617:12)\n    at require (node:internal/modules/helpers:153:16)\n    at Object.<anonymous> (/workspace/scratch/96b033f15391/thog2/tests/instra_thogopt_regression.js:6:17)\n    at Module._compile (node:internal/modules/cjs/loader:1872:14) {\n  code: 'MODULE_NOT_FOUND',\n  requireStack: [\n    '/workspace/scratch/96b033f15391/thog2/tests/instra_thogopt_regression.js'\n  ]\n}\n\nNode.js v24.19.0\n"
+      }
+    },
+    {
+      "test": "instra_weight_coupling_regression.js",
+      "master": {
+        "exit_code": 0,
+        "output_tail": "instra weight coupling regression: PASS\n"
+      },
+      "residuals_compression": {
+        "exit_code": 0,
+        "output_tail": "instra weight coupling regression: PASS\n"
+      }
+    },
+    {
+      "test": "instra_weight_inspector_regression.js",
+      "master": {
+        "exit_code": 0,
+        "output_tail": "instra weight inspector data and event regressions: PASS\n"
+      },
+      "residuals_compression": {
+        "exit_code": 0,
+        "output_tail": "instra weight inspector data and event regressions: PASS\n"
+      }
+    },
+    {
+      "test": "instra_weight_persistence_log_regression.js",
+      "master": {
+        "exit_code": 0,
+        "output_tail": "instra weight persistence/log regression: PASS\n"
+      },
+      "residuals_compression": {
+        "exit_code": 0,
+        "output_tail": "instra weight persistence/log regression: PASS\n"
+      }
+    },
+    {
+      "test": "instra_weight_precision_regression.js",
+      "master": {
+        "exit_code": 0,
+        "output_tail": "instra weight inspection precision persistence regression: PASS\n"
+      },
+      "residuals_compression": {
+        "exit_code": 0,
+        "output_tail": "instra weight inspection precision persistence regression: PASS\n"
+      }
+    },
+    {
+      "test": "instra_weight_range_interaction_regression.js",
+      "master": {
+        "exit_code": 0,
+        "output_tail": "instra weight range interaction regression: PASS\n"
+      },
+      "residuals_compression": {
+        "exit_code": 0,
+        "output_tail": "instra weight range interaction regression: PASS\n"
+      }
+    },
+    {
+      "test": "instra_weight_request_router_regression.js",
+      "master": {
+        "exit_code": 0,
+        "output_tail": "instra weight request router regression: PASS\n"
+      },
+      "residuals_compression": {
+        "exit_code": 0,
+        "output_tail": "instra weight request router regression: PASS\n"
+      }
+    },
+    {
+      "test": "instra_weight_runtime_loader_regression.js",
+      "master": {
+        "exit_code": 0,
+        "output_tail": "instra bounded runtime loader regression: PASS\n"
+      },
+      "residuals_compression": {
+        "exit_code": 0,
+        "output_tail": "instra bounded runtime loader regression: PASS\n"
+      }
+    },
+    {
+      "test": "instra_weight_stability_regression.js",
+      "master": {
+        "exit_code": 0,
+        "output_tail": "instra weight stability regression: PASS\n"
+      },
+      "residuals_compression": {
+        "exit_code": 0,
+        "output_tail": "instra weight stability regression: PASS\n"
+      }
+    },
+    {
+      "test": "instra_weight_step_filter_regression.js",
+      "master": {
+        "exit_code": 0,
+        "output_tail": "instra bounded runtime loader regression: PASS\ninstra weight request router regression: PASS\ninstra weight stability regression: PASS\n"
+      },
+      "residuals_compression": {
+        "exit_code": 0,
+        "output_tail": "instra bounded runtime loader regression: PASS\ninstra weight request router regression: PASS\ninstra weight stability regression: PASS\n"
+      }
+    },
+    {
+      "test": "instra_workspace_weight_overlay_regression.js",
+      "master": {
+        "exit_code": 0,
+        "output_tail": "instra workspace weight overlay regression: PASS\n"
+      },
+      "residuals_compression": {
+        "exit_code": 0,
+        "output_tail": "instra workspace weight overlay regression: PASS\n"
+      }
+    },
+    {
+      "test": "processing_resource_attribution_dashboard_regression.js",
+      "master": {
+        "exit_code": 0,
+        "output_tail": "processing resource attribution dashboard regression: ok\n"
+      },
+      "residuals_compression": {
+        "exit_code": 0,
+        "output_tail": "processing resource attribution dashboard regression: ok\n"
+      }
+    }
+  ],
+  "new_failures": []
+}

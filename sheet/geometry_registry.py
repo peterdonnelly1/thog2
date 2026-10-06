@@ -148,6 +148,9 @@ class ResolvedGeometryPlan:
     shared_non_depth_compressor: Optional[str]
     shared_non_depth_compressor_version: Optional[str]
     materializer: MaterializerAdapter
+    # vvv THOG independent residual geometry; default preserves legacy serialized plans
+    width: Optional[Dict[str, Any]] = None
+    # ^^^ THOG
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -162,6 +165,7 @@ class ResolvedGeometryPlan:
             "shared_non_depth_compressor": self.shared_non_depth_compressor,
             "shared_non_depth_compressor_version": self.shared_non_depth_compressor_version,
             "materializer": self.materializer.to_dict(),
+            **({"width": self.width} if self.width is not None else {}),
         }
 
 
@@ -492,6 +496,11 @@ def _geometry_plan_label_width(plan: ResolvedGeometryPlan) -> int:
 def format_geometry_plan(plan: ResolvedGeometryPlan, *, detailed: bool = False) -> str:
     label_width = _geometry_plan_label_width(plan)
     lines = ["selected geometry", "-----------------"]
+    # vvv THOG explain compact runtime and reference widths independently of depth
+    if plan.width is not None:
+        import json
+        lines.extend(["WIDTH / width-type-I", json.dumps(plan.width, indent=2, sort_keys=True)])
+    # ^^^ THOG
     if plan.depth_enabled:
         lines.extend([
             "DEPTH",

@@ -277,6 +277,11 @@ def _true_false(value: str) -> bool:
     raise argparse.ArgumentTypeError("expected true or false")
 
 
+# vvv THOG width arguments and explicit legacy-basis detection
+from sheet.width import WIDTH_PRESET, WIDTH_CAPTURE_DEFAULTS, WIDTH_CAPTURE_PREFIX
+from sheet.width_geometry import add_width_arguments, resolve_width_geometry, ExplicitLegacyBasisAction
+# ^^^ THOG
+
 def build_parser() -> argparse.ArgumentParser:
     parser = _ThogArgumentParser(description="Train or resume one canonical THOG2 OpenWebText run")
     # vvv THOG wrapper consumes these before core argparse, but --help must still advertise the exact public names
@@ -287,6 +292,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_thogopt_arguments(parser)
     # ^^^ THOG
     parser.add_argument("--model-type", choices=("dense", "sheet"))
+    add_width_arguments(parser)
     parser.add_argument("--select-depth", action="store_true", help="select the universal registered DEPTH curve")
     parser.add_argument("--select-element", action="append", default=[], metavar="SELECTOR", help="select one registered permitted geometry; repeat for multiple elements")
     parser.add_argument("--option", dest="geometry_options", action="append", default=[], metavar="TARGET.PROPERTY=VALUE", help="assign an element- or axis-scoped systematic geometry option")
@@ -391,8 +397,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--geometry-preset", choices=GEOMETRY_PRESETS, default=GEOMETRY_PRESET_DEPTH)
     parser.add_argument("--attention-geometry", choices=ATTENTION_GEOMETRIES)
     parser.add_argument("--mlp-geometry", choices=MLP_GEOMETRIES)
-    parser.add_argument("--basis-family", choices=BASIS_FAMILIES, default=BASIS_FAMILY_CHEBYSHEV)
-    parser.add_argument("--basis-version", default="auto")
+    parser.add_argument("--basis-family", action=ExplicitLegacyBasisAction, choices=BASIS_FAMILIES, default=BASIS_FAMILY_CHEBYSHEV)
+    parser.add_argument("--basis-version", action=ExplicitLegacyBasisAction, default="auto")
     parser.add_argument(
         "--save-dense-initialisation-snapshot",
         action="store_true",
@@ -562,6 +568,12 @@ def systematic_geometry_requested(arguments: argparse.Namespace) -> bool:
 
 
 def geometry_plan_from_arguments(arguments: argparse.Namespace):
+    # vvv THOG scoped WIDTH is independent of the existing element geometries
+    if arguments.select_width or arguments.geometry_preset == WIDTH_PRESET:
+        return resolve_width_geometry(arguments)
+    if any(value.upper().startswith("WIDTH.") for value in arguments.geometry_options):
+        raise ValueError("WIDTH options require --select-width and --geometry-preset width-type-I")
+    # ^^^ THOG
     if arguments.hyperblock and systematic_geometry_requested(arguments):
         raise ValueError("--hyperblock cannot be combined with selector-based geometry controls")
     if not systematic_geometry_requested(arguments):
@@ -687,6 +699,14 @@ def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) 
             if AXIS_MLP_HIDDEN in selection.orders:
                 selected_mlp_hidden_order = selection.orders[AXIS_MLP_HIDDEN]
     config = OwtRunConfig(
+        # vvv THOG preserve independent width/depth selection through resolved run config
+        width_enabled=bool(arguments.select_width),
+        width_order=None if geometry_plan is None or geometry_plan.width is None else geometry_plan.width["residual_width"],
+        width_compressor="chebyshev" if geometry_plan is None or geometry_plan.width is None else geometry_plan.width["basis"]["basis_family"],
+        width_compressor_version="auto" if geometry_plan is None or geometry_plan.width is None else geometry_plan.width["basis"]["basis_version"],
+        width_depth_enabled=bool(arguments.select_width and arguments.select_depth),
+        **{WIDTH_CAPTURE_PREFIX + suffix: vars(arguments)[WIDTH_CAPTURE_PREFIX + suffix] for suffix in WIDTH_CAPTURE_DEFAULTS},
+        # ^^^ THOG
         instrumentation__optimizer_histories__full_matrix_every_n_steps=vars(arguments).get("instrumentation__optimizer_histories__full_matrix_every_n_steps", 0),
         thogopt__momentum_history_coefficients=vars(arguments).get("thogopt__momentum_history_coefficients", "auto"),
         thogopt__scaling_history_coefficients=vars(arguments).get("thogopt__scaling_history_coefficients", "auto"),

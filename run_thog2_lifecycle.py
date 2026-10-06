@@ -62,6 +62,7 @@ from sheet.plastic_depth_resume import (
 )
 # ^^^ THOG
 from sheet.training_config import TrainingConfig
+from sheet.width import WIDTH_CONFIG_FIELDS, WIDTH_CAPTURE_DEFAULTS, WIDTH_CAPTURE_PREFIX
 
 
 # vvv THOG route persisted mid-COARSE state before ordinary FINE-boundary resume handling
@@ -443,6 +444,12 @@ def _configure_optimizer_environment(optimizer_name: str, optimizer_momentum: fl
     os.environ["THOG2_OPTIMIZER_MOMENTUM"] = str(optimizer_momentum)
 
 
+# vvv THOG width capture remains checkpoint-authoritative through lifecycle resume/fork
+_ARGUMENT_TO_CONFIG.update({WIDTH_CAPTURE_PREFIX + suffix: WIDTH_CAPTURE_PREFIX + suffix
+                            for suffix in WIDTH_CAPTURE_DEFAULTS})
+# ^^^ THOG
+
+
 def _run_config_field_names() -> Set[str]:
     return {field.name for field in fields(OwtRunConfig)}
 
@@ -498,6 +505,12 @@ def _run_config_from_training_config(
             "lapped_cosine_overlap_fraction": training_config.lapped_cosine_overlap_fraction,
         }
 
+    # vvv THOG recover direct width checkpoints even when lifecycle metadata is absent
+    if training_config.width_enabled:
+        sheet_values.update({name: getattr(training_config, name) for name in WIDTH_CONFIG_FIELDS})
+        sheet_values.update({WIDTH_CAPTURE_PREFIX + suffix: getattr(training_config, WIDTH_CAPTURE_PREFIX + suffix)
+                             for suffix in WIDTH_CAPTURE_DEFAULTS})
+    # ^^^ THOG
     return OwtRunConfig(
         model_type=model_type,
         run_mode="resume",
@@ -753,7 +766,8 @@ def _assert_material_arguments(
     mode: str,
 ) -> None:
     values = vars(arguments)
-    if any(name in explicit for name in ("select_depth", "select_element", "geometry_options", "explain_geometry")):
+    # if any(name in explicit for name in ("select_depth", "select_element", "geometry_options", "explain_geometry")):
+    if any(name in explicit for name in ("select_width", "select_depth", "select_element", "geometry_options", "explain_geometry")):
         raise ValueError(
             f"{mode} does not accept systematic geometry reconstruction; "
             "the checkpoint geometry is authoritative"

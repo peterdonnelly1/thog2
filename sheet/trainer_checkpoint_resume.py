@@ -321,6 +321,14 @@ class TrainerCheckpointResumeMixin:
                 "checkpoint completed update counters disagree"
             )
         trainer.batch_source.load_state_dict(payload["batch_source"])
+        # vvv THOG restore independent probe selection before training resumes
+        if payload.get("width_instrumentation") is not None:
+            from .width_instrumentation import width_instrumentation_for
+            instrumentation = width_instrumentation_for(trainer)
+            if instrumentation is None:
+                raise ValueError("checkpoint width capture requires compatible instrumentation")
+            instrumentation.load_state_dict(payload["width_instrumentation"])
+        # ^^^ THOG
         restore_rng_state(payload["rng_state"])
         # vvv THOG restore optional COARSE/FINE phase state without changing legacy checkpoint semantics
         trainer.plastic_coarse_fine_state = payload.get("plastic_coarse_fine_state")

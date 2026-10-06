@@ -265,7 +265,8 @@ class TrainingSheetGPT(SheetGPT):
         # vvv THOG fast_discard=false retains one operational materialisation per active layer and family for an optimiser update
         self._update_retained_materializations = attach_update_retained_materializations(
             self.trajectory,
-            enabled=not config.fast_discard,
+            # enabled=not config.fast_discard,
+            enabled=not config.fast_discard and not config.width_enabled,
         )
         # ^^^ THOG
         self.checkpoint_segment_size = 0
@@ -832,6 +833,13 @@ class TrainingSheetGPT(SheetGPT):
         plastic_depth_probe_request: Optional[PlasticDepthInlineProbeRequest] = None,
         plastic_depth_active_layers_override: Optional[int] = None,
     ) -> Tuple[Tensor, Optional[Tensor]]:
+        # vvv THOG compact path retains segmented activation checkpointing and layer dropout
+        if self.config.width_enabled:
+            if plastic_depth_probe_request is not None or plastic_depth_active_layers_override is not None:
+                raise ValueError("width mode does not support PLASTIC controls")
+            from .width import width_forward
+            return width_forward(self, idx, targets)
+        # ^^^ THOG
         if idx.ndim != 2:
             raise ValueError(f"idx must have shape [batch, time]; got {tuple(idx.shape)}")
         if self.config.premat == "enabled" and idx.device.type != "cuda":

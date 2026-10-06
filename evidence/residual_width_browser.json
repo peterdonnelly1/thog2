@@ -1,0 +1,31 @@
+{
+  "browser": "153.0.8010.0",
+  "checks": [
+    "three Plotly charts",
+    "step selection",
+    "residual-site selection",
+    "bounded curves",
+    "correct axis labels",
+    "maximize/restore",
+    "paired Multiview identity and step",
+    "rapid run switching",
+    "legacy run hides width charts",
+    "API pairing metadata"
+  ],
+  "width_requests": 20,
+  "console_errors": [],
+  "pairing": [
+    {
+      "run": "fixture_01",
+      "step": 1,
+      "D": 8,
+      "r": 3
+    },
+    {
+      "run": "fixture_00",
+      "step": 1,
+      "D": 8,
+      "r": 3
+    }
+  ]
+}

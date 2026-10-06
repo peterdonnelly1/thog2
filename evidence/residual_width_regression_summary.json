@@ -1,0 +1,638 @@
+{
+  "baseline_commit": "a88cafffa6055cbe75f937a1d1692b10a8e224ee",
+  "command": "OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 python -m pytest -q --junitxml=regression.xml --tb=short",
+  "environment": "Python 3.12.14, torch 2.14.1+cpu, pytest 9.1.1; final run enables real Chromium width browser acceptance; CUDA unavailable; host blocks AF_UNIX",
+  "counting_policy": "pytest counts each failing subtest assertion; failed_test_case_count counts unique parent testcase identities. Passed ordinary items and passed subtests are reported separately in pytest_summary.",
+  "master": {
+    "pytest_summary": "105 failed, 1672 passed, 26 skipped, 2 warnings, 483 subtests passed in 238.71s (0:03:58)",
+    "test_case_count_excluding_subtests": 1792,
+    "failed_test_case_count": 99,
+    "failure_assertion_count": 105,
+    "skipped_test_case_count": 26,
+    "seconds": 238.608,
+    "width_test_cases": 0,
+    "width_failed_cases": 0,
+    "failures": {
+      "tests.test_basis_family_plugin_registry.BasisFamilyPluginRegistryTests::test_07_primary_wrappers_have_no_family_specific_allow_list_or_tag_branch": [
+        "AssertionError: 'basis_artifact_tag_for_family' not found in '#!/bin/bash\\nset -euo pipefail\\n\\ncd \"$(dirname \"$0\")\"\\n\\n# vvv THOG make allocator-fragmentation protection a global, explicit wrapper policy\\nTHOG2_CUDA_EXPANDABLE_SEGMENT=\"enabled\"\\nTHOG2_CUDA_EXPANDABLE_SEGMENT_FILTERED_ARGS=()\\nTHOG2_CUDA_EXPANDABLE_SEGMENT_HELP=false\\nif [[ -n \"${P",
+        "AssertionError: 'basis_artifact_tag_for_family' not found in '#!/bin/bash\\nset -euo pipefail\\n\\ncd \"$(dirname \"$0\")\"\\n\\n# vvv THOG make allocator-fragmentation protection a global, explicit wrapper policy\\nTHOG2_CUDA_EXPANDABLE_SEGMENT=\"enabled\"\\nTHOG2_CUDA_EXPANDABLE_SEGMENT_FILTERED_ARGS=()\\nTHOG2_CUDA_EXPANDABLE_SEGMENT_HELP=false\\nif [[ -n \"${P"
+      ],
+      "tests.test_chaos_bump_sampling::test_canonical_shell_wrapper_routes_exact_namespace_and_rejects_alias": [
+        "AssertionError: /workspace/scratch/96b033f15391/baseline/resume_and_fork_OWT.sh: line 75: ./train_OWT_core.sh: Permission denied\n  \nassert 126 == 0\n +  where 126 = CompletedProcess(args=['bash', './train_OWT.sh', '--plastic__enabled', '--chaos_bump__sampling__enabled', '--chaos_bum...r='/workspace/scratch/96b033f15391/baseline/resume_and_fork_OWT.s"
+      ],
+      "tests.test_console_and_descriptor_help::test_wrapper_registry_emits_descriptor_table_once": [
+        "AssertionError: assert 0 == 1\n +  where 0 = <built-in method count of str object at 0x1e70bb70>('getopt / artifact descriptor registry')\n +    where <built-in method count of str object at 0x1e70bb70> = 'geometry registry (geometry_registry_v5)\\n=======================================\\n\\nselectors\\n---------\\ndepth-comp...on:\\n  --torch-compile fal"
+      ],
+      "tests.test_console_model_summary::test_model_summary_aligns_optimizer_and_reports_cosine_decay": [
+        "AttributeError: 'types.SimpleNamespace' object has no attribute 'layer_dropout_n_strata'"
+      ],
+      "tests.test_console_progress_layout.ConsoleProgressLayoutTests::test_current_layer_count_is_appended_only_when_plastic_is_enabled": [
+        "AttributeError: 'types.SimpleNamespace' object has no attribute 'active_public_coordinates'"
+      ],
+      "tests.test_console_progress_layout.ConsoleProgressLayoutTests::test_sampled_values_are_emitted_once_after_a_plastic_transition": [
+        "AttributeError: 'types.SimpleNamespace' object has no attribute 'active_public_coordinates'"
+      ],
+      "tests.test_console_progress_layout.ConsoleProgressLayoutTests::test_semantic_qkv_bypass_is_suppressed_only_for_depth_reporting": [
+        "AttributeError: module 'run_thog2_owt' has no attribute '_optimisation_fields'"
+      ],
+      "tests.test_console_progress_layout.ConsoleProgressLayoutTests::test_validation_reuses_latest_step_mean_and_uses_two_level_yellow_emphasis": [
+        "AssertionError: False is not true"
+      ],
+      "tests.test_console_progress_pretty_rows::test_training_console_row_uses_hh_mm_ss_after_step_one_and_colors_negative_delta_bright_green": [
+        "AssertionError: assert False\n +  where False = <built-in method startswith of str object at 0x7efd572a9a70>('T       2  00:03:16  tok/s=          63')\n +    where <built-in method startswith of str object at 0x7efd572a9a70> = 'T     2      196s    0.054h  tok/s=    63  toks=     24,576  loss= 10.8831  \\x1b[1;38;2;0;255;0m\u0394=  -0.123\\x1b[0m  lr= 5.71"
+      ],
+      "tests.test_console_progress_pretty_rows::test_step_one_console_row_keeps_elapsed_seconds": [
+        "AssertionError: assert False\n +  where False = <built-in method startswith of str object at 0x7efd64b937e0>('T       1        9s')\n +    where <built-in method startswith of str object at 0x7efd64b937e0> = 'T     1        9s    0.003h  loss= 10.8831  \u0394=     n/a'.startswith"
+      ],
+      "tests.test_console_progress_pretty_rows::test_validation_console_row_uses_bold_explicit_rgb_yellow_for_validation_loss": [
+        "AssertionError: assert False\n +  where False = <built-in method startswith of str object at 0x7efd55e10b30>('\\x1b[33mV       2  00:03:16  tok/s=          63')\n +    where <built-in method startswith of str object at 0x7efd55e10b30> = '\\x1b[33mV     2      196s    0.054h  tok/s=    63  toks=     24,576  loss= 10.8831  \\x1b[1;93mvalidation loss= 10.7"
+      ],
+      "tests.test_dense_weight_curves::test_dense_snapshot_reuses_all_six_families_with_integer_layer_points": [
+        "KeyError: 'model_feature'"
+      ],
+      "tests.test_dense_weight_curves::test_dense_figure_uses_crosses_with_per_step_connectors": [
+        "AssertionError: assert 4 == 2\n +  where 4 = len((Scatter({\\n    'hovertemplate': 'r1_c1<br>step 10<br>layer=%{x:.0f}<br>weight=%{y:.7g}<extra></extra>',\\n    'legendgro...nd': False,\\n    'x': [1.0, 2.0, 3.0],\\n    'y': [0.00123594980686903, -0.006092382594943047, -0.0011063809506595135]\\n})))\n +    where (Scatter({\\n    'hovertemplate': 'r1_c1<br>"
+      ],
+      "tests.test_dense_weight_curves::test_dense_scalar_coordinates_share_one_step_colour_and_legend_row": [
+        "AssertionError: assert 3 == 2\n +  where 3 = len((Scatter({\\n    'hovertemplate': 'r1_c1<br>step 17<br>layer=%{x:.0f}<br>weight=%{y:.7g}<extra></extra>',\\n    'legendgro...d': False,\\n    'x': [1.0, 2.0, 3.0],\\n    'y': [-0.002250351943075657, -0.009117048233747482, -0.003397060092538595]\\n})))\n +    where (Scatter({\\n    'hovertemplate': 'r1_c1<br>"
+      ],
+      "tests.test_depth_weight_curves_and_observational_probes::test_scalar_selection_is_fixed_per_run_and_run_specific": [
+        "assert 4 == 3\n +  where 4 = len(((0, 6), (2, 2), (2, 4), (0, 0)))"
+      ],
+      "tests.test_depth_weight_curves_v2::test_all_attention_charts_share_one_head": [
+        "assert 4 == 3\n +  where 4 = len(((0, 6), (2, 2), (2, 4), (0, 0)))"
+      ],
+      "tests.test_depth_weight_curves_v2::test_plotly_history_emphasises_newest_and_oldest": [
+        "AssertionError: assert 4 == 2\n +  where 4 = len([Scatter({\\n    'hovertemplate': 'r0_c6<br>U10 \u00b7 oldest<br>layer=%{x:.3f}<br>weight=%{y:.7g}<extra></extra>',\\n    'line... 0.03571978956460953, 0.03571978956460953, 0.03571978956460953,\\n          0.03571978956460953, 0.03571978956460953]\\n})])"
+      ],
+      "tests.test_direct_thog_mlp_application::test_training_wrappers_expose_default_on_direct_factorised_mlp_without_getopts_letter": [
+        "assert 'DIRECT_FACTORISED_MLP=\"${THOG2_DIRECT_FACTORISED_MLP:-true}\"' in '#!/bin/bash\\nset -euo pipefail\\n\\ncd \"$(dirname \"$0\")\"\\n\\n# vvv THOG make allocator-fragmentation protection a global...rue}\"\\n# \\'  --depth-materialisation-matmul true|false   DEPTH matrix materialisation; default true\\' \\\\\\n# ^^^ THOG\\n'"
+      ],
+      "tests.test_geometry_registry_phase1.GeometryRegistryPhase1Tests::test_registry_console_report_is_complete_and_explicit": [
+        "AssertionError: 'axes / uncompressed axes' not found in 'geometry registry (geometry_registry_v5)\\n=======================================\\n\\nselectors\\n---------\\ndepth-compatible: selector may accompany DEPTH without implying a 3-D BLOCK/BLOCK_SET field\\nmaterializer:     generic systematic materializer exists for this exact selector\\nlegacy-only"
+      ],
+      "tests.test_hyperblock_direct_factorised_mlp::test_wrapper_exposes_default_off_boolean_option": [
+        "subprocess.CalledProcessError: Command '['bash', 'train_OWT.sh', '-h']' returned non-zero exit status 126."
+      ],
+      "tests.test_hyperblock_wrapper::test_hyperblock_wrapper_help_and_bash_syntax": [
+        "subprocess.CalledProcessError: Command '['bash', 'train_OWT.sh', '-h']' returned non-zero exit status 126."
+      ],
+      "tests.test_instra_demand_runtime::test_twenty_four_warm_histories_resume_without_replaying_records": [
+        "ModuleNotFoundError: No module named 'wandb.sdk.internal.datastore'"
+      ],
+      "tests.test_instra_demand_runtime::test_replaced_remote_wandb_file_reopens_the_new_inode": [
+        "ModuleNotFoundError: No module named 'wandb.sdk.internal.datastore'"
+      ],
+      "tests.test_instra_firefox_acceptance::test_real_firefox_heatmap_and_weight_group_chart_overrides": [
+        "AssertionError: INSTRA server exited early (1)\nstdout:\n\nstderr:\nTraceback (most recent call last):\n  File \"/workspace/scratch/96b033f15391/baseline/run_thog2_dashboard.py\", line 209, in _start_node_agent\n    instra_node_agent.request(\"state\", timeout=1)\n  File \"/workspace/scratch/96b033f15391/baseline/instra_node_agent.py\", line 654, in request\n   "
+      ],
+      "tests.test_instra_firefox_acceptance::test_real_firefox_renders_a_completed_finite_weight_capture": [
+        "AssertionError: INSTRA server exited early (1)\nstdout:\n\nstderr:\nTraceback (most recent call last):\n  File \"/workspace/scratch/96b033f15391/baseline/run_thog2_dashboard.py\", line 209, in _start_node_agent\n    instra_node_agent.request(\"state\", timeout=1)\n  File \"/workspace/scratch/96b033f15391/baseline/instra_node_agent.py\", line 654, in request\n   "
+      ],
+      "tests.test_instra_firefox_acceptance::test_real_firefox_selected_thog_render_contract": [
+        "AssertionError: INSTRA server exited early (1)\nstdout:\n\nstderr:\nTraceback (most recent call last):\n  File \"/workspace/scratch/96b033f15391/baseline/run_thog2_dashboard.py\", line 209, in _start_node_agent\n    instra_node_agent.request(\"state\", timeout=1)\n  File \"/workspace/scratch/96b033f15391/baseline/instra_node_agent.py\", line 654, in request\n   "
+      ],
+      "tests.test_instra_firefox_heatmap_diagnostics::test_real_firefox_heatmap_pipeline_diagnostics": [
+        "AssertionError: INSTRA server exited early (1)\nstdout:\n\nstderr:\nTraceback (most recent call last):\n  File \"/workspace/scratch/96b033f15391/baseline/run_thog2_dashboard.py\", line 209, in _start_node_agent\n    instra_node_agent.request(\"state\", timeout=1)\n  File \"/workspace/scratch/96b033f15391/baseline/instra_node_agent.py\", line 654, in request\n   "
+      ],
+      "tests.test_instra_firefox_maximize_history::test_real_firefox_maximize_current_only_history_round_trip": [
+        "AssertionError: INSTRA server exited early (1)\nstdout:\n\nstderr:\nTraceback (most recent call last):\n  File \"/workspace/scratch/96b033f15391/baseline/run_thog2_dashboard.py\", line 209, in _start_node_agent\n    instra_node_agent.request(\"state\", timeout=1)\n  File \"/workspace/scratch/96b033f15391/baseline/instra_node_agent.py\", line 654, in request\n   "
+      ],
+      "tests.test_instra_firefox_weight_controls::test_real_firefox_weight_group_and_chart_overrides_are_clickable": [
+        "AssertionError: INSTRA server exited early (1)\nstdout:\n\nstderr:\nTraceback (most recent call last):\n  File \"/workspace/scratch/96b033f15391/baseline/run_thog2_dashboard.py\", line 209, in _start_node_agent\n    instra_node_agent.request(\"state\", timeout=1)\n  File \"/workspace/scratch/96b033f15391/baseline/instra_node_agent.py\", line 654, in request\n   "
+      ],
+      "tests.test_instra_firefox_weight_controls::test_real_firefox_explicit_weight_range_overrides_current_only_and_has_step_hover": [
+        "AssertionError: INSTRA server exited early (1)\nstdout:\n\nstderr:\nTraceback (most recent call last):\n  File \"/workspace/scratch/96b033f15391/baseline/run_thog2_dashboard.py\", line 209, in _start_node_agent\n    instra_node_agent.request(\"state\", timeout=1)\n  File \"/workspace/scratch/96b033f15391/baseline/instra_node_agent.py\", line 654, in request\n   "
+      ],
+      "tests.test_instra_firefox_weight_controls::test_real_firefox_weight_settings_previews_show_current_curves": [
+        "AssertionError: INSTRA server exited early (1)\nstdout:\n\nstderr:\nTraceback (most recent call last):\n  File \"/workspace/scratch/96b033f15391/baseline/run_thog2_dashboard.py\", line 209, in _start_node_agent\n    instra_node_agent.request(\"state\", timeout=1)\n  File \"/workspace/scratch/96b033f15391/baseline/instra_node_agent.py\", line 654, in request\n   "
+      ],
+      "tests.test_instra_firefox_weight_controls::test_real_firefox_rnd_changes_weight_coupling": [
+        "AssertionError: INSTRA server exited early (1)\nstdout:\n\nstderr:\nTraceback (most recent call last):\n  File \"/workspace/scratch/96b033f15391/baseline/run_thog2_dashboard.py\", line 209, in _start_node_agent\n    instra_node_agent.request(\"state\", timeout=1)\n  File \"/workspace/scratch/96b033f15391/baseline/instra_node_agent.py\", line 654, in request\n   "
+      ],
+      "tests.test_instra_firefox_workspace_range::test_real_firefox_workspace_intersection_and_step_windows": [
+        "AssertionError: INSTRA server exited early (1)\nstdout:\n\nstderr:\nTraceback (most recent call last):\n  File \"/workspace/scratch/96b033f15391/baseline/run_thog2_dashboard.py\", line 209, in _start_node_agent\n    instra_node_agent.request(\"state\", timeout=1)\n  File \"/workspace/scratch/96b033f15391/baseline/instra_node_agent.py\", line 654, in request\n   "
+      ],
+      "tests.test_instra_sep01_enhancements.InstraEnhancementTests::test_new_and_legacy_cli_spellings_and_effective_environment": [
+        "argparse.ArgumentError: argument --instrumentation__depth_weight_curves__coupling_pairs_per_matrix/--instrumentation--depth-weight-curves--coupling-pairs-per-matrix/--instrumentation-depth-weight-curves-coupling-pairs-per-matrix: conflicting option strings: --instrumentation__depth_weight_curves__coupling_pairs_per_matrix, --instrumentation--depth-",
+        "argparse.ArgumentError: argument --instrumentation__depth_weight_curves__coupling_pairs_per_matrix/--instrumentation--depth-weight-curves--coupling-pairs-per-matrix/--instrumentation-depth-weight-curves-coupling-pairs-per-matrix: conflicting option strings: --instrumentation__depth_weight_curves__coupling_pairs_per_matrix, --instrumentation--depth-",
+        "argparse.ArgumentError: argument --instrumentation__depth_weight_curves__coupling_pairs_per_matrix/--instrumentation--depth-weight-curves--coupling-pairs-per-matrix/--instrumentation-depth-weight-curves-coupling-pairs-per-matrix: conflicting option strings: --instrumentation__depth_weight_curves__coupling_pairs_per_matrix, --instrumentation--depth-",
+        "argparse.ArgumentError: argument --instrumentation__depth_weight_curves__coupling_pairs_per_matrix/--instrumentation--depth-weight-curves--coupling-pairs-per-matrix/--instrumentation-depth-weight-curves-coupling-pairs-per-matrix: conflicting option strings: --instrumentation__depth_weight_curves__coupling_pairs_per_matrix, --instrumentation--depth-",
+        "argparse.ArgumentError: argument --instrumentation__depth_weight_curves__coupling_pairs_per_matrix/--instrumentation--depth-weight-curves--coupling-pairs-per-matrix/--instrumentation-depth-weight-curves-coupling-pairs-per-matrix: conflicting option strings: --instrumentation__depth_weight_curves__coupling_pairs_per_matrix, --instrumentation--depth-",
+        "argparse.ArgumentError: argument --instrumentation__depth_weight_curves__coupling_pairs_per_matrix/--instrumentation--depth-weight-curves--coupling-pairs-per-matrix/--instrumentation-depth-weight-curves-coupling-pairs-per-matrix: conflicting option strings: --instrumentation__depth_weight_curves__coupling_pairs_per_matrix, --instrumentation--depth-"
+      ],
+      "tests.test_instra_sep30_feedback::test_chart_routes_hide_disabled_plastic_and_preserve_enabled_or_legacy_data": [
+        "KeyError: 'group'"
+      ],
+      "tests.test_jpeg_like_v1_wrappers.JpegLikeV1WrapperTests::test_registry_comment_and_help_expose_new_contract": [
+        "AssertionError: '# Registry:' not found in '#!/bin/bash\\nset -euo pipefail\\n\\ncd \"$(dirname \"$0\")\"\\n\\n# vvv THOG make allocator-fragmentation protection a global, explicit wrapper policy\\nTHOG2_CUDA_EXPANDABLE_SEGMENT=\"enabled\"\\nTHOG2_CUDA_EXPANDABLE_SEGMENT_FILTERED_ARGS=()\\nTHOG2_CUDA_EXPANDABLE_SEGMENT_HELP=false\\nif [[ -n \"${PYTORCH_CUDA_ALLOC_"
+      ],
+      "tests.test_jpeg_like_v1_wrappers.JpegLikeV1WrapperTests::test_scruffy_dry_run_propagates_geometry_compressor_group_and_y": [
+        "AssertionError: 'JPEG_LIKE_V1:       compressor=dct group=4 Y=2' not found in 'scruffy OWT train\\n  start time:                         03:15  06-10-26\\n  artifact:                           261006-0315_scruffy_JPEG_SMOKE___G0_chebyshev_G1_jpeg_like_MLP_UP_MLP_HIDDEN__d_owt_A_1_b_1_c_60_f_6_w_0__C_8_D_8_H_2_L_4__P_3_Q_4_J_2_O_2_X_4_Y_2_s_4__r_ds_z_"
+      ],
+      "tests.test_karitane_restart_launcher.KaritaneRestartLauncherTests::test_launcher_has_valid_shell_syntax_and_calls_dedicated_resume_module": [
+        "AssertionError: 127 != 0 : bash: /workspace/scratch/96b033f15391/baseline/current_DREEDLE_runstring.sh: No such file or directory"
+      ],
+      "tests.test_layer_dropout_wrappers.LayerDropoutWrapperTests::test_long_forms_and_forwarding_are_present": [
+        "AssertionError: '--layer-dropout-stratum-size' not found in '#!/bin/bash\\nset -euo pipefail\\n\\ncd \"$(dirname \"$0\")\"\\n\\n# vvv THOG make allocator-fragmentation protection a global, explicit wrapper policy\\nTHOG2_CUDA_EXPANDABLE_SEGMENT=\"enabled\"\\nTHOG2_CUDA_EXPANDABLE_SEGMENT_FILTERED_ARGS=()\\nTHOG2_CUDA_EXPANDABLE_SEGMENT_HELP=false\\nif [[ -n \"${PY"
+      ],
+      "tests.test_layer_dropout_wrappers.LayerDropoutWrapperTests::test_short_controls_and_long_resample_parse_before_help": [
+        "AssertionError: 126 != 0 : /workspace/scratch/96b033f15391/baseline/resume_and_fork_OWT.sh: line 75: ./train_OWT_core.sh: Permission denied"
+      ],
+      "tests.test_layer_dropout_wrappers.LayerDropoutWrapperTests::test_short_layer_dropout_controls_are_native_getopts": [
+        "AssertionError: 'L:s:M:H' not found in '#!/bin/bash\\nset -euo pipefail\\n\\ncd \"$(dirname \"$0\")\"\\n\\n# vvv THOG make allocator-fragmentation protection a global, explicit wrapper policy\\nTHOG2_CUDA_EXPANDABLE_SEGMENT=\"enabled\"\\nTHOG2_CUDA_EXPANDABLE_SEGMENT_FILTERED_ARGS=()\\nTHOG2_CUDA_EXPANDABLE_SEGMENT_HELP=false\\nif [[ -n \"${PYTORCH_CUDA_ALLOC_CONF"
+      ],
+      "tests.test_optimizer_wrapper.OptimizerWrapperTests::test_existing_run_scruffy_scripts_remain_present": [
+        "AssertionError: False is not true"
+      ],
+      "tests.test_optimizer_wrapper.OptimizerWrapperTests::test_full_wrappers_retain_body_and_native_optimizer_help": [
+        "AssertionError: 392 not greater than 400"
+      ],
+      "tests.test_optimizer_wrapper.OptimizerWrapperTests::test_help_contains_old_and_new_controls": [
+        "subprocess.CalledProcessError: Command '['bash', 'train_OWT.sh', '-h']' returned non-zero exit status 126."
+      ],
+      "tests.test_optimizer_wrapper.OptimizerWrapperTests::test_long_optimizer_controls_and_explicit_lr_override": [
+        "AssertionError: 'optimizer:          rmsprop  momentum=0.95' not found in 'scruffy OWT train\\n  start time:                         03:15  06-10-26\\n  artifact:                           261006-0315_scruffy_NO_PREFIX___DENSE__d_owt_A_1_b_1_c_77_f_7_w_0__C_1024_D_768_H_12_L_12__r_ds_z_tld_S_12__OPT_RMSPROP\\n  experiment:                         NO_P"
+      ],
+      "tests.test_optimizer_wrapper.OptimizerWrapperTests::test_short_optimizer_control_uses_optimizer_defaults": [
+        "AssertionError: 'optimizer:          sgd' not found in 'scruffy OWT train\\n  start time:                         03:15  06-10-26\\n  artifact:                           261006-0315_scruffy_NO_PREFIX___DENSE__d_owt_A_1_b_1_c_1000_f_100_w_0__C_1024_D_768_H_12_L_12__r_ds_z_tld_S_12__OPT_SGD\\n  experiment:                         NO_PREFIX\\n  model/pres"
+      ],
+      "tests.test_picton_cli_wrapper_contract::test_picton_canonical_host_wrappers_share_the_same_getopts_letters_and_long_options": [
+        "StopIteration"
+      ],
+      "tests.test_picton_cli_wrapper_contract::test_picton_all_known_shell_wrappers_are_syntactically_valid": [
+        "AssertionError: PosixPath('/workspace/scratch/96b033f15391/baseline/run_scruffy_dense_sheet_l144_smoke_owt.sh')\nassert False\n +  where False = is_file()\n +    where is_file = PosixPath('/workspace/scratch/96b033f15391/baseline/run_scruffy_dense_sheet_l144_smoke_owt.sh').is_file"
+      ],
+      "tests.test_picton_wrapper_defaults_and_nonfinite_policy::test_current_training_wrappers_default_to_fast_discard_eval_100_and_checkpoint_1000": [
+        "AssertionError: assert 'fast discard:       true' in 'scruffy OWT train\\n  start time:                         03:15  06-10-26\\n  artifact:                           FAKE_...d_tokens 1024 --plastic__layer_count_probe_radius 1 --layer-dropout-resample-steps 1 --log-timestamp 20261006_031555\\n'"
+      ],
+      "tests.test_plastic_cli_console_refinements::test_wrapper_help_covers_every_registered_plastic_option": [
+        "subprocess.CalledProcessError: Command '('bash', './train_OWT.sh', '-h')' returned non-zero exit status 126."
+      ],
+      "tests.test_plastic_depth_interfaces::test_wrapper_help_and_shell_syntax_cover_plastic_depth": [
+        "subprocess.CalledProcessError: Command '['bash', 'train_OWT.sh', '-h']' returned non-zero exit status 126."
+      ],
+      "tests.test_plastic_depth_interfaces::test_obsolete_hold_control_and_internal_sampling_seed_are_not_public_cli_options": [
+        "AssertionError: assert '--plastic-l...hold-updates' not in 'usage: __ma...e and exit\\n'\n  \n  '--plastic-layer-count-hold-updates' is contained here:\n    e\n    \u2014       --plastic-layer-count-hold-updates N                                                                 minimum updates to hold a committed layer count\n  ?         ++++++++++++++++++++++"
+      ],
+      "tests.test_plastic_depth_same_batch_all_probes::test_train_owt_wrapper_routes_same_batch_with_wall_time_controls_after_separator": [
+        "AssertionError: CUDA allocator:\n    --cuda-expandable-segment enabled|disabled  fragmentation protection; default enabled\n  \n  PLASTIC DEPTH COARSE/FINE:\n    --plastic__coarse_phase enabled|disabled       one-shot COARSE discovery; default disabled\n    --plastic__phase_1_n_steps N                   optimizer steps per COARSE trial\n    --plastic__ph"
+      ],
+      "tests.test_plastic_depth_wrapper_options.PlasticDepthWrapperOptionsTests::test_canonical_wrapper_help_accepts_double_underscore_controls": [
+        "AssertionError: 126 != 0 : /workspace/scratch/96b033f15391/baseline/resume_and_fork_OWT.sh: line 75: ./train_OWT_core.sh: Permission denied"
+      ],
+      "tests.test_plastic_depth_wrapper_options.PlasticDepthWrapperOptionsTests::test_dormant_initial_and_max_controls_do_not_block_instrumentation_modes": [
+        "AssertionError: 126 != 0 : /workspace/scratch/96b033f15391/baseline/resume_and_fork_OWT.sh: line 75: ./train_OWT_core.sh: Permission denied"
+      ],
+      "tests.test_premat_processing::test_processing_throughput_round_trips_through_local_store": [
+        "AssertionError: assert ({'optimizer_...2382812, ...}) == ({'optimizer_...d': 13001.25})\n  \n  At index 0 diff: {'optimizer_update': 1, 'tokens_per_second': 12345.5, 'wall_time': 1791256592.239873, 'relative_wall_seconds': 8.797645568847656e-05, 'process_time_seconds': 0.00040327900001102535} != {'optimizer_update': 1, 'tokens_per_second': 12345.5}\n "
+      ],
+      "tests.test_premat_processing::test_processing_normalizer_emits_graph_and_download_data": [
+        "AssertionError: assert '' == 80.0"
+      ],
+      "tests.test_premat_processing::test_processing_throughput_workspace_multirun_contract": [
+        "assert '/api/processing-throughput' in '# vvv THOG\\n\"\"\"Serve INSTRA through the preserved dashboard server with explicit Processing resource attribution asse...ransport\\n        _network_service.close()\\n\\n\\nif __name__ == \"__main__\":\\n    raise SystemExit(main())\\n# ^^^ THOG\\n'"
+      ],
+      "tests.test_premat_processing::test_processing_group_sits_after_val_and_throughput_has_no_curve_markers": [
+        "assert 'const processing_anchor = group_section(\"val\") || group_section(\"train\");' in '// vvv THOG\\n\"use strict\";\\n\\n// W&B-like navigation for all scalar/history and native system charts found in\\n// the...h_metric_groups();\\n    });\\n    // ^^^ THOG\\n    setTimeout(refresh_metric_groups, 50);\\n  }, 0);\\n});\\n// ^^^ THOG\\n'"
+      ],
+      "tests.test_premat_processing::test_ncu_semantic_exports_select_dominant_main_and_premat": [
+        "ValueError: /tmp/pytest-of-root/pytest-1/test_ncu_semantic_exports_sele0/raw.csv: launch is missing registers-per-thread metric; collect LaunchStats"
+      ],
+      "tests.test_premat_processing_resource_normalizer::test_normalizer_emits_exact_owners_stream_resource_csv_and_idle_intervals": [
+        "assert 4 == 2"
+      ],
+      "tests.test_processing_ncu_2024_repair::test_ncu_2024_wide_export_normalizes_resources_and_semantics": [
+        "ValueError: /tmp/pytest-of-root/pytest-1/test_ncu_2024_wide_export_norm0/raw.csv: launch is missing registers-per-thread metric; collect LaunchStats"
+      ],
+      "tests.test_processing_ncu_semantic_suffix_integration::test_wide_ncu_suffix_semantics_join_main_and_premat": [
+        "ValueError: /tmp/pytest-of-root/pytest-1/test_wide_ncu_suffix_semantics0/raw.csv: launch is missing registers-per-thread metric; collect LaunchStats"
+      ],
+      "tests.test_resume_and_fork_cli_compatibility.ResumeAndForkCliCompatibilityTests::test_lifecycle_parser_accepts_all_preserved_master_long_controls": [
+        "AssertionError: False is not true : lifecycle parser is missing preserved wrapper long options: ['--chaos', '--no-chaos', '--thogopt']"
+      ],
+      "tests.test_resume_and_fork_ddp_integration.ResumeAndForkDdpIntegrationTests::test_two_rank_cpu_resume_preserves_logical_run": [
+        "AssertionError: 1 != 0 : /opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python: Error while finding module specification for 'torch.distributed.run' (ModuleNotFoundError: No module named 'torch')"
+      ],
+      "tests.test_semantic_qkv_adapter_bypass_option::test_bypass_semantic_qkv_adapter_false_selects_legacy_adapter_path": [
+        "AssertionError: Expected 'reconstructed_attention_input_bias' to be called once. Called 0 times."
+      ],
+      "tests.test_sheet_stage3_compatibility.Stage3CompatibilityTests::test_s3_09_incompatible_checkpoint_rejection": [
+        "ValueError: n_layer must be divisible by layer_dropout_stratum_size; got n_layer=3, stratum_size=2"
+      ],
+      "tests.test_sheet_stage5_ddp.Stage5DdpTests::test_s5_08_ddp_construction_identity": [
+        "AssertionError: DDP worker failed\ncommand: /opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python -m torch.distributed.run --standalone --nproc-per-node=2 /workspace/scratch/96b033f15391/baseline/tests/stage5_ddp_worker.py --mode construction --output-dir /tmp/tmp24icu0h2 --evidence /tmp/tmp24icu0h2/construction.json\nstdout:\n\nstde"
+      ],
+      "tests.test_sheet_stage5_ddp.Stage5DdpTests::test_s5_09_ddp_update_matches_single_process_global_batch": [
+        "AssertionError: DDP worker failed\ncommand: /opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python -m torch.distributed.run --standalone --nproc-per-node=2 /workspace/scratch/96b033f15391/baseline/tests/stage5_ddp_worker.py --mode update --output-dir /tmp/tmp7vz_ug12 --evidence /tmp/tmp7vz_ug12/update.json\nstdout:\n\nstderr:\n/opt/cod"
+      ],
+      "tests.test_sheet_stage5_ddp.Stage5DdpTests::test_s5_10_ddp_state_remains_synchronized": [
+        "AssertionError: DDP worker failed\ncommand: /opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python -m torch.distributed.run --standalone --nproc-per-node=2 /workspace/scratch/96b033f15391/baseline/tests/stage5_ddp_worker.py --mode update --output-dir /tmp/tmpoplf94md --evidence /tmp/tmpoplf94md/update.json\nstdout:\n\nstderr:\n/opt/cod"
+      ],
+      "tests.test_sheet_stage5_ddp.Stage5DdpTests::test_s5_11_ddp_resume_preserves_lifecycle_and_state": [
+        "AssertionError: DDP worker failed\ncommand: /opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python -m torch.distributed.run --standalone --nproc-per-node=2 /workspace/scratch/96b033f15391/baseline/tests/stage5_ddp_worker.py --mode resume --output-dir /tmp/tmppaaz06pn --evidence /tmp/tmppaaz06pn/resume.json\nstdout:\n\nstderr:\n/opt/cod"
+      ],
+      "tests.test_sheet_stage5_ddp.Stage5DdpTests::test_s5_12_uneven_checkpoint_segment_boundary_under_ddp": [
+        "AssertionError: DDP worker failed\ncommand: /opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python -m torch.distributed.run --standalone --nproc-per-node=2 /workspace/scratch/96b033f15391/baseline/tests/stage5_ddp_worker.py --mode boundary --output-dir /tmp/tmpmd8ce2f2 --evidence /tmp/tmpmd8ce2f2/boundary.json\nstdout:\n\nstderr:\n/opt"
+      ],
+      "tests.test_sheet_stage5_failures.Stage5FailurePropagationTests::test_s5_rank_local_nonfinite_state_fails_collectively": [
+        "AssertionError: distributed failure mode 'nonfinite_rank' lacked diagnostic 'non-finite training loss on at least one rank'\n\n/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python: Error while finding module specification for 'torch.distributed.run' (ModuleNotFoundError: No module named 'torch')"
+      ],
+      "tests.test_sheet_stage5_failures.Stage5FailurePropagationTests::test_s5_structure_disagreement_fails_all_ranks_without_hang": [
+        "AssertionError: distributed failure mode 'structure_mismatch' lacked diagnostic 'distributed injected structure differs across ranks'\n\n/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python: Error while finding module specification for 'torch.distributed.run' (ModuleNotFoundError: No module named 'torch')"
+      ],
+      "tests.test_sheet_stage6_runner_scripts.RunnerScriptTests::test_s6_33_dense_runner_resolves_canonical_identity_and_shared_defaults": [
+        "AssertionError: 'scruffy_TEST_DENSE' not found in 'scruffy OWT train\\n  start time:                         03:16  06-10-26\\n  artifact:                           261006-0316_scruffy_TEST___DENSE__d_owt_A_2_b_1_c_60_f_6_w_0__C_8_D_8_H_2_L_2__r_ds_z_tld_S_1\\n  experiment:                         TEST\\n  model/preset/basis:                 dense / de"
+      ],
+      "tests.test_sheet_stage6_runner_scripts.RunnerScriptTests::test_s6_34_depth_runner_ignores_non_depth_orders_by_default": [
+        "AssertionError: 'scruffy_TEST_G0_chebyshev' not found in 'scruffy OWT train\\n  start time:                         03:16  06-10-26\\n  artifact:                           261006-0316_scruffy_TEST___G0_chebyshev__d_owt_A_2_b_1_c_60_f_6_w_0__C_8_D_8_H_2_L_2__P_2_DLB_0__r_ds_z_did_S_1\\n  experiment:                         TEST\\n  model/preset/basis:  "
+      ],
+      "tests.test_stage6_plastic_depth_progress::test_plastic_probe_losses_score_z_sample_layer_and_samples_are_ordered": [
+        "AssertionError: assert 'layers = 4' in 'T      7  0926       42s    0.012h  \u0394=  0.1s  tok/s= 12345  toks=     86,016  loss=  9.8765  \\x1b[1;38;2;0;255;0m\u0394=  ...0.889, \\x1b[1m\\x1b[37;1m\\x1b[4m9.235\\x1b[m, +91.111]  score_z [L-3, L+3] = [-02.50, \\x1b[1;38;2;0;255;0m+01.25\\x1b[0m]'"
+      ],
+      "tests.test_stage6_plastic_depth_progress::test_huge_score_z_uses_fixed_width_scientific_not_row_blowout": [
+        "AssertionError: assert 'score_z [L-3, L+3] = [+4.39e+10, -3.98e+10]' in 'T      7  0926       42s    0.012h  \u0394=  0.1s  tok/s= 12345  toks=     86,016  loss=  9.8765  \\x1b[1;38;2;0;255;0m\u0394=  ... \\x1b[1m\\x1b[37;1m\\x1b[4m9.235\\x1b[m, +91.111]  score_z [L-3, L+3] = [\\x1b[1;38;2;0;255;0m+4.39e+10\\x1b[0m, -3.98e+10]'"
+      ],
+      "tests.test_stage6_plastic_depth_progress::test_optimizer_progress_omits_depth_samples_when_absent": [
+        "AssertionError: assert False\n +  where False = <built-in method endswith of str object at 0x2152e830>('score_z [L-3, L+3] = [    -2.50,     +1.25]')\n +    where <built-in method endswith of str object at 0x2152e830> = 'T      7  0926       42s    0.012h  \u0394=  0.1s  tok/s= 12345  toks=     86,016  loss=  9.8765  \\x1b[1;38;2;0;255;0m\u0394=  ...0.889, \\x1b"
+      ],
+      "tests.test_stage6_plastic_depth_progress::test_optimizer_progress_omits_probe_losses_when_absent": [
+        "AssertionError: assert False\n +  where False = <built-in method endswith of str object at 0x7efd5017a470>('\\tsample_layer = [  1.3,   4.6,   8.9, 100.0]')\n +    where <built-in method endswith of str object at 0x7efd5017a470> = 'T      7  0926       42s    0.012h  \u0394=  0.1s  tok/s= 12345  toks=     86,016  loss=  9.8765  \\x1b[1;38;2;0;255;0m\u0394=  -0.1"
+      ],
+      "tests.test_stage6_plastic_depth_progress::test_optimizer_progress_omits_score_z_when_absent": [
+        "ValueError: substring not found"
+      ],
+      "tests.test_stage6_plastic_depth_progress::test_missing_edge_probe_loss_and_score_z_use_dash_placeholders_and_green_only": [
+        "AssertionError: assert '\\tprobe_losses [L-1, L, L+1] = [      -,   9.500,\\x1b[1;38;2;0;255;0m   9.250\\x1b[0m]' in 'T      7  0926       42s    0.012h  \u0394=  0.1s  tok/s= 12345  toks=     86,016  loss=  9.8765  \\x1b[1;38;2;0;255;0m\u0394=  ...[37;1m\\x1b[4m9.500\\x1b[m, \\x1b[38;2;0;180;0m-0.250\\x1b[m]  score_z [L-1, L+1] = [-, \\x1b[1;38;2;0;255;0m+00.12\\x1b["
+      ],
+      "tests.test_stage8_mlp_channel_order_and_wrapper_loops::test_stage8_training_wrappers_use_final_preset_as_single_architecture_selector": [
+        "assert '-p PRESET=${GEOMETRY_PRESET}' in '#!/bin/bash\\nset -euo pipefail\\n\\ncd \"$(dirname \"$0\")\"\\n\\n# vvv THOG make allocator-fragmentation protection a global...rue}\"\\n# \\'  --depth-materialisation-matmul true|false   DEPTH matrix materialisation; default true\\' \\\\\\n# ^^^ THOG\\n'"
+      ],
+      "tests.test_stage8_mlp_channel_order_and_wrapper_loops::test_stage8_training_wrappers_share_the_six_order_letters": [
+        "assert '-P O_DEPTH=${O_DEPTH}' in '#!/bin/bash\\nset -euo pipefail\\n\\ncd \"$(dirname \"$0\")\"\\n\\n# vvv THOG make allocator-fragmentation protection a global...rue}\"\\n# \\'  --depth-materialisation-matmul true|false   DEPTH matrix materialisation; default true\\' \\\\\\n# ^^^ THOG\\n'"
+      ],
+      "tests.test_stage8_mlp_channel_order_and_wrapper_loops::test_stage8_training_wrappers_loop_dense_once_and_compact_presets_across_depth_orders": [
+        "assert 'PRESET_VALUES=()' in '#!/bin/bash\\nset -euo pipefail\\n\\ncd \"$(dirname \"$0\")\"\\n\\n# vvv THOG make allocator-fragmentation protection a global...rue}\"\\n# \\'  --depth-materialisation-matmul true|false   DEPTH matrix materialisation; default true\\' \\\\\\n# ^^^ THOG\\n'"
+      ],
+      "tests.test_stage8_training_instrumentation_selector::test_stage8_training_wrappers_expose_one_unambiguous_instrumentation_selector": [
+        "assert 'M:' not in ' alphabet\\n...an execution'\n  \n  'M:' is contained here:\n    ER_MOMENTUM:-0.9}\"\n  ?           ++\n    OPTIMIZER_LR_EXPLICIT=false\n    OPTIMIZER_MIN_LR_EXPLICIT=false\n    ...\n  \n  ...Full output truncated (229 lines hidden), use '-vv' to show"
+      ],
+      "tests.test_stage8_wrapper_shell_syntax::test_stage8_training_wrappers_make_logging_backend_and_schedule_controls_explicit": [
+        "assert 'INSTRUMENTATION=\"tensorboard\"' in '#!/bin/bash\\nset -euo pipefail\\n\\ncd \"$(dirname \"$0\")\"\\n\\n# vvv THOG make allocator-fragmentation protection a global...rue}\"\\n# \\'  --depth-materialisation-matmul true|false   DEPTH matrix materialisation; default true\\' \\\\\\n# ^^^ THOG\\n'"
+      ],
+      "tests.test_stage8_wrapper_shell_syntax::test_stage8_training_wrappers_expose_all_six_semantic_order_controls": [
+        "assert 'O_DEPTH=32' in '#!/bin/bash\\nset -euo pipefail\\n\\ncd \"$(dirname \"$0\")\"\\n\\n# vvv THOG make allocator-fragmentation protection a global...rue}\"\\n# \\'  --depth-materialisation-matmul true|false   DEPTH matrix materialisation; default true\\' \\\\\\n# ^^^ THOG\\n'"
+      ],
+      "tests.test_stage8_wrapper_shell_syntax::test_stage8_training_wrappers_auto_correct_dense_residual_source": [
+        "assert 'true_layer_depth' in '#!/bin/bash\\nset -euo pipefail\\n\\ncd \"$(dirname \"$0\")\"\\n\\n# vvv THOG make allocator-fragmentation protection a global...rue}\"\\n# \\'  --depth-materialisation-matmul true|false   DEPTH matrix materialisation; default true\\' \\\\\\n# ^^^ THOG\\n'"
+      ],
+      "tests.test_stage8_wrappers_and_run_config::test_stage8_run_config_records_dct_full_block_identity_in_manifest_and_artifact_name": [
+        "AssertionError: assert False\n +  where False = <built-in method startswith of str object at 0x7efd55750870>((('260708-0904_' + 'NEL') + 'SON_DCT_FULL_BLOCK_'))\n +    where <built-in method startswith of str object at 0x7efd55750870> = '260708-0904_scruffy_NELSON___G0_dct_full_block__d_owt_A_160_b_12_c_60_f_6_w_1__C_256_D_16_H_2_L_4__P_3_Q_8_J_4_O_3"
+      ],
+      "tests.test_stage8_wrappers_and_run_config::test_stage8_semantic_order_defaults_are_recorded_in_manifest_identity_and_training_config": [
+        "AssertionError: assert 'G0_chebyshev_full_block' == 'CHEBY_FULL_BLOCK'\n  \n  - CHEBY_FULL_BLOCK\n  + G0_chebyshev_full_block"
+      ],
+      "tests.test_stage8_wrappers_and_run_config::test_stage8_semantic_order_overrides_are_recorded_in_manifest_artifact_identity_and_training_config": [
+        "AssertionError: assert 'G0_chebyshev_full_block' == 'CHEBY_FULL_BLOCK'\n  \n  - CHEBY_FULL_BLOCK\n  + G0_chebyshev_full_block"
+      ],
+      "tests.test_thogopt_integration::test_public_cli_history_arguments_and_reset_scope": [
+        "SystemExit: 2"
+      ],
+      "tests.test_thogopt_lifecycle::test_fresh_resume_reset_fork_and_capture": [
+        "assert 0 == 6\n +  where 0 = len({})"
+      ],
+      "tests.test_train_owt_public_wrapper.PublicTrainOwtWrapperTests::test_fresh_dry_run_preserves_master_cli_and_aligns_startup_values": [
+        "AssertionError: False is not true"
+      ],
+      "tests.test_vectorise_per_head_materialisation::test_training_wrappers_expose_default_on_vectorise_per_head_materialisation_without_getopts_letter": [
+        "assert 'VECTORISE_PER_HEAD_MATERIALISATION=\"${THOG2_VECTORISE_PER_HEAD_MATERIALISATION:-true}\"' in '#!/bin/bash\\nset -euo pipefail\\n\\ncd \"$(dirname \"$0\")\"\\n\\n# vvv THOG make allocator-fragmentation protection a global...rue}\"\\n# \\'  --depth-materialisation-matmul true|false   DEPTH matrix materialisation; default true\\' \\\\\\n# ^^^ THOG\\n'"
+      ],
+      "tests.test_wrapper_learning_rate_and_batch_grids::test_run_config_artifact_contains_two_digit_learning_rate_code": [
+        "AssertionError: assert '_LR_70_' in '_d_owt_A_160_b_12_c_70_f_7_w_10__C_256_D_768_H_12_L_72__P_16_DLB_0__r_ds_z_tld_S_12_'"
+      ],
+      "tests.test_wrapper_learning_rate_and_batch_grids::test_run_config_default_learning_rate_uses_lr_60_artifact_code": [
+        "AssertionError: assert '_LR_60_' in '_d_owt_A_160_b_12_c_60_f_6_w_10__C_256_D_768_H_12_L_72__P_16_DLB_0__r_ds_z_tld_S_12_'"
+      ],
+      "tests.test_wrapper_learning_rate_and_batch_grids::test_wrappers_expose_lr_and_min_lr_codes_and_nest_lr_and_batch_grid_axes": [
+        "assert 'LEARNING_RATE_CODES=\"60\"' in '#!/bin/bash\\nset -euo pipefail\\n\\ncd \"$(dirname \"$0\")\"\\n\\n# vvv THOG make allocator-fragmentation protection a global...rue}\"\\n# \\'  --depth-materialisation-matmul true|false   DEPTH matrix materialisation; default true\\' \\\\\\n# ^^^ THOG\\n'"
+      ]
+    }
+  },
+  "residuals_compression": {
+    "pytest_summary": "96 failed, 1813 passed, 26 skipped, 2 warnings, 484 subtests passed in 274.77s (0:04:34)",
+    "test_case_count_excluding_subtests": 1925,
+    "failed_test_case_count": 90,
+    "failure_assertion_count": 96,
+    "skipped_test_case_count": 26,
+    "seconds": 274.666,
+    "width_test_cases": 133,
+    "width_failed_cases": 0,
+    "failures": {
+      "tests.test_basis_family_plugin_registry.BasisFamilyPluginRegistryTests::test_07_primary_wrappers_have_no_family_specific_allow_list_or_tag_branch": [
+        "AssertionError: 'basis_artifact_tag_for_family' not found in '#!/bin/bash\\nset -euo pipefail\\n\\ncd \"$(dirname \"$0\")\"\\n\\n# vvv THOG make allocator-fragmentation protection a global, explicit wrapper policy\\nTHOG2_CUDA_EXPANDABLE_SEGMENT=\"enabled\"\\nTHOG2_CUDA_EXPANDABLE_SEGMENT_FILTERED_ARGS=()\\nTHOG2_CUDA_EXPANDABLE_SEGMENT_HELP=false\\nif [[ -n \"${P",
+        "AssertionError: 'basis_artifact_tag_for_family' not found in '#!/bin/bash\\nset -euo pipefail\\n\\ncd \"$(dirname \"$0\")\"\\n\\n# vvv THOG make allocator-fragmentation protection a global, explicit wrapper policy\\nTHOG2_CUDA_EXPANDABLE_SEGMENT=\"enabled\"\\nTHOG2_CUDA_EXPANDABLE_SEGMENT_FILTERED_ARGS=()\\nTHOG2_CUDA_EXPANDABLE_SEGMENT_HELP=false\\nif [[ -n \"${P"
+      ],
+      "tests.test_console_and_descriptor_help::test_wrapper_registry_emits_descriptor_table_once": [
+        "AssertionError: assert 0 == 1\n +  where 0 = <built-in method count of str object at 0x216fce10>('getopt / artifact descriptor registry')\n +    where <built-in method count of str object at 0x216fce10> = 'geometry registry (geometry_registry_v5)\\n=======================================\\n\\nselectors\\n---------\\ndepth-comp...on:\\n  --torch-compile fal"
+      ],
+      "tests.test_console_model_summary::test_model_summary_aligns_optimizer_and_reports_cosine_decay": [
+        "AttributeError: 'types.SimpleNamespace' object has no attribute 'layer_dropout_n_strata'"
+      ],
+      "tests.test_console_progress_layout.ConsoleProgressLayoutTests::test_current_layer_count_is_appended_only_when_plastic_is_enabled": [
+        "AttributeError: 'types.SimpleNamespace' object has no attribute 'active_public_coordinates'"
+      ],
+      "tests.test_console_progress_layout.ConsoleProgressLayoutTests::test_sampled_values_are_emitted_once_after_a_plastic_transition": [
+        "AttributeError: 'types.SimpleNamespace' object has no attribute 'active_public_coordinates'"
+      ],
+      "tests.test_console_progress_layout.ConsoleProgressLayoutTests::test_semantic_qkv_bypass_is_suppressed_only_for_depth_reporting": [
+        "AttributeError: module 'run_thog2_owt' has no attribute '_optimisation_fields'"
+      ],
+      "tests.test_console_progress_layout.ConsoleProgressLayoutTests::test_validation_reuses_latest_step_mean_and_uses_two_level_yellow_emphasis": [
+        "AssertionError: False is not true"
+      ],
+      "tests.test_console_progress_pretty_rows::test_training_console_row_uses_hh_mm_ss_after_step_one_and_colors_negative_delta_bright_green": [
+        "AssertionError: assert False\n +  where False = <built-in method startswith of str object at 0x7f1427be1fb0>('T       2  00:03:16  tok/s=          63')\n +    where <built-in method startswith of str object at 0x7f1427be1fb0> = 'T     2      196s    0.054h  tok/s=    63  toks=     24,576  loss= 10.8831  \\x1b[1;38;2;0;255;0m\u0394=  -0.123\\x1b[0m  lr= 5.71"
+      ],
+      "tests.test_console_progress_pretty_rows::test_step_one_console_row_keeps_elapsed_seconds": [
+        "AssertionError: assert False\n +  where False = <built-in method startswith of str object at 0x7f14279c6760>('T       1        9s')\n +    where <built-in method startswith of str object at 0x7f14279c6760> = 'T     1        9s    0.003h  loss= 10.8831  \u0394=     n/a'.startswith"
+      ],
+      "tests.test_console_progress_pretty_rows::test_validation_console_row_uses_bold_explicit_rgb_yellow_for_validation_loss": [
+        "AssertionError: assert False\n +  where False = <built-in method startswith of str object at 0x7f14279c7e10>('\\x1b[33mV       2  00:03:16  tok/s=          63')\n +    where <built-in method startswith of str object at 0x7f14279c7e10> = '\\x1b[33mV     2      196s    0.054h  tok/s=    63  toks=     24,576  loss= 10.8831  \\x1b[1;93mvalidation loss= 10.7"
+      ],
+      "tests.test_dense_weight_curves::test_dense_snapshot_reuses_all_six_families_with_integer_layer_points": [
+        "KeyError: 'model_feature'"
+      ],
+      "tests.test_dense_weight_curves::test_dense_figure_uses_crosses_with_per_step_connectors": [
+        "AssertionError: assert 4 == 2\n +  where 4 = len((Scatter({\\n    'hovertemplate': 'r1_c1<br>step 10<br>layer=%{x:.0f}<br>weight=%{y:.7g}<extra></extra>',\\n    'legendgro...nd': False,\\n    'x': [1.0, 2.0, 3.0],\\n    'y': [0.00123594980686903, -0.006092382594943047, -0.0011063809506595135]\\n})))\n +    where (Scatter({\\n    'hovertemplate': 'r1_c1<br>"
+      ],
+      "tests.test_dense_weight_curves::test_dense_scalar_coordinates_share_one_step_colour_and_legend_row": [
+        "AssertionError: assert 3 == 2\n +  where 3 = len((Scatter({\\n    'hovertemplate': 'r1_c1<br>step 17<br>layer=%{x:.0f}<br>weight=%{y:.7g}<extra></extra>',\\n    'legendgro...d': False,\\n    'x': [1.0, 2.0, 3.0],\\n    'y': [-0.002250351943075657, -0.009117048233747482, -0.003397060092538595]\\n})))\n +    where (Scatter({\\n    'hovertemplate': 'r1_c1<br>"
+      ],
+      "tests.test_depth_weight_curves_and_observational_probes::test_scalar_selection_is_fixed_per_run_and_run_specific": [
+        "assert 4 == 3\n +  where 4 = len(((0, 6), (2, 2), (2, 4), (0, 0)))"
+      ],
+      "tests.test_depth_weight_curves_v2::test_all_attention_charts_share_one_head": [
+        "assert 4 == 3\n +  where 4 = len(((0, 6), (2, 2), (2, 4), (0, 0)))"
+      ],
+      "tests.test_depth_weight_curves_v2::test_plotly_history_emphasises_newest_and_oldest": [
+        "AssertionError: assert 4 == 2\n +  where 4 = len([Scatter({\\n    'hovertemplate': 'r0_c6<br>U10 \u00b7 oldest<br>layer=%{x:.3f}<br>weight=%{y:.7g}<extra></extra>',\\n    'line... 0.03571978956460953, 0.03571978956460953, 0.03571978956460953,\\n          0.03571978956460953, 0.03571978956460953]\\n})])"
+      ],
+      "tests.test_direct_thog_mlp_application::test_training_wrappers_expose_default_on_direct_factorised_mlp_without_getopts_letter": [
+        "assert 'DIRECT_FACTORISED_MLP=\"${THOG2_DIRECT_FACTORISED_MLP:-true}\"' in '#!/bin/bash\\nset -euo pipefail\\n\\ncd \"$(dirname \"$0\")\"\\n\\n# vvv THOG make allocator-fragmentation protection a global...rue}\"\\n# \\'  --depth-materialisation-matmul true|false   DEPTH matrix materialisation; default true\\' \\\\\\n# ^^^ THOG\\n'"
+      ],
+      "tests.test_geometry_registry_phase1.GeometryRegistryPhase1Tests::test_registry_console_report_is_complete_and_explicit": [
+        "AssertionError: 'axes / uncompressed axes' not found in 'geometry registry (geometry_registry_v5)\\n=======================================\\n\\nselectors\\n---------\\ndepth-compatible: selector may accompany DEPTH without implying a 3-D BLOCK/BLOCK_SET field\\nmaterializer:     generic systematic materializer exists for this exact selector\\nlegacy-only"
+      ],
+      "tests.test_instra_demand_runtime::test_twenty_four_warm_histories_resume_without_replaying_records": [
+        "ModuleNotFoundError: No module named 'wandb.sdk.internal.datastore'"
+      ],
+      "tests.test_instra_demand_runtime::test_replaced_remote_wandb_file_reopens_the_new_inode": [
+        "ModuleNotFoundError: No module named 'wandb.sdk.internal.datastore'"
+      ],
+      "tests.test_instra_firefox_acceptance::test_real_firefox_heatmap_and_weight_group_chart_overrides": [
+        "AssertionError: INSTRA server exited early (1)\nstdout:\n\nstderr:\nTraceback (most recent call last):\n  File \"/workspace/scratch/96b033f15391/thog2/run_thog2_dashboard.py\", line 214, in _start_node_agent\n    instra_node_agent.request(\"state\", timeout=1)\n  File \"/workspace/scratch/96b033f15391/thog2/instra_node_agent.py\", line 654, in request\n    with "
+      ],
+      "tests.test_instra_firefox_acceptance::test_real_firefox_renders_a_completed_finite_weight_capture": [
+        "AssertionError: INSTRA server exited early (1)\nstdout:\n\nstderr:\nTraceback (most recent call last):\n  File \"/workspace/scratch/96b033f15391/thog2/run_thog2_dashboard.py\", line 214, in _start_node_agent\n    instra_node_agent.request(\"state\", timeout=1)\n  File \"/workspace/scratch/96b033f15391/thog2/instra_node_agent.py\", line 654, in request\n    with "
+      ],
+      "tests.test_instra_firefox_acceptance::test_real_firefox_selected_thog_render_contract": [
+        "AssertionError: INSTRA server exited early (1)\nstdout:\n\nstderr:\nTraceback (most recent call last):\n  File \"/workspace/scratch/96b033f15391/thog2/run_thog2_dashboard.py\", line 214, in _start_node_agent\n    instra_node_agent.request(\"state\", timeout=1)\n  File \"/workspace/scratch/96b033f15391/thog2/instra_node_agent.py\", line 654, in request\n    with "
+      ],
+      "tests.test_instra_firefox_heatmap_diagnostics::test_real_firefox_heatmap_pipeline_diagnostics": [
+        "AssertionError: INSTRA server exited early (1)\nstdout:\n\nstderr:\nTraceback (most recent call last):\n  File \"/workspace/scratch/96b033f15391/thog2/run_thog2_dashboard.py\", line 214, in _start_node_agent\n    instra_node_agent.request(\"state\", timeout=1)\n  File \"/workspace/scratch/96b033f15391/thog2/instra_node_agent.py\", line 654, in request\n    with "
+      ],
+      "tests.test_instra_firefox_maximize_history::test_real_firefox_maximize_current_only_history_round_trip": [
+        "AssertionError: INSTRA server exited early (1)\nstdout:\n\nstderr:\nTraceback (most recent call last):\n  File \"/workspace/scratch/96b033f15391/thog2/run_thog2_dashboard.py\", line 214, in _start_node_agent\n    instra_node_agent.request(\"state\", timeout=1)\n  File \"/workspace/scratch/96b033f15391/thog2/instra_node_agent.py\", line 654, in request\n    with "
+      ],
+      "tests.test_instra_firefox_weight_controls::test_real_firefox_weight_group_and_chart_overrides_are_clickable": [
+        "AssertionError: INSTRA server exited early (1)\nstdout:\n\nstderr:\nTraceback (most recent call last):\n  File \"/workspace/scratch/96b033f15391/thog2/run_thog2_dashboard.py\", line 214, in _start_node_agent\n    instra_node_agent.request(\"state\", timeout=1)\n  File \"/workspace/scratch/96b033f15391/thog2/instra_node_agent.py\", line 654, in request\n    with "
+      ],
+      "tests.test_instra_firefox_weight_controls::test_real_firefox_explicit_weight_range_overrides_current_only_and_has_step_hover": [
+        "AssertionError: INSTRA server exited early (1)\nstdout:\n\nstderr:\nTraceback (most recent call last):\n  File \"/workspace/scratch/96b033f15391/thog2/run_thog2_dashboard.py\", line 214, in _start_node_agent\n    instra_node_agent.request(\"state\", timeout=1)\n  File \"/workspace/scratch/96b033f15391/thog2/instra_node_agent.py\", line 654, in request\n    with "
+      ],
+      "tests.test_instra_firefox_weight_controls::test_real_firefox_weight_settings_previews_show_current_curves": [
+        "AssertionError: INSTRA server exited early (1)\nstdout:\n\nstderr:\nTraceback (most recent call last):\n  File \"/workspace/scratch/96b033f15391/thog2/run_thog2_dashboard.py\", line 214, in _start_node_agent\n    instra_node_agent.request(\"state\", timeout=1)\n  File \"/workspace/scratch/96b033f15391/thog2/instra_node_agent.py\", line 654, in request\n    with "
+      ],
+      "tests.test_instra_firefox_weight_controls::test_real_firefox_rnd_changes_weight_coupling": [
+        "AssertionError: INSTRA server exited early (1)\nstdout:\n\nstderr:\nTraceback (most recent call last):\n  File \"/workspace/scratch/96b033f15391/thog2/run_thog2_dashboard.py\", line 214, in _start_node_agent\n    instra_node_agent.request(\"state\", timeout=1)\n  File \"/workspace/scratch/96b033f15391/thog2/instra_node_agent.py\", line 654, in request\n    with "
+      ],
+      "tests.test_instra_firefox_workspace_range::test_real_firefox_workspace_intersection_and_step_windows": [
+        "AssertionError: INSTRA server exited early (1)\nstdout:\n\nstderr:\nTraceback (most recent call last):\n  File \"/workspace/scratch/96b033f15391/thog2/run_thog2_dashboard.py\", line 214, in _start_node_agent\n    instra_node_agent.request(\"state\", timeout=1)\n  File \"/workspace/scratch/96b033f15391/thog2/instra_node_agent.py\", line 654, in request\n    with "
+      ],
+      "tests.test_instra_sep01_enhancements.InstraEnhancementTests::test_new_and_legacy_cli_spellings_and_effective_environment": [
+        "argparse.ArgumentError: argument --instrumentation__depth_weight_curves__coupling_pairs_per_matrix/--instrumentation--depth-weight-curves--coupling-pairs-per-matrix/--instrumentation-depth-weight-curves-coupling-pairs-per-matrix: conflicting option strings: --instrumentation__depth_weight_curves__coupling_pairs_per_matrix, --instrumentation--depth-",
+        "argparse.ArgumentError: argument --instrumentation__depth_weight_curves__coupling_pairs_per_matrix/--instrumentation--depth-weight-curves--coupling-pairs-per-matrix/--instrumentation-depth-weight-curves-coupling-pairs-per-matrix: conflicting option strings: --instrumentation__depth_weight_curves__coupling_pairs_per_matrix, --instrumentation--depth-",
+        "argparse.ArgumentError: argument --instrumentation__depth_weight_curves__coupling_pairs_per_matrix/--instrumentation--depth-weight-curves--coupling-pairs-per-matrix/--instrumentation-depth-weight-curves-coupling-pairs-per-matrix: conflicting option strings: --instrumentation__depth_weight_curves__coupling_pairs_per_matrix, --instrumentation--depth-",
+        "argparse.ArgumentError: argument --instrumentation__depth_weight_curves__coupling_pairs_per_matrix/--instrumentation--depth-weight-curves--coupling-pairs-per-matrix/--instrumentation-depth-weight-curves-coupling-pairs-per-matrix: conflicting option strings: --instrumentation__depth_weight_curves__coupling_pairs_per_matrix, --instrumentation--depth-",
+        "argparse.ArgumentError: argument --instrumentation__depth_weight_curves__coupling_pairs_per_matrix/--instrumentation--depth-weight-curves--coupling-pairs-per-matrix/--instrumentation-depth-weight-curves-coupling-pairs-per-matrix: conflicting option strings: --instrumentation__depth_weight_curves__coupling_pairs_per_matrix, --instrumentation--depth-",
+        "argparse.ArgumentError: argument --instrumentation__depth_weight_curves__coupling_pairs_per_matrix/--instrumentation--depth-weight-curves--coupling-pairs-per-matrix/--instrumentation-depth-weight-curves-coupling-pairs-per-matrix: conflicting option strings: --instrumentation__depth_weight_curves__coupling_pairs_per_matrix, --instrumentation--depth-"
+      ],
+      "tests.test_instra_sep30_feedback::test_chart_routes_hide_disabled_plastic_and_preserve_enabled_or_legacy_data": [
+        "KeyError: 'group'"
+      ],
+      "tests.test_jpeg_like_v1_wrappers.JpegLikeV1WrapperTests::test_registry_comment_and_help_expose_new_contract": [
+        "AssertionError: '# Registry:' not found in '#!/bin/bash\\nset -euo pipefail\\n\\ncd \"$(dirname \"$0\")\"\\n\\n# vvv THOG make allocator-fragmentation protection a global, explicit wrapper policy\\nTHOG2_CUDA_EXPANDABLE_SEGMENT=\"enabled\"\\nTHOG2_CUDA_EXPANDABLE_SEGMENT_FILTERED_ARGS=()\\nTHOG2_CUDA_EXPANDABLE_SEGMENT_HELP=false\\nif [[ -n \"${PYTORCH_CUDA_ALLOC_"
+      ],
+      "tests.test_jpeg_like_v1_wrappers.JpegLikeV1WrapperTests::test_scruffy_dry_run_propagates_geometry_compressor_group_and_y": [
+        "AssertionError: 'JPEG_LIKE_V1:       compressor=dct group=4 Y=2' not found in 'scruffy OWT train\\n  start time:                         03:48  06-10-26\\n  artifact:                           261006-0348_scruffy_JPEG_SMOKE___G0_chebyshev_G1_jpeg_like_MLP_UP_MLP_HIDDEN__d_owt_A_1_b_1_c_60_f_6_w_0__C_8_D_8_H_2_L_4__P_3_Q_4_J_2_O_2_X_4_Y_2_s_4__r_ds_z_"
+      ],
+      "tests.test_karitane_restart_launcher.KaritaneRestartLauncherTests::test_launcher_has_valid_shell_syntax_and_calls_dedicated_resume_module": [
+        "AssertionError: 127 != 0 : bash: /workspace/scratch/96b033f15391/thog2/current_DREEDLE_runstring.sh: No such file or directory"
+      ],
+      "tests.test_layer_dropout_wrappers.LayerDropoutWrapperTests::test_long_forms_and_forwarding_are_present": [
+        "AssertionError: '--layer-dropout-stratum-size' not found in '#!/bin/bash\\nset -euo pipefail\\n\\ncd \"$(dirname \"$0\")\"\\n\\n# vvv THOG make allocator-fragmentation protection a global, explicit wrapper policy\\nTHOG2_CUDA_EXPANDABLE_SEGMENT=\"enabled\"\\nTHOG2_CUDA_EXPANDABLE_SEGMENT_FILTERED_ARGS=()\\nTHOG2_CUDA_EXPANDABLE_SEGMENT_HELP=false\\nif [[ -n \"${PY"
+      ],
+      "tests.test_layer_dropout_wrappers.LayerDropoutWrapperTests::test_short_layer_dropout_controls_are_native_getopts": [
+        "AssertionError: 'L:s:M:H' not found in '#!/bin/bash\\nset -euo pipefail\\n\\ncd \"$(dirname \"$0\")\"\\n\\n# vvv THOG make allocator-fragmentation protection a global, explicit wrapper policy\\nTHOG2_CUDA_EXPANDABLE_SEGMENT=\"enabled\"\\nTHOG2_CUDA_EXPANDABLE_SEGMENT_FILTERED_ARGS=()\\nTHOG2_CUDA_EXPANDABLE_SEGMENT_HELP=false\\nif [[ -n \"${PYTORCH_CUDA_ALLOC_CONF"
+      ],
+      "tests.test_optimizer_wrapper.OptimizerWrapperTests::test_existing_run_scruffy_scripts_remain_present": [
+        "AssertionError: False is not true"
+      ],
+      "tests.test_optimizer_wrapper.OptimizerWrapperTests::test_full_wrappers_retain_body_and_native_optimizer_help": [
+        "AssertionError: 392 not greater than 400"
+      ],
+      "tests.test_optimizer_wrapper.OptimizerWrapperTests::test_help_contains_old_and_new_controls": [
+        "AssertionError: 'capital -C' not found in '#!/bin/bash\\nset -euo pipefail\\n\\ncd \"$(dirname \"$0\")\"\\n\\n# vvv THOG make allocator-fragmentation protection a global, explicit wrapper policy\\nTHOG2_CUDA_EXPANDABLE_SEGMENT=\"enabled\"\\nTHOG2_CUDA_EXPANDABLE_SEGMENT_FILTERED_ARGS=()\\nTHOG2_CUDA_EXPANDABLE_SEGMENT_HELP=false\\nif [[ -n \"${PYTORCH_CUDA_ALLOC_C"
+      ],
+      "tests.test_optimizer_wrapper.OptimizerWrapperTests::test_long_optimizer_controls_and_explicit_lr_override": [
+        "AssertionError: 'optimizer:          rmsprop  momentum=0.95' not found in 'scruffy OWT train\\n  start time:                         03:48  06-10-26\\n  artifact:                           261006-0348_scruffy_NO_PREFIX___DENSE__d_owt_A_1_b_1_c_77_f_7_w_0__C_1024_D_768_H_12_L_12__r_ds_z_tld_S_12__OPT_RMSPROP\\n  experiment:                         NO_P"
+      ],
+      "tests.test_optimizer_wrapper.OptimizerWrapperTests::test_short_optimizer_control_uses_optimizer_defaults": [
+        "AssertionError: 'optimizer:          sgd' not found in 'scruffy OWT train\\n  start time:                         03:48  06-10-26\\n  artifact:                           261006-0348_scruffy_NO_PREFIX___DENSE__d_owt_A_1_b_1_c_1000_f_100_w_0__C_1024_D_768_H_12_L_12__r_ds_z_tld_S_12__OPT_SGD\\n  experiment:                         NO_PREFIX\\n  model/pres"
+      ],
+      "tests.test_picton_cli_wrapper_contract::test_picton_canonical_host_wrappers_share_the_same_getopts_letters_and_long_options": [
+        "StopIteration"
+      ],
+      "tests.test_picton_cli_wrapper_contract::test_picton_all_known_shell_wrappers_are_syntactically_valid": [
+        "AssertionError: PosixPath('/workspace/scratch/96b033f15391/thog2/run_scruffy_dense_sheet_l144_smoke_owt.sh')\nassert False\n +  where False = is_file()\n +    where is_file = PosixPath('/workspace/scratch/96b033f15391/thog2/run_scruffy_dense_sheet_l144_smoke_owt.sh').is_file"
+      ],
+      "tests.test_picton_wrapper_defaults_and_nonfinite_policy::test_current_training_wrappers_default_to_fast_discard_eval_100_and_checkpoint_1000": [
+        "AssertionError: assert 'fast discard:       true' in 'scruffy OWT train\\n  start time:                         03:48  06-10-26\\n  artifact:                           FAKE_...d_tokens 1024 --plastic__layer_count_probe_radius 1 --layer-dropout-resample-steps 1 --log-timestamp 20261006_034858\\n'"
+      ],
+      "tests.test_plastic_depth_interfaces::test_obsolete_hold_control_and_internal_sampling_seed_are_not_public_cli_options": [
+        "AssertionError: assert '--plastic-l...hold-updates' not in 'usage: __ma...e and exit\\n'\n  \n  '--plastic-layer-count-hold-updates' is contained here:\n    e\n    \u2014       --plastic-layer-count-hold-updates N                                                                 minimum updates to hold a committed layer count\n  ?         ++++++++++++++++++++++"
+      ],
+      "tests.test_premat_processing::test_processing_throughput_round_trips_through_local_store": [
+        "AssertionError: assert ({'optimizer_...5234375, ...}) == ({'optimizer_...d': 13001.25})\n  \n  At index 0 diff: {'optimizer_update': 1, 'tokens_per_second': 12345.5, 'wall_time': 1791258575.6910067, 'relative_wall_seconds': 0.0005316734313964844, 'process_time_seconds': 0.0006105810002736689} != {'optimizer_update': 1, 'tokens_per_second': 12345.5}\n "
+      ],
+      "tests.test_premat_processing::test_processing_normalizer_emits_graph_and_download_data": [
+        "AssertionError: assert '' == 80.0"
+      ],
+      "tests.test_premat_processing::test_processing_throughput_workspace_multirun_contract": [
+        "assert '/api/processing-throughput' in '# vvv THOG\\n\"\"\"Serve INSTRA through the preserved dashboard server with explicit Processing resource attribution asse...ransport\\n        _network_service.close()\\n\\n\\nif __name__ == \"__main__\":\\n    raise SystemExit(main())\\n# ^^^ THOG\\n'"
+      ],
+      "tests.test_premat_processing::test_processing_group_sits_after_val_and_throughput_has_no_curve_markers": [
+        "assert 'const processing_anchor = group_section(\"val\") || group_section(\"train\");' in '// vvv THOG\\n\"use strict\";\\n\\n// W&B-like navigation for all scalar/history and native system charts found in\\n// the...h_metric_groups();\\n    });\\n    // ^^^ THOG\\n    setTimeout(refresh_metric_groups, 50);\\n  }, 0);\\n});\\n// ^^^ THOG\\n'"
+      ],
+      "tests.test_premat_processing::test_ncu_semantic_exports_select_dominant_main_and_premat": [
+        "ValueError: /tmp/pytest-of-root/pytest-15/test_ncu_semantic_exports_sele0/raw.csv: launch is missing registers-per-thread metric; collect LaunchStats"
+      ],
+      "tests.test_premat_processing_resource_normalizer::test_normalizer_emits_exact_owners_stream_resource_csv_and_idle_intervals": [
+        "assert 4 == 2"
+      ],
+      "tests.test_processing_ncu_2024_repair::test_ncu_2024_wide_export_normalizes_resources_and_semantics": [
+        "ValueError: /tmp/pytest-of-root/pytest-15/test_ncu_2024_wide_export_norm0/raw.csv: launch is missing registers-per-thread metric; collect LaunchStats"
+      ],
+      "tests.test_processing_ncu_semantic_suffix_integration::test_wide_ncu_suffix_semantics_join_main_and_premat": [
+        "ValueError: /tmp/pytest-of-root/pytest-15/test_wide_ncu_suffix_semantics0/raw.csv: launch is missing registers-per-thread metric; collect LaunchStats"
+      ],
+      "tests.test_resume_and_fork_cli_compatibility.ResumeAndForkCliCompatibilityTests::test_lifecycle_parser_accepts_all_preserved_master_long_controls": [
+        "AssertionError: False is not true : lifecycle parser is missing preserved wrapper long options: ['--chaos', '--no-chaos', '--thogopt']"
+      ],
+      "tests.test_resume_and_fork_ddp_integration.ResumeAndForkDdpIntegrationTests::test_two_rank_cpu_resume_preserves_logical_run": [
+        "AssertionError: 1 != 0 : /opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python: Error while finding module specification for 'torch.distributed.run' (ModuleNotFoundError: No module named 'torch')"
+      ],
+      "tests.test_semantic_qkv_adapter_bypass_option::test_bypass_semantic_qkv_adapter_false_selects_legacy_adapter_path": [
+        "AssertionError: Expected 'reconstructed_attention_input_bias' to be called once. Called 0 times."
+      ],
+      "tests.test_sheet_stage3_compatibility.Stage3CompatibilityTests::test_s3_09_incompatible_checkpoint_rejection": [
+        "ValueError: n_layer must be divisible by layer_dropout_stratum_size; got n_layer=3, stratum_size=2"
+      ],
+      "tests.test_sheet_stage5_ddp.Stage5DdpTests::test_s5_08_ddp_construction_identity": [
+        "AssertionError: DDP worker failed\ncommand: /opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python -m torch.distributed.run --standalone --nproc-per-node=2 /workspace/scratch/96b033f15391/thog2/tests/stage5_ddp_worker.py --mode construction --output-dir /tmp/tmpiri_7158 --evidence /tmp/tmpiri_7158/construction.json\nstdout:\n\nstderr:"
+      ],
+      "tests.test_sheet_stage5_ddp.Stage5DdpTests::test_s5_09_ddp_update_matches_single_process_global_batch": [
+        "AssertionError: DDP worker failed\ncommand: /opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python -m torch.distributed.run --standalone --nproc-per-node=2 /workspace/scratch/96b033f15391/thog2/tests/stage5_ddp_worker.py --mode update --output-dir /tmp/tmp270cfegp --evidence /tmp/tmp270cfegp/update.json\nstdout:\n\nstderr:\n/opt/codex/"
+      ],
+      "tests.test_sheet_stage5_ddp.Stage5DdpTests::test_s5_10_ddp_state_remains_synchronized": [
+        "AssertionError: DDP worker failed\ncommand: /opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python -m torch.distributed.run --standalone --nproc-per-node=2 /workspace/scratch/96b033f15391/thog2/tests/stage5_ddp_worker.py --mode update --output-dir /tmp/tmpqy4q0oik --evidence /tmp/tmpqy4q0oik/update.json\nstdout:\n\nstderr:\n/opt/codex/"
+      ],
+      "tests.test_sheet_stage5_ddp.Stage5DdpTests::test_s5_11_ddp_resume_preserves_lifecycle_and_state": [
+        "AssertionError: DDP worker failed\ncommand: /opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python -m torch.distributed.run --standalone --nproc-per-node=2 /workspace/scratch/96b033f15391/thog2/tests/stage5_ddp_worker.py --mode resume --output-dir /tmp/tmpw1j_najw --evidence /tmp/tmpw1j_najw/resume.json\nstdout:\n\nstderr:\n/opt/codex/"
+      ],
+      "tests.test_sheet_stage5_ddp.Stage5DdpTests::test_s5_12_uneven_checkpoint_segment_boundary_under_ddp": [
+        "AssertionError: DDP worker failed\ncommand: /opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python -m torch.distributed.run --standalone --nproc-per-node=2 /workspace/scratch/96b033f15391/thog2/tests/stage5_ddp_worker.py --mode boundary --output-dir /tmp/tmpyb53lhba --evidence /tmp/tmpyb53lhba/boundary.json\nstdout:\n\nstderr:\n/opt/co"
+      ],
+      "tests.test_sheet_stage5_failures.Stage5FailurePropagationTests::test_s5_rank_local_nonfinite_state_fails_collectively": [
+        "AssertionError: distributed failure mode 'nonfinite_rank' lacked diagnostic 'non-finite training loss on at least one rank'\n\n/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python: Error while finding module specification for 'torch.distributed.run' (ModuleNotFoundError: No module named 'torch')"
+      ],
+      "tests.test_sheet_stage5_failures.Stage5FailurePropagationTests::test_s5_structure_disagreement_fails_all_ranks_without_hang": [
+        "AssertionError: distributed failure mode 'structure_mismatch' lacked diagnostic 'distributed injected structure differs across ranks'\n\n/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python: Error while finding module specification for 'torch.distributed.run' (ModuleNotFoundError: No module named 'torch')"
+      ],
+      "tests.test_sheet_stage6_runner_scripts.RunnerScriptTests::test_s6_33_dense_runner_resolves_canonical_identity_and_shared_defaults": [
+        "AssertionError: 'scruffy_TEST_DENSE' not found in 'scruffy OWT train\\n  start time:                         03:50  06-10-26\\n  artifact:                           261006-0350_scruffy_TEST___DENSE__d_owt_A_2_b_1_c_60_f_6_w_0__C_8_D_8_H_2_L_2__r_ds_z_tld_S_1\\n  experiment:                         TEST\\n  model/preset/basis:                 dense / de"
+      ],
+      "tests.test_sheet_stage6_runner_scripts.RunnerScriptTests::test_s6_34_depth_runner_ignores_non_depth_orders_by_default": [
+        "AssertionError: 'scruffy_TEST_G0_chebyshev' not found in 'scruffy OWT train\\n  start time:                         03:50  06-10-26\\n  artifact:                           261006-0350_scruffy_TEST___G0_chebyshev__d_owt_A_2_b_1_c_60_f_6_w_0__C_8_D_8_H_2_L_2__P_2_DLB_0__r_ds_z_did_S_1\\n  experiment:                         TEST\\n  model/preset/basis:  "
+      ],
+      "tests.test_stage6_plastic_depth_progress::test_plastic_probe_losses_score_z_sample_layer_and_samples_are_ordered": [
+        "AssertionError: assert 'layers = 4' in 'T      7  0926       42s    0.012h  \u0394=  0.1s  tok/s= 12345  toks=     86,016  loss=  9.8765  \\x1b[1;38;2;0;255;0m\u0394=  ...0.889, \\x1b[1m\\x1b[37;1m\\x1b[4m9.235\\x1b[m, +91.111]  score_z [L-3, L+3] = [-02.50, \\x1b[1;38;2;0;255;0m+01.25\\x1b[0m]'"
+      ],
+      "tests.test_stage6_plastic_depth_progress::test_huge_score_z_uses_fixed_width_scientific_not_row_blowout": [
+        "AssertionError: assert 'score_z [L-3, L+3] = [+4.39e+10, -3.98e+10]' in 'T      7  0926       42s    0.012h  \u0394=  0.1s  tok/s= 12345  toks=     86,016  loss=  9.8765  \\x1b[1;38;2;0;255;0m\u0394=  ... \\x1b[1m\\x1b[37;1m\\x1b[4m9.235\\x1b[m, +91.111]  score_z [L-3, L+3] = [\\x1b[1;38;2;0;255;0m+4.39e+10\\x1b[0m, -3.98e+10]'"
+      ],
+      "tests.test_stage6_plastic_depth_progress::test_optimizer_progress_omits_depth_samples_when_absent": [
+        "AssertionError: assert False\n +  where False = <built-in method endswith of str object at 0x241db1c0>('score_z [L-3, L+3] = [    -2.50,     +1.25]')\n +    where <built-in method endswith of str object at 0x241db1c0> = 'T      7  0926       42s    0.012h  \u0394=  0.1s  tok/s= 12345  toks=     86,016  loss=  9.8765  \\x1b[1;38;2;0;255;0m\u0394=  ...0.889, \\x1b"
+      ],
+      "tests.test_stage6_plastic_depth_progress::test_optimizer_progress_omits_probe_losses_when_absent": [
+        "AssertionError: assert False\n +  where False = <built-in method endswith of str object at 0x7f1420049d30>('\\tsample_layer = [  1.3,   4.6,   8.9, 100.0]')\n +    where <built-in method endswith of str object at 0x7f1420049d30> = 'T      7  0926       42s    0.012h  \u0394=  0.1s  tok/s= 12345  toks=     86,016  loss=  9.8765  \\x1b[1;38;2;0;255;0m\u0394=  -0.1"
+      ],
+      "tests.test_stage6_plastic_depth_progress::test_optimizer_progress_omits_score_z_when_absent": [
+        "ValueError: substring not found"
+      ],
+      "tests.test_stage6_plastic_depth_progress::test_missing_edge_probe_loss_and_score_z_use_dash_placeholders_and_green_only": [
+        "AssertionError: assert '\\tprobe_losses [L-1, L, L+1] = [      -,   9.500,\\x1b[1;38;2;0;255;0m   9.250\\x1b[0m]' in 'T      7  0926       42s    0.012h  \u0394=  0.1s  tok/s= 12345  toks=     86,016  loss=  9.8765  \\x1b[1;38;2;0;255;0m\u0394=  ...[37;1m\\x1b[4m9.500\\x1b[m, \\x1b[38;2;0;180;0m-0.250\\x1b[m]  score_z [L-1, L+1] = [-, \\x1b[1;38;2;0;255;0m+00.12\\x1b["
+      ],
+      "tests.test_stage8_mlp_channel_order_and_wrapper_loops::test_stage8_training_wrappers_use_final_preset_as_single_architecture_selector": [
+        "assert '-p PRESET=${GEOMETRY_PRESET}' in '#!/bin/bash\\nset -euo pipefail\\n\\ncd \"$(dirname \"$0\")\"\\n\\n# vvv THOG make allocator-fragmentation protection a global...rue}\"\\n# \\'  --depth-materialisation-matmul true|false   DEPTH matrix materialisation; default true\\' \\\\\\n# ^^^ THOG\\n'"
+      ],
+      "tests.test_stage8_mlp_channel_order_and_wrapper_loops::test_stage8_training_wrappers_share_the_six_order_letters": [
+        "assert '-P O_DEPTH=${O_DEPTH}' in '#!/bin/bash\\nset -euo pipefail\\n\\ncd \"$(dirname \"$0\")\"\\n\\n# vvv THOG make allocator-fragmentation protection a global...rue}\"\\n# \\'  --depth-materialisation-matmul true|false   DEPTH matrix materialisation; default true\\' \\\\\\n# ^^^ THOG\\n'"
+      ],
+      "tests.test_stage8_mlp_channel_order_and_wrapper_loops::test_stage8_training_wrappers_loop_dense_once_and_compact_presets_across_depth_orders": [
+        "assert 'PRESET_VALUES=()' in '#!/bin/bash\\nset -euo pipefail\\n\\ncd \"$(dirname \"$0\")\"\\n\\n# vvv THOG make allocator-fragmentation protection a global...rue}\"\\n# \\'  --depth-materialisation-matmul true|false   DEPTH matrix materialisation; default true\\' \\\\\\n# ^^^ THOG\\n'"
+      ],
+      "tests.test_stage8_training_instrumentation_selector::test_stage8_training_wrappers_expose_one_unambiguous_instrumentation_selector": [
+        "assert 'M:' not in ' alphabet\\n...an execution'\n  \n  'M:' is contained here:\n    ER_MOMENTUM:-0.9}\"\n  ?           ++\n    OPTIMIZER_LR_EXPLICIT=false\n    OPTIMIZER_MIN_LR_EXPLICIT=false\n    ...\n  \n  ...Full output truncated (267 lines hidden), use '-vv' to show"
+      ],
+      "tests.test_stage8_wrapper_shell_syntax::test_stage8_training_wrappers_make_logging_backend_and_schedule_controls_explicit": [
+        "assert 'INSTRUMENTATION=\"tensorboard\"' in '#!/bin/bash\\nset -euo pipefail\\n\\ncd \"$(dirname \"$0\")\"\\n\\n# vvv THOG make allocator-fragmentation protection a global...rue}\"\\n# \\'  --depth-materialisation-matmul true|false   DEPTH matrix materialisation; default true\\' \\\\\\n# ^^^ THOG\\n'"
+      ],
+      "tests.test_stage8_wrapper_shell_syntax::test_stage8_training_wrappers_expose_all_six_semantic_order_controls": [
+        "assert 'O_DEPTH=32' in '#!/bin/bash\\nset -euo pipefail\\n\\ncd \"$(dirname \"$0\")\"\\n\\n# vvv THOG make allocator-fragmentation protection a global...rue}\"\\n# \\'  --depth-materialisation-matmul true|false   DEPTH matrix materialisation; default true\\' \\\\\\n# ^^^ THOG\\n'"
+      ],
+      "tests.test_stage8_wrapper_shell_syntax::test_stage8_training_wrappers_auto_correct_dense_residual_source": [
+        "assert 'true_layer_depth' in '#!/bin/bash\\nset -euo pipefail\\n\\ncd \"$(dirname \"$0\")\"\\n\\n# vvv THOG make allocator-fragmentation protection a global...rue}\"\\n# \\'  --depth-materialisation-matmul true|false   DEPTH matrix materialisation; default true\\' \\\\\\n# ^^^ THOG\\n'"
+      ],
+      "tests.test_stage8_wrappers_and_run_config::test_stage8_run_config_records_dct_full_block_identity_in_manifest_and_artifact_name": [
+        "AssertionError: assert False\n +  where False = <built-in method startswith of str object at 0x7f1424c203f0>((('260708-0904_' + 'NEL') + 'SON_DCT_FULL_BLOCK_'))\n +    where <built-in method startswith of str object at 0x7f1424c203f0> = '260708-0904_scruffy_NELSON___G0_dct_full_block__d_owt_A_160_b_12_c_60_f_6_w_1__C_256_D_16_H_2_L_4__P_3_Q_8_J_4_O_3"
+      ],
+      "tests.test_stage8_wrappers_and_run_config::test_stage8_semantic_order_defaults_are_recorded_in_manifest_identity_and_training_config": [
+        "AssertionError: assert 'G0_chebyshev_full_block' == 'CHEBY_FULL_BLOCK'\n  \n  - CHEBY_FULL_BLOCK\n  + G0_chebyshev_full_block"
+      ],
+      "tests.test_stage8_wrappers_and_run_config::test_stage8_semantic_order_overrides_are_recorded_in_manifest_artifact_identity_and_training_config": [
+        "AssertionError: assert 'G0_chebyshev_full_block' == 'CHEBY_FULL_BLOCK'\n  \n  - CHEBY_FULL_BLOCK\n  + G0_chebyshev_full_block"
+      ],
+      "tests.test_thogopt_integration::test_public_cli_history_arguments_and_reset_scope": [
+        "SystemExit: 2"
+      ],
+      "tests.test_thogopt_lifecycle::test_fresh_resume_reset_fork_and_capture": [
+        "assert 0 == 6\n +  where 0 = len({})"
+      ],
+      "tests.test_train_owt_public_wrapper.PublicTrainOwtWrapperTests::test_fresh_dry_run_preserves_master_cli_and_aligns_startup_values": [
+        "AssertionError: False is not true"
+      ],
+      "tests.test_vectorise_per_head_materialisation::test_training_wrappers_expose_default_on_vectorise_per_head_materialisation_without_getopts_letter": [
+        "assert 'VECTORISE_PER_HEAD_MATERIALISATION=\"${THOG2_VECTORISE_PER_HEAD_MATERIALISATION:-true}\"' in '#!/bin/bash\\nset -euo pipefail\\n\\ncd \"$(dirname \"$0\")\"\\n\\n# vvv THOG make allocator-fragmentation protection a global...rue}\"\\n# \\'  --depth-materialisation-matmul true|false   DEPTH matrix materialisation; default true\\' \\\\\\n# ^^^ THOG\\n'"
+      ],
+      "tests.test_wrapper_learning_rate_and_batch_grids::test_run_config_artifact_contains_two_digit_learning_rate_code": [
+        "AssertionError: assert '_LR_70_' in '_d_owt_A_160_b_12_c_70_f_7_w_10__C_256_D_768_H_12_L_72__P_16_DLB_0__r_ds_z_tld_S_12_'"
+      ],
+      "tests.test_wrapper_learning_rate_and_batch_grids::test_run_config_default_learning_rate_uses_lr_60_artifact_code": [
+        "AssertionError: assert '_LR_60_' in '_d_owt_A_160_b_12_c_60_f_6_w_10__C_256_D_768_H_12_L_72__P_16_DLB_0__r_ds_z_tld_S_12_'"
+      ],
+      "tests.test_wrapper_learning_rate_and_batch_grids::test_wrappers_expose_lr_and_min_lr_codes_and_nest_lr_and_batch_grid_axes": [
+        "assert 'LEARNING_RATE_CODES=\"60\"' in '#!/bin/bash\\nset -euo pipefail\\n\\ncd \"$(dirname \"$0\")\"\\n\\n# vvv THOG make allocator-fragmentation protection a global...rue}\"\\n# \\'  --depth-materialisation-matmul true|false   DEPTH matrix materialisation; default true\\' \\\\\\n# ^^^ THOG\\n'"
+      ]
+    }
+  },
+  "new_failed_test_cases": [],
+  "fixed_failed_test_cases": [
+    "tests.test_chaos_bump_sampling::test_canonical_shell_wrapper_routes_exact_namespace_and_rejects_alias",
+    "tests.test_hyperblock_direct_factorised_mlp::test_wrapper_exposes_default_off_boolean_option",
+    "tests.test_hyperblock_wrapper::test_hyperblock_wrapper_help_and_bash_syntax",
+    "tests.test_layer_dropout_wrappers.LayerDropoutWrapperTests::test_short_controls_and_long_resample_parse_before_help",
+    "tests.test_plastic_cli_console_refinements::test_wrapper_help_covers_every_registered_plastic_option",
+    "tests.test_plastic_depth_interfaces::test_wrapper_help_and_shell_syntax_cover_plastic_depth",
+    "tests.test_plastic_depth_same_batch_all_probes::test_train_owt_wrapper_routes_same_batch_with_wall_time_controls_after_separator",
+    "tests.test_plastic_depth_wrapper_options.PlasticDepthWrapperOptionsTests::test_canonical_wrapper_help_accepts_double_underscore_controls",
+    "tests.test_plastic_depth_wrapper_options.PlasticDepthWrapperOptionsTests::test_dormant_initial_and_max_controls_do_not_block_instrumentation_modes"
+  ],
+  "inherited_failures_only": true,
+  "inherited_failure_scope": "Existing artifact/CLI snapshots, non-width model/options and optimizer expectations, PREMAT and launch paths, plus AF_UNIX-dependent DDP and Instra host-agent cases. See exact messages below.",
+  "launcher_fix": "train_OWT_core.sh is executable in the release tree; the canonical wrapper no longer receives Permission denied on a clean clone.",
+  "permission_fix_exposed_inherited_help_assertion": {
+    "test": "tests.test_optimizer_wrapper.OptimizerWrapperTests::test_help_contains_old_and_new_controls",
+    "baseline_with_executable_bit_exit_code": 1,
+    "baseline_message_contains_same_assertion": true,
+    "note": "The clean baseline initially stops with exit 126. Once executable permission is supplied, the same unchanged baseline fails the current stale help-text assertion."
+  },
+  "final_focused_acceptance": {
+    "command": "python -m pytest -q tests/test_residual_width.py tests/test_residual_width_integration.py tests/test_residual_width_browser.py --junitxml=width_acceptance_final.xml --tb=short",
+    "passed": 135,
+    "failed": 0,
+    "skipped": 0,
+    "seconds": 34.92,
+    "note": "Includes all 133 width cases from the full suite plus two final explicit-reference discarded-energy fixtures (constant-mode/general orthonormal basis, D=600, 256-feature tiles, bounded token/grid samples). No runtime implementation changed after the full suite."
+  }
+}

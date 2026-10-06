@@ -834,7 +834,19 @@ class TrainerStepMixin:
         end()
     # ^^^ THOG
 
+    # vvv THOG disabled capture creates no hooks, samples or rolling buffers
     def train_one_update(self) -> Dict[str, Any]:
+        if not vars(self.config).get("width_enabled", False):
+            return self._train_one_update_without_width_capture()
+        from .width_instrumentation import width_instrumentation_for
+        instrumentation = width_instrumentation_for(self)
+        if instrumentation is None:
+            return self._train_one_update_without_width_capture()
+        return instrumentation.train_one_update(self._train_one_update_without_width_capture)
+    # ^^^ THOG
+
+    # def train_one_update(self) -> Dict[str, Any]:
+    def _train_one_update_without_width_capture(self) -> Dict[str, Any]:
         # vvv THOG stale transition samples and per-probe heatmap progress never survive into another optimizer attempt
         self._plastic_depth_pending_console_sampled_values = None
         self._depth_probe_optimizer_update = None
