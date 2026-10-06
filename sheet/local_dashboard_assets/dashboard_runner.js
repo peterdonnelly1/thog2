@@ -120,10 +120,18 @@
     if (presets.length===1 && presets[0]==="dense" || parameters["--model-type"]==="dense")
       for (const key of Object.keys(parameters)) if (snapshot?.catalogue[key]?.dense_compatible===false)
         errors.push(`${key} is not applicable to a dense-only Recipe`);
-    if (presets.some(preset=>preset !== "dense") && parameters["--model-type"] !== "dense" &&
+    // vvv THOG require the selected width axis without implicitly selecting fixed depth
+    if (presets.includes("width-type-I") && parameters["--model-type"] !== "dense") {
+      if (parameters["--select-width"] !== true) errors.push("--select-width is required for a width-type-I Recipe");
+      const width_order = parameters["WIDTH.order"];
+      if (width_order === undefined || width_order === null || width_order === "" ||
+          Array.isArray(width_order) && !width_order.length) errors.push("WIDTH.order is required for a width-type-I Recipe");
+    }
+    if (presets.some(preset=>preset !== "dense" && preset !== "width-type-I") && parameters["--model-type"] !== "dense" &&
         (parameters["DEPTH.order"] === undefined || parameters["DEPTH.order"] === "")) {
       errors.push("DEPTH.order is required for a DEPTH Recipe");
     }
+    // ^^^ THOG
     if (!Array.isArray(recipe.profilers) || !recipe.profilers.length) errors.push("Profiling mode is required");
     const eligible = (hosts || []).filter(host => host.local || host.execution_enabled)
       .flatMap(host => (host.last_discovered?.execution_profiles?.length ? host.last_discovered.gpus || [] : [])
@@ -236,7 +244,12 @@
     if (spec.kind === "dimension" && (parts.length>64 || new Set(parts).size !== parts.length)) return true;
     return parts.some(part => {
       if (spec.choices?.length && !spec.choices.some(choice=>String(choice)===part)) return true;
-      if (spec.type === "int") return !/^\+?\d+$/.test(part) || !Number.isSafeInteger(Number(part)) || key === "DEPTH.order" && Number(part)<1;
+      // vvv THOG the width capture window alone admits the documented unbounded sentinel
+      if (spec.type === "int") {
+        if (key === "--instrumentation__width_activation_curves__end_step" && part === "-1") return false;
+        return !/^\+?\d+$/.test(part) || !Number.isSafeInteger(Number(part)) || key === "DEPTH.order" && Number(part)<1;
+      }
+      // ^^^ THOG
       if (spec.type === "float") return !Number.isFinite(Number(part));
       if (["flag","bool_value"].includes(spec.type)) return !["true","false"].includes(part);
       return part.includes("\0");

@@ -367,7 +367,7 @@
       "width-type-I"
     ],
     "default": null,
-    "help": "dense | legacy_sheet_col | depth | jpeg_like_v1 | head_aware_block | mlp_block | full_block",
+    "help": "dense | legacy_sheet_col | depth | jpeg_like_v1 | head_aware_block | mlp_block | full_block | width-type-I",
     "kind": "dimension",
     "short": "-p",
     "type": "string"

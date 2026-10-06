@@ -1,0 +1,459 @@
+{
+  "date": "2026-10-06",
+  "parent_release_commit": "386cea2d6d58ab6e91414b4055fa1bd759996e84",
+  "scope": [
+    "Runner frontend permits width-only single runs and grids without implicit DEPTH selection",
+    "Runner frontend and Recipe scalar parser accept only the width end_step=-1 negative sentinel",
+    "Preset catalogue help and Runner single/grid guide updated"
+  ],
+  "reproduction_before_fix": {
+    "browser_guard": "Standalone width Recipe rejected with DEPTH.order is required for a DEPTH Recipe",
+    "explicit_unbounded_capture": "All three one/three/six-combination fixtures rejected end_step=-1"
+  },
+  "targeted_validation": {
+    "python_cases_passed": 183,
+    "chromium_case_passed": 1,
+    "python_command": "python -m pytest -q tests/test_residual_width.py tests/test_residual_width_integration.py tests/test_instra_runner_unittest.py tests/test_sheet_stage3_resume.py tests/test_resume_and_fork_cpu_integration.py",
+    "notes": "All 183 numerical, integration, Runner and resume cases pass. The real Chromium acceptance passes separately and in the final full suite.",
+    "expanded_recipe_run_counts": [
+      1,
+      3,
+      6
+    ]
+  },
+  "full_regression": {
+    "command": "OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 python -m pytest -q --junitxml=runner_fix_full_regression.xml --tb=short (Chromium enabled)",
+    "previous_release_summary": "96 failed, 1813 passed, 26 skipped, 2 warnings, 484 subtests passed",
+    "summary": "96 failed, 1818 passed, 26 skipped, 2 warnings, 484 subtests passed in 307.80s (0:05:07)",
+    "failed_parent_case_count": 90,
+    "failed_assertion_count": 96,
+    "new_failed_parent_cases": [],
+    "fixed_previous_failed_parent_cases": [],
+    "failed_parent_cases": [
+      "tests.test_basis_family_plugin_registry.BasisFamilyPluginRegistryTests::test_07_primary_wrappers_have_no_family_specific_allow_list_or_tag_branch",
+      "tests.test_console_and_descriptor_help::test_wrapper_registry_emits_descriptor_table_once",
+      "tests.test_console_model_summary::test_model_summary_aligns_optimizer_and_reports_cosine_decay",
+      "tests.test_console_progress_layout.ConsoleProgressLayoutTests::test_current_layer_count_is_appended_only_when_plastic_is_enabled",
+      "tests.test_console_progress_layout.ConsoleProgressLayoutTests::test_sampled_values_are_emitted_once_after_a_plastic_transition",
+      "tests.test_console_progress_layout.ConsoleProgressLayoutTests::test_semantic_qkv_bypass_is_suppressed_only_for_depth_reporting",
+      "tests.test_console_progress_layout.ConsoleProgressLayoutTests::test_validation_reuses_latest_step_mean_and_uses_two_level_yellow_emphasis",
+      "tests.test_console_progress_pretty_rows::test_step_one_console_row_keeps_elapsed_seconds",
+      "tests.test_console_progress_pretty_rows::test_training_console_row_uses_hh_mm_ss_after_step_one_and_colors_negative_delta_bright_green",
+      "tests.test_console_progress_pretty_rows::test_validation_console_row_uses_bold_explicit_rgb_yellow_for_validation_loss",
+      "tests.test_dense_weight_curves::test_dense_figure_uses_crosses_with_per_step_connectors",
+      "tests.test_dense_weight_curves::test_dense_scalar_coordinates_share_one_step_colour_and_legend_row",
+      "tests.test_dense_weight_curves::test_dense_snapshot_reuses_all_six_families_with_integer_layer_points",
+      "tests.test_depth_weight_curves_and_observational_probes::test_scalar_selection_is_fixed_per_run_and_run_specific",
+      "tests.test_depth_weight_curves_v2::test_all_attention_charts_share_one_head",
+      "tests.test_depth_weight_curves_v2::test_plotly_history_emphasises_newest_and_oldest",
+      "tests.test_direct_thog_mlp_application::test_training_wrappers_expose_default_on_direct_factorised_mlp_without_getopts_letter",
+      "tests.test_geometry_registry_phase1.GeometryRegistryPhase1Tests::test_registry_console_report_is_complete_and_explicit",
+      "tests.test_instra_demand_runtime::test_replaced_remote_wandb_file_reopens_the_new_inode",
+      "tests.test_instra_demand_runtime::test_twenty_four_warm_histories_resume_without_replaying_records",
+      "tests.test_instra_firefox_acceptance::test_real_firefox_heatmap_and_weight_group_chart_overrides",
+      "tests.test_instra_firefox_acceptance::test_real_firefox_renders_a_completed_finite_weight_capture",
+      "tests.test_instra_firefox_acceptance::test_real_firefox_selected_thog_render_contract",
+      "tests.test_instra_firefox_heatmap_diagnostics::test_real_firefox_heatmap_pipeline_diagnostics",
+      "tests.test_instra_firefox_maximize_history::test_real_firefox_maximize_current_only_history_round_trip",
+      "tests.test_instra_firefox_weight_controls::test_real_firefox_explicit_weight_range_overrides_current_only_and_has_step_hover",
+      "tests.test_instra_firefox_weight_controls::test_real_firefox_rnd_changes_weight_coupling",
+      "tests.test_instra_firefox_weight_controls::test_real_firefox_weight_group_and_chart_overrides_are_clickable",
+      "tests.test_instra_firefox_weight_controls::test_real_firefox_weight_settings_previews_show_current_curves",
+      "tests.test_instra_firefox_workspace_range::test_real_firefox_workspace_intersection_and_step_windows",
+      "tests.test_instra_sep01_enhancements.InstraEnhancementTests::test_new_and_legacy_cli_spellings_and_effective_environment",
+      "tests.test_instra_sep30_feedback::test_chart_routes_hide_disabled_plastic_and_preserve_enabled_or_legacy_data",
+      "tests.test_jpeg_like_v1_wrappers.JpegLikeV1WrapperTests::test_registry_comment_and_help_expose_new_contract",
+      "tests.test_jpeg_like_v1_wrappers.JpegLikeV1WrapperTests::test_scruffy_dry_run_propagates_geometry_compressor_group_and_y",
+      "tests.test_karitane_restart_launcher.KaritaneRestartLauncherTests::test_launcher_has_valid_shell_syntax_and_calls_dedicated_resume_module",
+      "tests.test_layer_dropout_wrappers.LayerDropoutWrapperTests::test_long_forms_and_forwarding_are_present",
+      "tests.test_layer_dropout_wrappers.LayerDropoutWrapperTests::test_short_layer_dropout_controls_are_native_getopts",
+      "tests.test_optimizer_wrapper.OptimizerWrapperTests::test_existing_run_scruffy_scripts_remain_present",
+      "tests.test_optimizer_wrapper.OptimizerWrapperTests::test_full_wrappers_retain_body_and_native_optimizer_help",
+      "tests.test_optimizer_wrapper.OptimizerWrapperTests::test_help_contains_old_and_new_controls",
+      "tests.test_optimizer_wrapper.OptimizerWrapperTests::test_long_optimizer_controls_and_explicit_lr_override",
+      "tests.test_optimizer_wrapper.OptimizerWrapperTests::test_short_optimizer_control_uses_optimizer_defaults",
+      "tests.test_picton_cli_wrapper_contract::test_picton_all_known_shell_wrappers_are_syntactically_valid",
+      "tests.test_picton_cli_wrapper_contract::test_picton_canonical_host_wrappers_share_the_same_getopts_letters_and_long_options",
+      "tests.test_picton_wrapper_defaults_and_nonfinite_policy::test_current_training_wrappers_default_to_fast_discard_eval_100_and_checkpoint_1000",
+      "tests.test_plastic_depth_interfaces::test_obsolete_hold_control_and_internal_sampling_seed_are_not_public_cli_options",
+      "tests.test_premat_processing::test_ncu_semantic_exports_select_dominant_main_and_premat",
+      "tests.test_premat_processing::test_processing_group_sits_after_val_and_throughput_has_no_curve_markers",
+      "tests.test_premat_processing::test_processing_normalizer_emits_graph_and_download_data",
+      "tests.test_premat_processing::test_processing_throughput_round_trips_through_local_store",
+      "tests.test_premat_processing::test_processing_throughput_workspace_multirun_contract",
+      "tests.test_premat_processing_resource_normalizer::test_normalizer_emits_exact_owners_stream_resource_csv_and_idle_intervals",
+      "tests.test_processing_ncu_2024_repair::test_ncu_2024_wide_export_normalizes_resources_and_semantics",
+      "tests.test_processing_ncu_semantic_suffix_integration::test_wide_ncu_suffix_semantics_join_main_and_premat",
+      "tests.test_resume_and_fork_cli_compatibility.ResumeAndForkCliCompatibilityTests::test_lifecycle_parser_accepts_all_preserved_master_long_controls",
+      "tests.test_resume_and_fork_ddp_integration.ResumeAndForkDdpIntegrationTests::test_two_rank_cpu_resume_preserves_logical_run",
+      "tests.test_semantic_qkv_adapter_bypass_option::test_bypass_semantic_qkv_adapter_false_selects_legacy_adapter_path",
+      "tests.test_sheet_stage3_compatibility.Stage3CompatibilityTests::test_s3_09_incompatible_checkpoint_rejection",
+      "tests.test_sheet_stage5_ddp.Stage5DdpTests::test_s5_08_ddp_construction_identity",
+      "tests.test_sheet_stage5_ddp.Stage5DdpTests::test_s5_09_ddp_update_matches_single_process_global_batch",
+      "tests.test_sheet_stage5_ddp.Stage5DdpTests::test_s5_10_ddp_state_remains_synchronized",
+      "tests.test_sheet_stage5_ddp.Stage5DdpTests::test_s5_11_ddp_resume_preserves_lifecycle_and_state",
+      "tests.test_sheet_stage5_ddp.Stage5DdpTests::test_s5_12_uneven_checkpoint_segment_boundary_under_ddp",
+      "tests.test_sheet_stage5_failures.Stage5FailurePropagationTests::test_s5_rank_local_nonfinite_state_fails_collectively",
+      "tests.test_sheet_stage5_failures.Stage5FailurePropagationTests::test_s5_structure_disagreement_fails_all_ranks_without_hang",
+      "tests.test_sheet_stage6_runner_scripts.RunnerScriptTests::test_s6_33_dense_runner_resolves_canonical_identity_and_shared_defaults",
+      "tests.test_sheet_stage6_runner_scripts.RunnerScriptTests::test_s6_34_depth_runner_ignores_non_depth_orders_by_default",
+      "tests.test_stage6_plastic_depth_progress::test_huge_score_z_uses_fixed_width_scientific_not_row_blowout",
+      "tests.test_stage6_plastic_depth_progress::test_missing_edge_probe_loss_and_score_z_use_dash_placeholders_and_green_only",
+      "tests.test_stage6_plastic_depth_progress::test_optimizer_progress_omits_depth_samples_when_absent",
+      "tests.test_stage6_plastic_depth_progress::test_optimizer_progress_omits_probe_losses_when_absent",
+      "tests.test_stage6_plastic_depth_progress::test_optimizer_progress_omits_score_z_when_absent",
+      "tests.test_stage6_plastic_depth_progress::test_plastic_probe_losses_score_z_sample_layer_and_samples_are_ordered",
+      "tests.test_stage8_mlp_channel_order_and_wrapper_loops::test_stage8_training_wrappers_loop_dense_once_and_compact_presets_across_depth_orders",
+      "tests.test_stage8_mlp_channel_order_and_wrapper_loops::test_stage8_training_wrappers_share_the_six_order_letters",
+      "tests.test_stage8_mlp_channel_order_and_wrapper_loops::test_stage8_training_wrappers_use_final_preset_as_single_architecture_selector",
+      "tests.test_stage8_training_instrumentation_selector::test_stage8_training_wrappers_expose_one_unambiguous_instrumentation_selector",
+      "tests.test_stage8_wrapper_shell_syntax::test_stage8_training_wrappers_auto_correct_dense_residual_source",
+      "tests.test_stage8_wrapper_shell_syntax::test_stage8_training_wrappers_expose_all_six_semantic_order_controls",
+      "tests.test_stage8_wrapper_shell_syntax::test_stage8_training_wrappers_make_logging_backend_and_schedule_controls_explicit",
+      "tests.test_stage8_wrappers_and_run_config::test_stage8_run_config_records_dct_full_block_identity_in_manifest_and_artifact_name",
+      "tests.test_stage8_wrappers_and_run_config::test_stage8_semantic_order_defaults_are_recorded_in_manifest_identity_and_training_config",
+      "tests.test_stage8_wrappers_and_run_config::test_stage8_semantic_order_overrides_are_recorded_in_manifest_artifact_identity_and_training_config",
+      "tests.test_thogopt_integration::test_public_cli_history_arguments_and_reset_scope",
+      "tests.test_thogopt_lifecycle::test_fresh_resume_reset_fork_and_capture",
+      "tests.test_train_owt_public_wrapper.PublicTrainOwtWrapperTests::test_fresh_dry_run_preserves_master_cli_and_aligns_startup_values",
+      "tests.test_vectorise_per_head_materialisation::test_training_wrappers_expose_default_on_vectorise_per_head_materialisation_without_getopts_letter",
+      "tests.test_wrapper_learning_rate_and_batch_grids::test_run_config_artifact_contains_two_digit_learning_rate_code",
+      "tests.test_wrapper_learning_rate_and_batch_grids::test_run_config_default_learning_rate_uses_lr_60_artifact_code",
+      "tests.test_wrapper_learning_rate_and_batch_grids::test_wrappers_expose_lr_and_min_lr_codes_and_nest_lr_and_batch_grid_axes"
+    ],
+    "qualification": "The full suite retains inherited failures; it is not all green. Failure identities are unchanged against the previous release."
+  },
+  "javascript_regression": {
+    "baseline_commit": "386cea2d6d58ab6e91414b4055fa1bd759996e84",
+    "program_count": 42,
+    "passed": 40,
+    "failed": 2,
+    "failures": [
+      "instra_system_visibility_regression.js",
+      "instra_thogopt_regression.js"
+    ],
+    "results": [
+      {
+        "file": "dashboard_v058_smoke.js",
+        "exit_code": 0,
+        "output_tail": ""
+      },
+      {
+        "file": "instra_aug30_enhancements_regression.js",
+        "exit_code": 0,
+        "output_tail": "instra August 30 enhancements regression: PASS\n"
+      },
+      {
+        "file": "instra_dashboard_consistency_final_regression.js",
+        "exit_code": 0,
+        "output_tail": "instra dashboard consistency final regression: PASS\n"
+      },
+      {
+        "file": "instra_dashboard_feature_regression.js",
+        "exit_code": 0,
+        "output_tail": "PASS palette, trash, no-data chart, dual throughput z and reset-zoom regressions\n"
+      },
+      {
+        "file": "instra_dashboard_performance_regression.js",
+        "exit_code": 0,
+        "output_tail": "instra dashboard performance regression: PASS\n"
+      },
+      {
+        "file": "instra_further_enhancements_regression.js",
+        "exit_code": 0,
+        "output_tail": "instra further enhancements regression: PASS\n"
+      },
+      {
+        "file": "instra_grid_chart_regression.js",
+        "exit_code": 0,
+        "output_tail": "PASS Grid shades, independent eyes and multi-Grid loss merge\n"
+      },
+      {
+        "file": "instra_heatmap_performance_regression.js",
+        "exit_code": 0,
+        "output_tail": "instra heatmap performance regression: PASS\n"
+      },
+      {
+        "file": "instra_host_grid_identity_regression.js",
+        "exit_code": 0,
+        "output_tail": "PASS host-qualified legacy eyes/colours and shared durable Grid UUIDs\n"
+      },
+      {
+        "file": "instra_legacy_heatmap_repair_regression.js",
+        "exit_code": 0,
+        "output_tail": "instra legacy heatmap repair regression: PASS\n"
+      },
+      {
+        "file": "instra_metric_group_state_regression.js",
+        "exit_code": 0,
+        "output_tail": "instra metric group state regression: PASS\n"
+      },
+      {
+        "file": "instra_network_host_controls_regression.js",
+        "exit_code": 0,
+        "output_tail": "PASS Networks discovery, host removal with Master, local-only Master and masked SSH reconnect\n"
+      },
+      {
+        "file": "instra_oct01_history_downloads_regression.js",
+        "exit_code": 0,
+        "output_tail": "PASS parallel/retry/live/legacy elapsed clocks and immutable estimate ranges\nPASS HSL Grid and hex override picker initialization/reset\n"
+      },
+      {
+        "file": "instra_processing_pair_state_regression.js",
+        "exit_code": 0,
+        "output_tail": "PASS full startup pairing, sticky first claims, fallback companions, throughput-only runs and explicit unpairing\n"
+      },
+      {
+        "file": "instra_processing_quiescence_regression.js",
+        "exit_code": 0,
+        "output_tail": "PASS Processing redraw batching and hidden-tab quiescence\n"
+      },
+      {
+        "file": "instra_processing_update_timing_regression.js",
+        "exit_code": 0,
+        "output_tail": "PASS complete-update pair labels, ordering, matching, PREMAT parsing and cache invalidation\n"
+      },
+      {
+        "file": "instra_processing_user_fixes_regression.js",
+        "exit_code": 0,
+        "output_tail": "PASS paired downloads, resource headings, maximize controls, dynamic comparison refresh and compact chart geometry\n"
+      },
+      {
+        "file": "instra_regression_repair.js",
+        "exit_code": 0,
+        "output_tail": "instra legacy heatmap repair regression: PASS\n"
+      },
+      {
+        "file": "instra_run_sort_and_poll_regression.js",
+        "exit_code": 0,
+        "output_tail": "PASS ordinal heading sorting and bounded catalogue polling\n"
+      },
+      {
+        "file": "instra_runner_current_grid_regression.js",
+        "exit_code": 0,
+        "output_tail": "PASS Runner ordering, retained History/Log, active scoped Multiview, grey icons and maximized chart selection\n"
+      },
+      {
+        "file": "instra_runner_followup_regression.js",
+        "exit_code": 0,
+        "output_tail": "PASS Runner automatic placement and required-field diagnostics, History visibility, Runs S segment value\n"
+      },
+      {
+        "file": "instra_sep01_enhancements_regression.js",
+        "exit_code": 0,
+        "output_tail": "instra September 1 behaviour regression: PASS\n"
+      },
+      {
+        "file": "instra_sep01_repair_regression.js",
+        "exit_code": 0,
+        "output_tail": "instra September 1 refresh/range repair regression: PASS\n"
+      },
+      {
+        "file": "instra_sep02_enhancements_regression.js",
+        "exit_code": 0,
+        "output_tail": "instra September 2 columns/metric controls regression: PASS\n"
+      },
+      {
+        "file": "instra_sep02_followup_regression.js",
+        "exit_code": 0,
+        "output_tail": "instra follow-up percentage/navigation/icons regression: PASS\n"
+      },
+      {
+        "file": "instra_sep20_runtime_owner_regression.js",
+        "exit_code": 0,
+        "output_tail": "PASS bounded September runtime owners, stable redraw path and trash restoration\n"
+      },
+      {
+        "file": "instra_sep21_user_requests_regression.js",
+        "exit_code": 0,
+        "output_tail": "PASS September 21 Instra user-request contracts\n"
+      },
+      {
+        "file": "instra_sep30_feedback_regression.js",
+        "exit_code": 0,
+        "output_tail": "PASS category enables/order/search membership, progressive loss and cancellation of obsolete 40-run selections\n"
+      },
+      {
+        "file": "instra_sep30_ui_regression.js",
+        "exit_code": 0,
+        "output_tail": "PASS duration units, all field options, immediate syntax/choice validation, History outcomes and distinct persistent Grid hues\nPASS string axis titles and 1000 unchanged layout passes without redraw\n"
+      },
+      {
+        "file": "instra_system_visibility_regression.js",
+        "exit_code": 1,
+        "output_tail": "node:internal/modules/cjs/loader:1520\n  throw err;\n  ^\n\nError: Cannot find module 'jsdom'\nRequire stack:\n- /workspace/scratch/96b033f15391/thog2/tests/instra_system_visibility_regression.js\n    at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)\n    at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)\n    at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1095:10)\n    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)\n    at Module._load (node:internal/modules/cjs/loader:1294:5)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)\n    at Module.require (node:internal/modules/cjs/loader:1617:12)\n    at require (node:internal/modules/helpers:153:16)\n    at Object.<anonymous> (/workspace/scratch/96b033f15391/thog2/tests/instra_system_visibility_regression.js:5:17)\n    at Module._compile (node:internal/modules/cjs/loader:1872:14) {\n  code: 'MODULE_NOT_FOUND',\n  requireStack: [\n    '/workspace/scratch/96b033f15391/thog2/tests/instra_system_visibility_regression.js'\n  ]\n}\n\nNode.js v24.19.0\n"
+      },
+      {
+        "file": "instra_thogopt_regression.js",
+        "exit_code": 1,
+        "output_tail": "node:internal/modules/cjs/loader:1520\n  throw err;\n  ^\n\nError: Cannot find module 'jsdom'\nRequire stack:\n- /workspace/scratch/96b033f15391/thog2/tests/instra_thogopt_regression.js\n    at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)\n    at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)\n    at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1095:10)\n    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)\n    at Module._load (node:internal/modules/cjs/loader:1294:5)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)\n    at Module.require (node:internal/modules/cjs/loader:1617:12)\n    at require (node:internal/modules/helpers:153:16)\n    at Object.<anonymous> (/workspace/scratch/96b033f15391/thog2/tests/instra_thogopt_regression.js:6:17)\n    at Module._compile (node:internal/modules/cjs/loader:1872:14) {\n  code: 'MODULE_NOT_FOUND',\n  requireStack: [\n    '/workspace/scratch/96b033f15391/thog2/tests/instra_thogopt_regression.js'\n  ]\n}\n\nNode.js v24.19.0\n"
+      },
+      {
+        "file": "instra_weight_coupling_regression.js",
+        "exit_code": 0,
+        "output_tail": "instra weight coupling regression: PASS\n"
+      },
+      {
+        "file": "instra_weight_inspector_regression.js",
+        "exit_code": 0,
+        "output_tail": "instra weight inspector data and event regressions: PASS\n"
+      },
+      {
+        "file": "instra_weight_persistence_log_regression.js",
+        "exit_code": 0,
+        "output_tail": "instra weight persistence/log regression: PASS\n"
+      },
+      {
+        "file": "instra_weight_precision_regression.js",
+        "exit_code": 0,
+        "output_tail": "instra weight inspection precision persistence regression: PASS\n"
+      },
+      {
+        "file": "instra_weight_range_interaction_regression.js",
+        "exit_code": 0,
+        "output_tail": "instra weight range interaction regression: PASS\n"
+      },
+      {
+        "file": "instra_weight_request_router_regression.js",
+        "exit_code": 0,
+        "output_tail": "instra weight request router regression: PASS\n"
+      },
+      {
+        "file": "instra_weight_runtime_loader_regression.js",
+        "exit_code": 0,
+        "output_tail": "instra bounded runtime loader regression: PASS\n"
+      },
+      {
+        "file": "instra_weight_stability_regression.js",
+        "exit_code": 0,
+        "output_tail": "instra weight stability regression: PASS\n"
+      },
+      {
+        "file": "instra_weight_step_filter_regression.js",
+        "exit_code": 0,
+        "output_tail": "instra bounded runtime loader regression: PASS\ninstra weight request router regression: PASS\ninstra weight stability regression: PASS\n"
+      },
+      {
+        "file": "instra_workspace_weight_overlay_regression.js",
+        "exit_code": 0,
+        "output_tail": "instra workspace weight overlay regression: PASS\n"
+      },
+      {
+        "file": "processing_resource_attribution_dashboard_regression.js",
+        "exit_code": 0,
+        "output_tail": "processing resource attribution dashboard regression: ok\n"
+      }
+    ],
+    "new_failed_programs": []
+  },
+  "browser": {
+    "browser": "153.0.8010.0",
+    "checks": [
+      "three Plotly charts",
+      "step selection",
+      "residual-site selection",
+      "bounded curves",
+      "correct axis labels",
+      "maximize/restore",
+      "paired Multiview identity and step",
+      "rapid run switching",
+      "legacy run hides width charts",
+      "API pairing metadata",
+      "Runner width-only single-run Preview submission",
+      "Runner width-only grid Preview submission",
+      "Runner unbounded capture window edit"
+    ],
+    "width_requests": 20,
+    "console_errors": [],
+    "pairing": [
+      {
+        "run": "fixture_01",
+        "step": 1,
+        "D": 8,
+        "r": 3
+      },
+      {
+        "run": "fixture_00",
+        "step": 1,
+        "D": 8,
+        "r": 3
+      }
+    ],
+    "runner_preview_parameters": [
+      {
+        "--max-iters": 50,
+        "--batch-size": 16,
+        "--geometry-preset": [
+          "width-type-I"
+        ],
+        "--n-layer": 16,
+        "--n-embd": 1024,
+        "--n-head": 16,
+        "--block-size": 1024,
+        "--gradient-accumulation-steps": 6,
+        "--checkpoint-segment-size": 4,
+        "--optimizer": "adamw",
+        "--learning-rate": 0.0009,
+        "--min-lr": 9e-05,
+        "--warmup-iters": 0,
+        "--select-width": true,
+        "WIDTH.order": [
+          64
+        ],
+        "WIDTH.compressor": "dct",
+        "--instrumentation__width_activation_curves__end_step": -1
+      },
+      {
+        "--max-iters": 50,
+        "--batch-size": 16,
+        "--geometry-preset": [
+          "width-type-I"
+        ],
+        "--n-layer": 16,
+        "--n-embd": 1024,
+        "--n-head": 16,
+        "--block-size": 1024,
+        "--gradient-accumulation-steps": 6,
+        "--checkpoint-segment-size": 4,
+        "--optimizer": "adamw",
+        "--learning-rate": 0.0009,
+        "--min-lr": 9e-05,
+        "--warmup-iters": 0,
+        "--select-width": true,
+        "WIDTH.order": [
+          32,
+          64,
+          128
+        ],
+        "WIDTH.compressor": "dct",
+        "--instrumentation__width_activation_curves__end_step": -1
+      }
+    ]
+  },
+  "browser_scope": "Real field edits and Preview payloads with isolated Preview responses; no GPU launch. Backend recipe expansion and command/config resolution are tested separately.",
+  "user_smoke_output": {
+    "source_name": "output.txt",
+    "source_sha256": "27035a7df111ddeff9ced27abed36b7747af96dd2dc659b2bb2d5f6882c82e85",
+    "reported_runs": [
+      {
+        "variant": "width_only",
+        "completed_updates": 20,
+        "training_updates_contiguous": true,
+        "final_validation_loss": 10.2344,
+        "checkpoint_bytes": 48563876,
+        "training_loss_count": 20
+      },
+      {
+        "variant": "width_depth",
+        "completed_updates": 20,
+        "training_updates_contiguous": true,
+        "final_validation_loss": 10.3358,
+        "checkpoint_bytes": 43846500,
+        "training_loss_count": 20
+      }
+    ],
+    "traceback_present": false,
+    "resume_output_present": false,
+    "dashboard_interaction_output_present": false
+  }
+}

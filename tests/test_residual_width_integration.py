@@ -200,6 +200,29 @@ def test_runner_scoped_width_and_depth_command():
     config=resolve(command[3:]);assert config.width_depth_enabled and config.width_order==3
 
 
+@pytest.mark.parametrize('orders,depth_orders,expected_count', [([4],None,1),([4,8,16],None,3),([4,8,16],[1,2],6)])
+def test_runner_width_single_and_grid_without_implicit_depth(orders,depth_orders,expected_count):
+    import thog_grid_runner as runner
+    parameters = {'--geometry-preset':'width-type-I','--select-width':True,
+        'WIDTH.order':orders,'WIDTH.compressor':'dct','--n-embd':[16],
+        '--n-head':[4],'--n-layer':[4],'--warmup-iters':[0],'--max-iters':20,
+        '--instrumentation__width_activation_curves__mode':'probes',
+        '--instrumentation__width_activation_curves__end_step':-1}
+    if depth_orders is not None:
+        parameters.update({'DEPTH.order':depth_orders,'DEPTH.compressor':'chebyshev'})
+    runs = runner.expand({'label':'width smoke grid','parameters':parameters})
+    assert len(runs) == expected_count
+    resolved_orders = set()
+    for run in runs:
+        command = runner.command_for({**run,'grid_tag':'G-00001'}, {})
+        config = resolve(command[3:])
+        assert config.width_enabled and config.width_depth_enabled == (depth_orders is not None)
+        assert ('--select-depth' in command) == (depth_orders is not None)
+        assert config.instrumentation__width_activation_curves__end_step == -1
+        resolved_orders.add((config.width_order,config.o_depth if depth_orders is not None else None))
+    assert len(resolved_orders) == expected_count
+
+
 def test_baseline_checkpoint_dictionary_does_not_acquire_width_fields():
     config=TrainingConfig(model_type='dense')
     assert not any(name.startswith('width_') or 'width_activation' in name for name in config.persistent_dict())

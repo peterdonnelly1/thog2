@@ -73,8 +73,47 @@ const {chromium} = require('playwright');
     const payload = await response.json();
     assert.equal(payload.available_steps.length,3);
     assert.match(payload.probe_interpretation,/not retrained/);
+    // Exercise actual Runner field edits and Preview submission without allocating fixture GPUs.
+    await page.locator('#runner_nav').click();
+    await page.waitForSelector('#runner_parameter_search');
+    const set_runner_field = async (key,value) => {
+      await page.locator('#runner_parameter_search').fill(key);
+      await page.locator(`input[data-runner-field="${key}"]`).fill(value);
+    };
+    await set_runner_field('--geometry-preset','width-type-I');
+    await set_runner_field('--select-width','true');
+    await set_runner_field('WIDTH.order','64');
+    await set_runner_field('WIDTH.compressor','dct');
+    await set_runner_field('DEPTH.order','');
+    await set_runner_field('--instrumentation__width_activation_curves__end_step','-1');
+    assert.equal(await page.locator('#runner_validation').textContent(),'');
+    const preview_recipes = [];
+    await page.route('**/api/runner/action',async route => {
+      const request = route.request().postDataJSON();
+      assert.equal(request.action,'preview');
+      preview_recipes.push(request.recipe);
+      const orders = request.recipe.parameters['WIDTH.order'];
+      const count = Array.isArray(orders) ? orders.length : 1;
+      await route.fulfill({json:{total_runs:count,runs:[],gpu_pool:[],
+        estimated_duration:{seconds:null,explanation:'Isolated Runner editor acceptance'}}});
+    });
+    const preview = async count => {
+      await page.locator('#runner_parameter_search').fill('');
+      await page.locator('#runner_detail').getByRole('button',{name:'Preview',exact:true}).click();
+      await page.locator('#runner_preview').getByRole('heading',
+        {name:`Total Runs in Grid: ${count} · physical executions: 0`,exact:true}).waitFor();
+    };
+    await preview(1);
+    assert.deepEqual(preview_recipes[0].parameters['WIDTH.order'],[64]);
+    assert.equal(Object.hasOwn(preview_recipes[0].parameters,'DEPTH.order'),false);
+    assert.equal(preview_recipes[0].parameters['--instrumentation__width_activation_curves__end_step'],-1);
+    await set_runner_field('WIDTH.order','32, 64, 128');
+    await preview(3);
+    assert.deepEqual(preview_recipes[1].parameters['WIDTH.order'],[32,64,128]);
+    assert.equal(Object.hasOwn(preview_recipes[1].parameters,'DEPTH.order'),false);
+    await page.unroute('**/api/runner/action');
     assert.deepEqual(errors,[]);
-    const record={browser:await browser.version(),checks:['three Plotly charts','step selection','residual-site selection','bounded curves','correct axis labels','maximize/restore','paired Multiview identity and step','rapid run switching','legacy run hides width charts','API pairing metadata'],width_requests:requests.length,console_errors:errors,pairing:paired};
+    const record={browser:await browser.version(),checks:['three Plotly charts','step selection','residual-site selection','bounded curves','correct axis labels','maximize/restore','paired Multiview identity and step','rapid run switching','legacy run hides width charts','API pairing metadata','Runner width-only single-run Preview submission','Runner width-only grid Preview submission','Runner unbounded capture window edit'],width_requests:requests.length,console_errors:errors,pairing:paired,runner_preview_parameters:preview_recipes.map(recipe=>recipe.parameters)};
     if (process.argv[3]) fs.writeFileSync(process.argv[3],JSON.stringify(record,null,2)+'\n');
     console.log(JSON.stringify(record));
   } finally {

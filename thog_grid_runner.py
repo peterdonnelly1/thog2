@@ -72,8 +72,11 @@ def _scalar(name, value):
             if not re.fullmatch(r"[+-]?\d+", raw):
                 raise ValueError()
             result = int(raw)
-            if result < 0 or (name == "DEPTH.order" and result < 1):
+            # vvv THOG preserve the width capture window's documented -1 sentinel in saved Recipes
+            unbounded_width_capture = name == "--instrumentation__width_activation_curves__end_step" and result == -1
+            if (result < 0 and not unbounded_width_capture) or (name == "DEPTH.order" and result < 1):
                 raise ValueError()
+            # ^^^ THOG
         elif kind == "float":
             import math
             result = float(raw)

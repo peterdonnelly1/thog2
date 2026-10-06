@@ -31,7 +31,40 @@ python -m run_thog2_owt \
 
 WIDTH and DEPTH each accept `order`, `compressor` and `compressor_version`. `compressor` also accepts `family@exact_version`. Families use the existing aliases and registry: Chebyshev, DCT, Haar and lapped cosine. Width defaults to Chebyshev and version `auto`; the resolved exact version is persisted. Duplicate assignments, unknown properties, conflicting versions and unsupported requests fail before model allocation. In width mode, explicitly supplied legacy `--basis-family`/`--basis-version` (or shell `-B`/`-v`) are rejected, including explicit defaults. Use scoped options instead.
 
-The existing `train_OWT.sh` wrapper forwards the same selector, scoped options and capture namespace. In Runner/Grid, choose `width-type-I`, enable `--select-width` and supply `WIDTH.order`. A `DEPTH.order` grid axis enables the existing fixed-depth selector; omit it for width alone. Width rejects PLASTIC, HYPERBLOCK, additional element geometries, PREMAT and materialized-weight replay. The standard AdamW, SGD, Nesterov, Adafactor and RMSprop update paths were exercised. THOGOPT's existing reconstructed-layer optimizer is not qualified for direct width contractions.
+The existing `train_OWT.sh` wrapper forwards the same selector, scoped options and capture namespace. Width rejects PLASTIC, HYPERBLOCK, additional element geometries, PREMAT and materialized-weight replay. The standard AdamW, SGD, Nesterov, Adafactor and RMSprop update paths were exercised. THOGOPT's existing reconstructed-layer optimizer is not qualified for direct width contractions.
+
+## Start a single run or grid in Runner
+
+After updating the branch, restart the Instra backend to reload the catalogue, and hard-refresh the browser. Open **Runner → Recipes → Add Grid Recipe**. Use **Geometry** or the parameter search to set these fields:
+
+| Field | Width-only smoke setting |
+| --- | --- |
+| `--geometry-preset` | `width-type-I` |
+| `--select-width` | `true` |
+| `WIDTH.order` | `64` |
+| `WIDTH.compressor` | `dct` |
+| `WIDTH.compressor_version` | Blank (resolves `auto`) |
+| `DEPTH.order` | Clear the inherited default; leaving a value selects joint depth compression |
+| `DEPTH.compressor`, `DEPTH.compressor_version` | Blank for width alone |
+| `--n-embd`, `--n-layer`, `--n-head` | `256`, `4`, `4` |
+| `--block-size`, `--batch-size`, `--gradient-accumulation-steps` | `128`, `1`, `1` |
+| `--checkpoint-segment-size` | `2` |
+| `--max-iters`, `--warmup-iters` | `20`, `0` |
+| `--learning-rate`, `--min-lr` | `0.0006`, `0.00006` |
+| `--eval-interval`, `--eval-iters`, `--log-interval`, `--checkpoint-interval` | `5`, `2`, `1`, `5` |
+| `--optimizer`, `--premat` | `adamw`, `disabled` |
+| `--data-dir` | `data/openwebtext` (prepared dataset) |
+| Profiling mode | `None` |
+
+Clear any inherited global `--basis-family`/`--basis-version`, extra attention/MLP geometry, PLASTIC or HYPERBLOCK settings. Select the intended host/GPU; its execution profile supplies precision and attention backend. For the first Runner smoke, use the profile matching the successful direct smoke: float32 and SDPA. Set optional export and checkpoint destinations as usual.
+
+One value in every dimension gives a single run. Enter `32, 64, 128` in `WIDTH.order` for three width-only runs. To form a joint grid, also enter `2, 4` in `DEPTH.order` and `chebyshev` in `DEPTH.compressor`: the Cartesian product has six runs. A nonblank `DEPTH.order` automatically forwards `--select-depth`. Reference width, layer count and the existing numeric dimensions can also be swept. Each combination is validated before scheduling; `2 <= r <= D` and basis rank validity still apply.
+
+Width and depth compressor families/versions are fixed Recipe fields. Create separate Recipes to compare basis families. Do not enter comma-separated family names in these fields.
+
+To display the three width charts, use **Width Activation Curves** to set `--instrumentation__width_activation_curves__mode` to `probes`, `log_every_n_steps` to `5`, `probe_every_n_steps` to `10`, `history_length` to `5`, `sample_tokens_per_layer` to `2`, and `feature_evaluation_points` to `32`, with the full namespace prefix on every field. The default `end_step=-1` means an unbounded capture window and is accepted when entered explicitly. Without capture, the training run remains valid and ordinary loss logging continues.
+
+Click **Save → Preview**, verify one, three or six logical runs and the intended GPU placement, then **Launch**. The Runner editor permits width-only recipes without `DEPTH.order`; legacy depth recipes still require it. See the [Runner follow-up evidence](../../evidence/residual_width_runner_followup.json) for regression and browser checks.
 
 ## Representation and normalization
 

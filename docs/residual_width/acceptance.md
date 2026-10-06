@@ -105,6 +105,16 @@ CUDA mixed-precision training, actual GPU allocated/reserved peaks, GPU throughp
 
 All release claims are limited to the passing numerical/workflow fixtures and measured storage categories above. The higher toy loss, mean CPU update-time regression, increased lifetime RSS and inherited repository test failures remain visible for the next model-size and hardware decision.
 
+## Runner follow-up, 6 October 2026
+
+The user-provided Scruffy smoke output shows both width-only and independent width/depth runs completing all 20 updates, with contiguous training steps, finite reported losses and gradients, and final checkpoints. Final validation losses are 10.2344 and 10.3358 respectively. These short runs establish functional completion for those configurations; they do not establish convergence or comparative performance. The supplied output does not show checkpoint resume or dashboard interaction.
+
+Reviewing Runner uncovered a legacy frontend guard that required `DEPTH.order` for every non-dense preset, blocking width-only Save/Preview/Launch. The corrected guard requires width selection and `WIDTH.order` for `width-type-I`, permits an omitted depth axis, and preserves the existing depth-preset requirement. Both the editor and Recipe validator now accept the documented capture `end_step=-1` sentinel without accepting negative training counts. The preset help includes width. The [workflow guide](README.md#start-a-single-run-or-grid-in-runner) provides single-run, three-width and six-combination joint-grid instructions, including clearing Runner's inherited depth default.
+
+The targeted follow-up checks pass 183 Python numerical, integration, Runner and resume cases, plus the real Chromium acceptance case. Its 13 checks now include actual width-only single/grid field edits and Preview request payloads, with zero console errors. Preview responses are isolated browser fixtures; real one/three/six-combination expansion and command/config resolution are separately checked in Python. This does not claim a live Runner GPU launch. All 42 non-browser JavaScript programs were checked: 40 pass and the same two inherited `jsdom`-dependent programs fail. The [follow-up evidence](../../evidence/residual_width_runner_followup.json) records the subsequent full-suite comparison and the attached-output digest. Earlier tables describe the initial release; the follow-up record qualifies these later Runner changes.
+
+The final follow-up full suite reports `96 failed, 1818 passed, 26 skipped, 2 warnings, 484 subtests passed in 307.80s (0:05:07)`. Its 90 unique failed parent cases and 96 failed assertions have exactly the same case identities as the preceding release, with zero newly failing parent cases. The five additional ordinary passes cover the two previously final-only tiled-energy fixtures and the three new Runner expansion fixtures. The full run includes all 13 browser checks and the existing Runner and resume regressions.
+
 ## Numbered outcomes for every specification item
 
 The numbered CSV matrix additionally maps each item to its implementation, validation evidence and qualification scope. Numerical/workflow outcomes refer to CPU functional acceptance; documentary and reporting outcomes are confirmed by this release record.
