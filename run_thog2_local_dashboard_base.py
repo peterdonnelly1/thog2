@@ -225,6 +225,7 @@ class RunDashboardState:
             metadata.get("updated_at"),
         )
         revision = (
+            status.get("training_loss_maximum_update"),                                                                                                    # <<< THOG loss-only progress invalidates displayed histories
             status["heatmap_count"],
             status["heatmap_maximum_update"],
             status["depth_snapshot_count"],
@@ -250,7 +251,8 @@ class RunDashboardState:
         maximum_update = max(
             (
                 value
-                for value in (heartbeat_update, chart_maximum_update)
+                # for value in (heartbeat_update, chart_maximum_update)
+                for value in (heartbeat_update, chart_maximum_update, status.get("training_loss_maximum_update"))                                          # <<< THOG loss-only WIDTH progress advances without capture instrumentation
                 if value is not None
             ),
             default=None,

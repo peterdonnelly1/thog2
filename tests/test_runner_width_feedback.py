@@ -36,6 +36,7 @@ def test_public_optimizer_commands_select_width_without_implicit_depth(preset,or
     parameters['--select-width']=False
     if depth_orders is not None:
         parameters['DEPTH.order']=depth_orders
+        parameters['--select-depth']=True
     runs=expand({'label':'Width optimizer grid', 'parameters':parameters})
     assert len(runs)==count
     for run in runs:
@@ -64,6 +65,70 @@ def test_mixed_presets_keep_automatic_width_flag_on_width_trials():
         width=run['parameters'].get('--geometry-preset')=='width-type-I'
         assert config.width_enabled==width
         assert ('--select-width' in command)==width
+        assert not config.width_depth_enabled
+
+
+@pytest.mark.parametrize('preset', ['width', 'width-type-I'])
+@pytest.mark.parametrize('explicit_depth', [None, False])
+def test_width_preset_ignores_inherited_depth_order_in_preview_and_exports(preset, explicit_depth):
+    parameters=width_parameters(preset)
+    parameters['WIDTH.order']=[4,6]
+    parameters['DEPTH.order']=[1,12,24]
+    parameters['DEPTH.compressor_version']='not-a-width-setting'
+    if explicit_depth is not None:
+        parameters['--select-depth']=explicit_depth
+    runs=expand({'label':'Inherited DEPTH defaults','parameters':parameters})
+    assert len(runs)==2
+    for run in runs:
+        assert not any(key.startswith('DEPTH.') for key in run['parameters'])
+        command=command_for({**run,'grid_tag':'G-TEST'}, {})
+        assert '--select-depth' not in command
+        arguments=build_parser().parse_args(command[3:])
+        config=config_from_arguments(arguments,geometry_plan=geometry_plan_from_arguments(arguments))
+        assert not config.width_depth_enabled
+        assert config.compact_identity()['depth'] is None
+        assert '_DEPTH_' not in config.compact_artifact_fragment()
+    raw_command=command_for({'parameters':{**parameters,'WIDTH.order':4,'DEPTH.order':12},
+                            'grid_tag':'G-TEST','run_id':'raw-width','profiler':'none'}, {})
+    assert '--select-depth' not in raw_command
+    assert not any(value.startswith('DEPTH.') for value in raw_command)
+
+
+def test_chebyshev_rank_failure_offers_a_verified_order_and_dct_alternative():
+    from sheet.width import build_width_basis
+    with pytest.raises(ValueError) as rejected:
+        build_width_basis(1024,512,'chebyshev')
+    assert 'equally spaced Chebyshev' in str(rejected.value)
+    assert 'Try WIDTH.order=128 at D=1024' in str(rejected.value)
+    assert 'WIDTH.order=512 with WIDTH.compressor=dct' in str(rejected.value)
+    assert build_width_basis(1024,128,'chebyshev')[1]['raw_numerical_rank']==128
+
+
+def test_captured_1024_width_recipe_resolves_both_requested_dct_orders_without_depth():
+    parameters=width_parameters()
+    parameters.update({'--n-embd':1024,'--n-head':16,'--n-layer':16,'--block-size':1024,
+        '--batch-size':16,'--gradient-accumulation-steps':6,'--checkpoint-segment-size':4,
+        'DEPTH.order':12,'WIDTH.order':[512,1024]})
+    runs=expand({'label':'Captured width-only recipe','parameters':parameters})
+    assert len(runs)==2
+    for run in runs:
+        arguments=build_parser().parse_args(command_for({**run,'grid_tag':'G-TEST'}, {})[3:])
+        config=config_from_arguments(arguments,geometry_plan=geometry_plan_from_arguments(arguments))
+        assert not config.width_depth_enabled
+        assert config.compact_artifact_fragment() in ('WIDTH_dct_r512','WIDTH_dct_r1024')
+
+
+def test_width_startup_report_is_compact_with_full_explain_metadata():
+    from sheet.geometry_registry import format_geometry_plan
+    arguments=build_parser().parse_args(['--geometry-preset','width','--select-width',
+        '--n-embd','1024','--n-head','16','--option','WIDTH.order=512','--option','WIDTH.compressor=dct'])
+    plan=geometry_plan_from_arguments(arguments)
+    report=format_geometry_plan(plan)
+    assert 'D=1024 / r=512' in report
+    assert 'depth compression:' in report and 'disabled' in report
+    assert len(report.splitlines())<30
+    assert 'mode_order' not in report
+    assert 'mode_order' in format_geometry_plan(plan,detailed=True)
 
 
 def test_width_aliases_share_identity_and_do_not_duplicate_grid_trials():

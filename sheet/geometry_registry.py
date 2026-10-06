@@ -498,8 +498,23 @@ def format_geometry_plan(plan: ResolvedGeometryPlan, *, detailed: bool = False) 
     lines = ["selected geometry", "-----------------"]
     # vvv THOG explain compact runtime and reference widths independently of depth
     if plan.width is not None:
-        import json
-        lines.extend(["WIDTH / width-type-I", json.dumps(plan.width, indent=2, sort_keys=True)])
+        # vvv THOG normal startup is compact; --explain-geometry retains complete construction metadata
+        width = plan.width
+        basis = width["basis"]
+        lines.extend([
+            "WIDTH / width-type-I",
+            _format_field(label_width, "reference / residual:", f"D={width['reference_width']} / r={width['residual_width']}"),
+            _format_field(label_width, "attention / MLP:", f"A={width['attention_width']} / F={width['mlp_hidden_width']}"),
+            _format_field(label_width, "compressor:", f"{basis['basis_family']}@{basis['basis_version']}"),
+            _format_field(label_width, "numerical rank:", f"{basis['raw_numerical_rank']} / {width['residual_width']}"),
+            _format_field(label_width, "raw conditioning:", f"{basis['raw_condition_number']:.6g}"),
+            _format_field(label_width, "executed blocks:", width["executed_blocks"]),
+            _format_field(label_width, "depth compression:", "enabled" if plan.depth_enabled else "disabled"),
+        ])
+        if detailed:
+            import json
+            lines.append(json.dumps(width, indent=2, sort_keys=True))
+        # ^^^ THOG
     # ^^^ THOG
     if plan.depth_enabled:
         lines.extend([

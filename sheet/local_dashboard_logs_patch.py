@@ -77,6 +77,11 @@ def _matching_train_logs(catalog: Any, state: Any) -> tuple[Path, ...]:
 
 
 def _resolve_train_log(catalog: Any, state: Any, dashboard_module: Any) -> Optional[Path]:
+    # vvv THOG a Runner attempt identity is authoritative over shared artifact startup logs
+    attempt_log = _runner_attempt_log(state)
+    if attempt_log is not None:
+        return attempt_log
+    # ^^^ THOG
     database_path = getattr(state, "database_path", None)
     if database_path is not None:
         directory = Path(database_path).parent
@@ -86,9 +91,6 @@ def _resolve_train_log(catalog: Any, state: Any, dashboard_module: Any) -> Optio
         for candidate in candidates:
             if candidate.is_file():
                 return candidate
-    attempt_log = _runner_attempt_log(state)
-    if attempt_log is not None:
-        return attempt_log
     candidates = _matching_train_logs(catalog, state)
     if not candidates:
         return None

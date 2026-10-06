@@ -94,6 +94,7 @@ def test_runs_and_runner_loss_uses_latest_local_optimizer_value(tmp_path: Path) 
     status = dashboard.RunDashboardState(path).status()
     assert status["last_loss"] == 7.125
     assert status["best_loss"] == 6.25
+    assert status["maximum_update"] == 3
     store.close()
 
 
@@ -111,6 +112,32 @@ def test_runs_and_runner_loss_falls_back_to_attempt_log(monkeypatch, tmp_path: P
     assert dashboard.RunDashboardState(path).status()["last_loss"] == 6.75
     assert dashboard.RunDashboardState(path).status()["best_loss"] is None
     store.close()
+
+
+# vvv THOG exact attempt identity wins over another process's shared startup preamble
+def test_runner_log_uses_attempt_output_over_adjacent_startup_log(monkeypatch, tmp_path: Path) -> None:
+    from sheet.local_dashboard_logs_patch import _read_log_tail
+    attempt_id = "d" * 32
+    state_directory = tmp_path / "instra-state"
+    state_directory.mkdir()
+    monkeypatch.setenv("INSTRA_STATE_DIR", str(state_directory))
+    attempt_path = state_directory / f"attempt-{attempt_id}.log"
+    attempt_path.write_text("startup preamble\n\x1b[32mT 1 loss=8.5\x1b[0m\n\x1b[32mT 2 loss=7.2\x1b[0m\n")
+    path = tmp_path / "artifact" / "run-id" / "charts.sqlite3"
+    store = LocalChartStore(path, run_name="artifact", run_id="run-id",
+                            config={"runner": {"attempt_id": attempt_id}})
+    (path.parent / "train.log").write_text('{"WIDTH": "stale startup report"}\n')
+    state = dashboard.RunDashboardState(path)
+    from types import SimpleNamespace
+    catalog = SimpleNamespace(root=tmp_path, state_for_run=lambda run_name: state)
+    payload = _read_log_tail(catalog, dashboard, "run-id", offset=None, maximum_bytes=4096)
+    assert payload["path"] == str(attempt_path.resolve())
+    assert "T 2 loss=7.2" in payload["text"]
+    assert "\x1b[32m" in payload["text"]
+    assert "stale startup report" not in payload["text"]
+    assert _read_log_tail(catalog, dashboard, "run-id", offset=payload["end"], maximum_bytes=4096)["text"] == ""
+    store.close()
+# ^^^ THOG
 
 
 def test_wandb_run_id_separates_repeated_artifact_names(

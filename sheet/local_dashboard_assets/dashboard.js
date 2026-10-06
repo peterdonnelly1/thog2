@@ -1134,6 +1134,11 @@ function apply_chart_display_settings(prepared, chart_name, settings) {
   prepared.layout.xaxis.gridcolor = "#e7e9ed";
   prepared.layout.yaxis.gridcolor = "#e7e9ed";
   if (chart_name === "heatmap") return;
+  // vvv THOG draw the bottom axis independently of the y=0 grid line
+  prepared.layout.xaxis.showline = true;
+  prepared.layout.xaxis.linecolor = "#59616b";
+  prepared.layout.xaxis.linewidth = 1;
+  // ^^^ THOG
   if (depth_weight_chart_set.has(chart_name) && settings.current_weights_only) {
     retain_latest_weight_snapshots(prepared);
   } else {
@@ -1145,6 +1150,10 @@ function apply_chart_display_settings(prepared, chart_name, settings) {
     if (!original_mode.includes("lines")) continue;
     trace.y = smoothed_values(trace.y || [], settings.smoothing);
     trace.mode = settings.chart_type === "lines_markers" ? "lines+markers" : settings.chart_type;
+    // vvv THOG one recorded loss sample remains visible in the ordinary lines view
+    if (trace.mode === "lines" && (trace.y || []).filter(value=>value !== null && Number.isFinite(Number(value))).length === 1)
+      trace.mode = "lines+markers";
+    // ^^^ THOG
     trace.line = {...(trace.line || {}), width: Math.max(0.5, Number(trace.line?.width || 1) * settings.line_width)};
     if (settings.chart_type !== "lines") {
       trace.marker = {...(trace.marker || {}), size: Math.max(3, Number(trace.marker?.size || 4))};

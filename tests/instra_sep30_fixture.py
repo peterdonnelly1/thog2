@@ -37,7 +37,19 @@ for index in range(12):
         store.append_processing_throughput(optimizer_update=step,tokens_per_second=10000+index*100+step)
     store.close()
     if index == 0:
-        (fixture_root/run_id/"train.log").write_text("\x1b[32mCLI oldest\x1b[0m\nCLI newest\n")
+        # vvv THOG exercise real progress formatting and ANSI in the width browser fixture
+        log_text="\x1b[32mCLI oldest\x1b[0m\nCLI newest\n"
+        if os.environ.get("THOG_WIDTH_REAL_RUNNER") == "1":
+            from sheet.stage6_trainer import format_progress_line
+            rows=["model parameters and options", "  WIDTH: D=8 / r=3; DEPTH disabled"]
+            rows.extend(format_progress_line(run_id,"optimizer_progress", {
+                "completed_updates":step, "timestamp":"061026-2200", "cumulative_training_seconds":step*10,
+                "mean_step_seconds":" 10.00", "tok/s":" 10000", "consumed_tokens":step*32768,
+                "training_loss":f"{8-step/10:9.4f}", "training_loss_delta":"  -0.100",
+                "learning_rate":" 9.000e-04", "gradient_norm":"   1.000"}) for step in range(1,4))
+            log_text="\n".join(rows)+"\n"
+        (fixture_root/run_id/"train.log").write_text(log_text)
+        # ^^^ THOG
     runs.append({"run_id":run_id,"grid_id":f"grid_{index//4}","state":"completed","host_label":"scruffy",
                  "host_id":"thog_host.scruffy","gpu":gpu,"profiler":"none","parameters":parameters,
                  "execution_profile":"current","dtype":"bfloat16","attention_backend":"flash2",
@@ -106,9 +118,16 @@ class FixtureHandler(base_handler):
         if parsed.path=="/api/chart-groups":
             return self._send_json({"available":True,"groups":[{"name":"train","chart_count":1,"revision":1}]})
         if parsed.path=="/api/chart-group":
-            return self._send_json({"available":True,"group":{"name":query.get("group",["train"])[0],"revision":1,
-                "charts":[{"id":"train/loss","title":"loss","x_title":"step","default_x_axis_mode":"step",
-                "available_x_axis_modes":["step"],"series":[{"name":"loss","x":[1,2,3,4,5],"y":[5,4.8,4.6,4.4,4.2]}]}]}})
+            chart={"id":"train/loss","title":"loss","x_title":"step","default_x_axis_mode":"step",
+                "available_x_axis_modes":["step"],"series":[{"name":"loss","x":[1,2,3,4,5],"y":[5,4.8,4.6,4.4,4.2]}]}
+            # vvv THOG exercise the capture's time-axis view through actual chart settings
+            if os.environ.get("THOG_WIDTH_REAL_RUNNER") == "1":
+                chart["available_x_axis_modes"]=["step","relative_wall","relative_process"]
+                chart["series"][0]["x_variants"]={"step":[1,2,3,4,5],
+                    "relative_wall":[60,120,180,240,300],"relative_process":[50,100,150,200,250]}
+            # ^^^ THOG
+            return self._send_json({"available":True,"group":{"name":query.get("group",["train"])[0],
+                "revision":1,"charts":[chart]}})
         return super().do_GET()
 server=ThreadingHTTPServer(("127.0.0.1",int(sys.argv[2])),FixtureHandler)
 print(f"fixture ready at {server.server_address}",flush=True)

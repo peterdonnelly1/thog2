@@ -42,6 +42,11 @@ assert.equal(recipe_problems({...recipe,parameters:width_parameters},hosts).leng
   "a standalone width Recipe must reach Save, Preview and Launch without selecting depth");
 assert.equal(recipe_problems({...recipe,parameters:{...width_parameters,"WIDTH.order":[16,32,64]}},hosts).length,0,
   "a retained-width sweep must be valid without DEPTH.order");
+// vvv THOG a dormant depth default cannot invalidate an otherwise valid WIDTH-only Recipe
+assert.equal(recipe_problems({...recipe,parameters:{...width_parameters,"DEPTH.order":12}},hosts).length,0);
+assert.match(recipe_problems({...recipe,parameters:{...width_parameters,"DEPTH.order":12,"--select-depth":true}},hosts).join(" "),
+  /DEPTH.order must not exceed --n-layer/);
+// ^^^ THOG
 assert.equal(recipe_problems({...recipe,parameters:{...width_parameters,"WIDTH.order":[16,32],"DEPTH.order":[1,2]}},hosts).length,0,
   "independent width/depth grids remain valid");
 assert.equal(recipe_problems({...recipe,parameters:{...width_parameters,"--geometry-preset":["dense","width-type-I"]}},hosts).length,0,

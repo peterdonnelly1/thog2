@@ -153,6 +153,11 @@ def validate_recipe(recipe):
 
 def expand(recipe, *, stable_preview=False):
     choices = validate_recipe(recipe)
+    # vvv THOG inherited DEPTH fields are dormant when WIDTH is the only selected axis
+    presets = choices.get("--geometry-preset", [])
+    if presets and all(preset in WIDTH_PRESETS for preset in presets) and not choices.get("--select-depth"):
+        choices = {name: value for name, value in choices.items() if not name.startswith("DEPTH.")}
+    # ^^^ THOG
     keys = [key for key in choices if CATALOGUE[key]["kind"] == "dimension"]
     count = len(recipe.get("profilers", ["none"]))
     for key in keys:
@@ -163,7 +168,6 @@ def expand(recipe, *, stable_preview=False):
     trials = []
     seen = set()
     seed = json.dumps(recipe, sort_keys=True, separators=(",", ":")) if stable_preview else ""
-    presets = choices.get("--geometry-preset", [])
     mixed_presets = "dense" in presets and any(preset != "dense" for preset in presets)
     max_layers = max(choices.get("--n-layer", [0]))
     for selected in itertools.product(*(choices[key] for key in keys)):
@@ -171,6 +175,8 @@ def expand(recipe, *, stable_preview=False):
         # vvv THOG resolve aliases once and keep width selection local to each concrete preset
         if values.get("--geometry-preset") in WIDTH_PRESETS:
             values["--geometry-preset"] = "width-type-I"
+            if not values.get("--select-depth"):
+                values = {name: value for name, value in values.items() if not name.startswith("DEPTH.")}
         elif any(preset in WIDTH_PRESETS for preset in presets):
             values = {name: value for name, value in values.items()
                       if name != "--select-width" and not name.startswith("WIDTH.")}
@@ -242,9 +248,12 @@ def command_for(run, gpu, *, python="python", entry="run_thog2_owt", host_label=
     preset = values.get("--geometry-preset", "depth")
     # vvv THOG direct exports also honor width aliases and automatic selection
     width_selected = preset in WIDTH_PRESETS
-    depth_selected = bool(values.get("DEPTH.order") or values.get("--select-depth"))
+    # depth_selected = bool(values.get("DEPTH.order") or values.get("--select-depth"))
+    depth_selected = bool(values.get("--select-depth") or not width_selected and values.get("DEPTH.order"))
     if width_selected:
         args.append("--select-width")
+    if depth_selected:
+        args.append("--select-depth")
     # ^^^ THOG
     args += ["--model-type", values.get("--model-type", "dense" if preset == "dense" else "sheet")]
     if (any(name.startswith("--plastic__") and name != "--plastic__enabled" and
@@ -253,7 +262,7 @@ def command_for(run, gpu, *, python="python", entry="run_thog2_owt", host_label=
         args.append("--plastic__enabled")
     for name, value in values.items():
         # vvv THOG dormant depth defaults do not silently activate or invalidate width-only runs
-        if width_selected and (name == "--select-width" or name.startswith("DEPTH.") and not depth_selected):
+        if name == "--select-depth" or width_selected and (name == "--select-width" or name.startswith("DEPTH.") and not depth_selected):
             continue
         # ^^^ THOG
         # vvv THOG scoped basis controls share existing --option forwarding
@@ -261,7 +270,8 @@ def command_for(run, gpu, *, python="python", entry="run_thog2_owt", host_label=
             args += ["--option", f"{name}={value}"]
         # ^^^ THOG
         elif name == "DEPTH.order":
-            args += ["--select-depth", "--option", f"DEPTH.order={value}"]
+            # args += ["--select-depth", "--option", f"DEPTH.order={value}"]
+            args += ["--option", f"DEPTH.order={value}"]
         elif name in {"--model-type", "--experiment-prefix", "--cuda-expandable-segment", *WRAPPER_ENV_OPTIONS} or (name == "--geometry-preset" and value == "dense"):
             continue
         elif CATALOGUE[name]["kind"] == "list":

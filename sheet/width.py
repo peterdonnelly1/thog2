@@ -32,6 +32,26 @@ WIDTH_CAPTURE_DEFAULTS = {
 WIDTH_CAPTURE_PREFIX = "instrumentation__width_activation_curves__"
 
 
+# vvv THOG rank failures name a numerically certified lower-order alternative
+def _resolved_lower_width_order(reference_width, retained_width, kernel, version):
+    order = 2 ** int(math.log2(min(128, retained_width - 1)))
+    coordinates = kernel.coordinates(reference_width, dtype=torch.float64, device="cpu")
+    while order >= 2:
+        raw = kernel.raw_basis_for_version(coordinates, order, version)
+        singular_values = torch.linalg.svdvals(raw)
+        tolerance = torch.finfo(torch.float64).eps * max(reference_width, order) * singular_values[0]
+        if int((singular_values > tolerance).sum()) == order:
+            columns = build_registered_basis(reference_width, order, runtime_dtype=torch.float64,
+                                             basis_family=kernel.basis_family, version=version)
+            error = float((columns.T @ columns - torch.eye(order, dtype=torch.float64)).abs().max())
+            span_error = float((raw - columns @ (columns.T @ raw)).norm() / raw.norm())
+            if error <= 1.0e-10 and span_error <= 1.0e-10:
+                return order
+        order //= 2
+    return None
+# ^^^ THOG
+
+
 def build_width_basis(reference_width: int, retained_width: int, family: str, version: str = "auto"):
     if isinstance(retained_width, bool) or not isinstance(retained_width, int) or not 2 <= retained_width <= reference_width:
         raise ValueError(f"WIDTH.order must satisfy 2 <= r <= D; got D={reference_width}, r={retained_width}")
@@ -48,9 +68,18 @@ def build_width_basis(reference_width: int, retained_width: int, family: str, ve
     rank = int((singular_values > tolerance).sum())
     condition = float(singular_values[0] / singular_values[-1])
     if rank != retained_width:
+        # vvv THOG explain the specified uniform-grid Chebyshev limit before allocation
+        remedy = ""
+        if definition.family == "chebyshev":
+            lower_order = _resolved_lower_width_order(reference_width, retained_width, kernel, resolved_version)
+            remedy = "; equally spaced Chebyshev coordinates cannot resolve this polynomial order in float64. "
+            if lower_order is not None:
+                remedy += f"Try WIDTH.order={lower_order} at D={reference_width}, or "
+            remedy += f"keep WIDTH.order={retained_width} with WIDTH.compressor=dct. No basis is substituted automatically."
+        # ^^^ THOG
         raise ValueError(
             f"unresolved width basis {definition.family}@{resolved_version}: D={reference_width}, "
-            f"r={retained_width}, float64 rank={rank}, tolerance={float(tolerance):.6g}, condition={condition:.6g}"
+            f"r={retained_width}, float64 rank={rank}, tolerance={float(tolerance):.6g}, condition={condition:.6g}{remedy}"
         )
     columns = build_registered_basis(reference_width, retained_width, runtime_dtype=torch.float64,
                                      basis_family=definition.family, version=resolved_version)

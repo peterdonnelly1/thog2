@@ -189,7 +189,7 @@ def test_local_chart_bounds_old_database_and_width_figures(tmp_path):
 
 def test_runner_scoped_width_and_depth_command():
     import thog_grid_runner as runner
-    recipe={'label':'compact','parameters':{'--geometry-preset':'width-type-I','--select-width':True,
+    recipe={'label':'compact','parameters':{'--geometry-preset':'width-type-I','--select-width':True,'--select-depth':True,
         'WIDTH.order':[3,4], 'WIDTH.compressor':'dct', 'DEPTH.order':[1], 'DEPTH.compressor':'haar',
         '--n-embd':[8],'--n-head':[2],'--n-layer':[2],'--warmup-iters':[0],'--max-iters':5}}
     runs=runner.expand(recipe)
@@ -209,7 +209,7 @@ def test_runner_width_single_and_grid_without_implicit_depth(orders,depth_orders
         '--instrumentation__width_activation_curves__mode':'probes',
         '--instrumentation__width_activation_curves__end_step':-1}
     if depth_orders is not None:
-        parameters.update({'DEPTH.order':depth_orders,'DEPTH.compressor':'chebyshev'})
+        parameters.update({'DEPTH.order':depth_orders,'DEPTH.compressor':'chebyshev','--select-depth':True})
     runs = runner.expand({'label':'width smoke grid','parameters':parameters})
     assert len(runs) == expected_count
     resolved_orders = set()

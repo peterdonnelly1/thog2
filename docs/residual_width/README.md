@@ -44,8 +44,8 @@ After updating the branch, restart the Instra backend to reload the catalogue, a
 | `WIDTH.order` | `64` |
 | `WIDTH.compressor` | `dct` |
 | `WIDTH.compressor_version` | Blank (resolves `auto`) |
-| `DEPTH.order` | Clear the inherited default; leaving a value selects joint depth compression |
-| `DEPTH.compressor`, `DEPTH.compressor_version` | Inactive when neither `DEPTH.order` nor `--select-depth` selects depth |
+| `--select-depth` | Blank or `false` for width only |
+| `DEPTH.order`, `DEPTH.compressor`, `DEPTH.compressor_version` | Inactive for width only; inherited defaults may remain |
 | `--n-embd`, `--n-layer`, `--n-head` | `256`, `4`, `4` |
 | `--block-size`, `--batch-size`, `--gradient-accumulation-steps` | `128`, `1`, `1` |
 | `--checkpoint-segment-size` | `2` |
@@ -58,7 +58,7 @@ After updating the branch, restart the Instra backend to reload the catalogue, a
 
 Clear any inherited global `--basis-family`/`--basis-version`, extra attention/MLP geometry, PLASTIC or HYPERBLOCK settings. Select the intended host/GPU; its execution profile supplies precision and attention backend. For the first Runner smoke, use the profile matching the successful direct smoke: float32 and SDPA. Set optional export and checkpoint destinations as usual.
 
-One value in every dimension gives a single run. Enter `32, 64, 128` in `WIDTH.order` for three width-only runs. To form a joint grid, also enter `2, 4` in `DEPTH.order` and `chebyshev` in `DEPTH.compressor`: the Cartesian product has six runs. A nonblank `DEPTH.order` automatically forwards `--select-depth`. Reference width, layer count and the existing numeric dimensions can also be swept. Each combination is validated before scheduling; `2 <= r <= D` and basis rank validity still apply.
+One value in every active dimension gives a single run. Enter `32, 64, 128` in `WIDTH.order` for three width-only runs. Inherited DEPTH fields neither select depth nor multiply width trials. To form a joint grid, explicitly enable `--select-depth` in Geometry, then enter `2, 4` in `DEPTH.order` and `chebyshev` in `DEPTH.compressor`: the Cartesian product has six runs. Reference width, layer count and the existing numeric dimensions can also be swept. Each combination is validated before scheduling; `2 <= r <= D` and basis rank validity still apply. A mixed preset grid resolves WIDTH and DEPTH independently for each selected preset.
 
 Width and depth compressor families/versions are fixed Recipe fields. Create separate Recipes to compare basis families. Do not enter comma-separated family names in these fields.
 
@@ -77,6 +77,12 @@ At both block pre-norm sites and ln_f, normalization is exactly C LN_D(Cᵀc). E
 Post-affine projection can discard represented feature components. Basis-dependent coupling is constrained by C and γ; G is not a free learned matrix. The standard pre-attention, pre-MLP and final normalization boundaries are preserved. Their mathematical equivalence is tested; optimal placement and broad language-model quality advantages remain unproven.
 
 Raw basis construction uses float64 numerical-rank tolerance `eps_float64 * max(D,r) * sigma_max`, and checks both orthogonality and preservation of the requested raw span. Chebyshev D=1024,r=128 is resolved, with raw condition approximately 111. Its r=512 request is rejected as rank deficient; DCT provides a resolved half-width alternative. No grid, family or version is silently substituted. A nonorthonormal adapter fails the width capability contract.
+
+Runner's Chebyshev rejection now gives an explicitly verified lower order and a DCT alternative. For D=1024, use `WIDTH.order=128` to try the registered uniform-grid Chebyshev basis, or retain `512`/`1024` with DCT. The numerical guard is required by the supplied specification; changing the sampling grid would require a different registered policy/version.
+
+The October 6 follow-up fixes an unintended depth selection: an inherited `DEPTH.order=12` had been forwarded even when the sole preset was width, introducing 12 contractions per linear operation. Relaunch the recipe after updating; existing runs/checkpoints retain their original representation. A matched smaller CPU comparison is recorded in [runner_width_selection_cpu.json](../../evidence/runner_width_selection_cpu.json). It diagnoses selection cost and does not predict CUDA timings. Projected reference-space normalization and unchanged attention/MLP internal widths still have costs after depth is disabled.
+
+Runs Logs uses the exact Runner attempt's console output when available, displays one unwrapped row per printed step with ANSI colours and newest rows at the top, and retains startup output below. Normal width startup is a compact geometry summary; `--explain-geometry` still prints full basis metadata. Loss plots draw a visible bottom axis and show a marker for a single recorded sample. The Runs step count advances from recorded optimizer losses even when geometry capture is off. See [residual_width_runtime_feedback.json](../../evidence/residual_width_runtime_feedback.json) for checks and remaining hardware limits.
 
 ## Capture controls
 

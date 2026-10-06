@@ -1,0 +1,333 @@
+{
+  "date": "2026-10-06",
+  "starting_commit": "2f5ab640692d6f0a23b2df17711132e488885453",
+  "selection_root_cause": "Runner enabled --select-depth whenever an inherited DEPTH.order was nonblank, even when WIDTH was the sole preset. The captures therefore ran WIDTH dct r512 with unintended DEPTH chebyshev P12.",
+  "selection_fix": "WIDTH alone ignores dedicated DEPTH fields in expansion, validation, identity and exported commands unless --select-depth is explicitly true. Dormant DEPTH choices do not multiply WIDTH trials. Depth presets retain their order requirement; explicitly selected joint execution is preserved.",
+  "captured_recipe_validation": {
+    "D": 1024,
+    "WIDTH.order": [
+      512,
+      1024
+    ],
+    "DEPTH.order": 12,
+    "L": 16,
+    "H": 16,
+    "context": 1024,
+    "batch_size": 16,
+    "gradient_accumulation": 6,
+    "checkpoint_segment_size": 4,
+    "logical_runs": 2,
+    "effective_depth_enabled": false,
+    "GPU_launches": 0
+  },
+  "chebyshev": "The supplied specification requires rejection of unresolved uniform-grid Chebyshev orders. D1024/r512 remains rejected; the error now gives a freshly certified r128 suggestion and DCT alternative. Real HTTP Preview at D1024/r128 succeeds without depth.",
+  "display_fixes": [
+    "Visible bottom loss axis in ordinary, maximized and relative-wall-time views",
+    "Single loss sample retains a marker",
+    "Recorded optimizer losses advance the Runs step count without optional geometry captures",
+    "Exact Runner attempt console output takes precedence over an adjacent shared startup log",
+    "Unwrapped newest-first console rows with incremental foreground/background/bold/reverse ANSI state and partial-row handling",
+    "Compact ordinary WIDTH startup; full basis metadata retained for --explain-geometry"
+  ],
+  "python_validation": {
+    "broad_tests": 275,
+    "broad_passed": 273,
+    "broad_subtest_failures": 2,
+    "errors": 0,
+    "skipped": 0,
+    "deselected": 1,
+    "additional_captured_recipe_test": "passed",
+    "final_runner_feedback_tests": 17,
+    "unique_passed_cases_including_additional_test": 274
+  },
+  "inherited_failures": [
+    {
+      "case": "tests/test_basis_family_plugin_registry.py::BasisFamilyPluginRegistryTests::test_07_primary_wrappers_have_no_family_specific_allow_list_or_tag_branch",
+      "subtest": "train_OWT.sh",
+      "count": 2,
+      "reason": "Legacy source-text assertions expect basis_artifact_tag_for_family and no family branching directly in the wrapper; the unchanged wrapper delegates to train_OWT_core.sh.",
+      "reproduced_on_starting_commit": true
+    }
+  ],
+  "deselected_inherited_case": "tests/test_geometry_registry_phase1.py::GeometryRegistryPhase1Tests::test_registry_console_report_is_complete_and_explicit; unchanged failure reproduced in previous feedback validation",
+  "javascript_passed": [
+    "instra_runner_followup_regression.js",
+    "instra_runner_current_grid_regression.js",
+    "instra_sep30_feedback_regression.js",
+    "instra_sep30_ui_regression.js",
+    "instra_sep20_runtime_owner_regression.js"
+  ],
+  "browser": {
+    "browser": "153.0.8010.0",
+    "checks": [
+      "three Plotly charts",
+      "step selection",
+      "residual-site selection",
+      "bounded curves",
+      "correct axis labels",
+      "maximize/restore",
+      "paired Multiview identity and step",
+      "rapid run switching",
+      "legacy run hides width charts",
+      "API pairing metadata",
+      "Runner real Save",
+      "Runner real width-only single Preview with optimizer",
+      "Runner real width-only grid Preview with optimizer",
+      "Runner real joint grid Preview",
+      "Runner width aliases and automatic selection",
+      "WIDTH.order in Frequently Used and Geometry",
+      "Runner HTTP validation error and recovery",
+      "Runner unbounded capture window edit",
+      "visible loss bottom axis in normal, maximized and time-axis views",
+      "visible single loss sample",
+      "loss-only completed-step count",
+      "Runs ANSI progress rows latest first without wrapping",
+      "incremental ANSI styles and partial progress row",
+      "inherited DEPTH.order does not select or multiply WIDTH trials",
+      "explicit DEPTH selector enables joint execution",
+      "Chebyshev rank error and verified lower-order Preview"
+    ],
+    "width_requests": 27,
+    "console_errors": [],
+    "pairing": [
+      {
+        "run": "fixture_01",
+        "step": 1,
+        "D": 8,
+        "r": 3
+      },
+      {
+        "run": "fixture_00",
+        "step": 1,
+        "D": 8,
+        "r": 3
+      }
+    ],
+    "runner_preview_parameters": [
+      {
+        "--max-iters": 50,
+        "--batch-size": 16,
+        "--geometry-preset": [
+          "width"
+        ],
+        "--n-layer": 16,
+        "DEPTH.order": [
+          12
+        ],
+        "--n-embd": 1024,
+        "--n-head": 16,
+        "--block-size": 1024,
+        "--gradient-accumulation-steps": 6,
+        "--checkpoint-segment-size": 4,
+        "--optimizer": "adamw",
+        "--learning-rate": 0.0009,
+        "--min-lr": 9e-05,
+        "--warmup-iters": 0,
+        "--select-width": true,
+        "WIDTH.order": [
+          16
+        ],
+        "WIDTH.compressor": "dct",
+        "DEPTH.compressor": "chebyshev",
+        "DEPTH.compressor_version": "auto",
+        "--instrumentation__width_activation_curves__end_step": -1
+      },
+      {
+        "--max-iters": 50,
+        "--batch-size": 16,
+        "--geometry-preset": [
+          "width-type-I"
+        ],
+        "--n-layer": 16,
+        "DEPTH.order": [
+          12
+        ],
+        "--n-embd": 1024,
+        "--n-head": 16,
+        "--block-size": 1024,
+        "--gradient-accumulation-steps": 6,
+        "--checkpoint-segment-size": 4,
+        "--optimizer": "adamw",
+        "--learning-rate": 0.0009,
+        "--min-lr": 9e-05,
+        "--warmup-iters": 0,
+        "--select-width": true,
+        "WIDTH.order": [
+          16,
+          32,
+          64
+        ],
+        "WIDTH.compressor": "dct",
+        "DEPTH.compressor": "chebyshev",
+        "DEPTH.compressor_version": "auto",
+        "--instrumentation__width_activation_curves__end_step": -1
+      },
+      {
+        "--max-iters": 50,
+        "--batch-size": 16,
+        "--geometry-preset": [
+          "width-type-I"
+        ],
+        "--n-layer": 16,
+        "DEPTH.order": [
+          1,
+          2
+        ],
+        "--n-embd": 1024,
+        "--n-head": 16,
+        "--block-size": 1024,
+        "--gradient-accumulation-steps": 6,
+        "--checkpoint-segment-size": 4,
+        "--optimizer": "adamw",
+        "--learning-rate": 0.0009,
+        "--min-lr": 9e-05,
+        "--warmup-iters": 0,
+        "--select-width": true,
+        "WIDTH.order": [
+          16,
+          32,
+          64
+        ],
+        "WIDTH.compressor": "dct",
+        "DEPTH.compressor": "chebyshev",
+        "DEPTH.compressor_version": "auto",
+        "--instrumentation__width_activation_curves__end_step": -1
+      },
+      {
+        "--max-iters": 50,
+        "--batch-size": 16,
+        "--geometry-preset": [
+          "width-type-I"
+        ],
+        "--n-layer": 16,
+        "DEPTH.order": [
+          1,
+          2
+        ],
+        "--n-embd": 1024,
+        "--n-head": 16,
+        "--block-size": 1024,
+        "--gradient-accumulation-steps": 6,
+        "--checkpoint-segment-size": 4,
+        "--optimizer": "adamw",
+        "--learning-rate": 0.0009,
+        "--min-lr": 9e-05,
+        "--warmup-iters": 0,
+        "--select-width": true,
+        "WIDTH.order": [
+          16,
+          32,
+          64
+        ],
+        "WIDTH.compressor": "dct",
+        "DEPTH.compressor": "chebyshev",
+        "DEPTH.compressor_version": "auto",
+        "--instrumentation__width_activation_curves__end_step": -1,
+        "--select-depth": [
+          true
+        ]
+      },
+      {
+        "--max-iters": 50,
+        "--batch-size": 16,
+        "--geometry-preset": [
+          "width-type-I"
+        ],
+        "--n-layer": 16,
+        "--n-embd": 1024,
+        "--n-head": 16,
+        "--block-size": 1024,
+        "--gradient-accumulation-steps": 6,
+        "--checkpoint-segment-size": 4,
+        "--optimizer": "adamw",
+        "--learning-rate": 0.0009,
+        "--min-lr": 9e-05,
+        "--warmup-iters": 0,
+        "--select-width": true,
+        "WIDTH.order": [
+          16,
+          32,
+          64
+        ],
+        "WIDTH.compressor": "dct",
+        "DEPTH.compressor": "chebyshev",
+        "DEPTH.compressor_version": "auto",
+        "--instrumentation__width_activation_curves__end_step": -1,
+        "--select-depth": [
+          false
+        ]
+      },
+      {
+        "--max-iters": 50,
+        "--batch-size": 16,
+        "--geometry-preset": [
+          "width-type-I"
+        ],
+        "--n-layer": 16,
+        "--n-embd": [
+          1024
+        ],
+        "--n-head": 16,
+        "--block-size": 1024,
+        "--gradient-accumulation-steps": 6,
+        "--checkpoint-segment-size": 4,
+        "--optimizer": "adamw",
+        "--learning-rate": 0.0009,
+        "--min-lr": 9e-05,
+        "--warmup-iters": 0,
+        "--select-width": true,
+        "WIDTH.order": [
+          128
+        ],
+        "WIDTH.compressor": "chebyshev",
+        "DEPTH.compressor": "chebyshev",
+        "DEPTH.compressor_version": "auto",
+        "--instrumentation__width_activation_curves__end_step": -1,
+        "--select-depth": [
+          false
+        ]
+      }
+    ],
+    "runner_preview_counts": [
+      1,
+      3,
+      3,
+      6,
+      3,
+      1
+    ],
+    "logs": {
+      "texts": [
+        "T3  061026-2200       30s    0.008h  \u0394= 10.0s  tok/s= 10000  toks=     98,304  loss=  7.7000  \u0394=  -0.100  lr= 9.000e-04  g/n=   1.000",
+        "T2  061026-2200       20s    0.006h  \u0394= 10.0s  tok/s= 10000  toks=     65,536  loss=  7.8000  \u0394=  -0.100  lr= 9.000e-04  g/n=   1.000",
+        "T1  061026-2200       10s    0.003h  \u0394= 10.0s  tok/s= 10000  toks=     32,768  loss=  7.9000  \u0394=  -0.100  lr= 9.000e-04  g/n=   1.000",
+        "  WIDTH: D=8 / r=3; DEPTH disabled",
+        "model parameters and options"
+      ],
+      "white_space": "pre",
+      "coloured": true,
+      "charts_hidden": true
+    }
+  },
+  "cpu_comparison": {
+    "evidence": "runner_width_selection_cpu.json",
+    "dimensions": {
+      "D": 128,
+      "r": 64,
+      "L": 16,
+      "P_before": 12,
+      "P_after": null
+    },
+    "mean_accidental_joint_update_ms": 1758.490004666707,
+    "mean_intended_width_update_ms": 332.7814982499907,
+    "observed_cpu_update_ratio": 5.284218064748604,
+    "linear_contractions_per_block_forward_before": 48,
+    "linear_contractions_per_block_forward_after": 4
+  },
+  "limits": [
+    "CPU fixtures and Chromium acceptance; no CUDA device is available in this environment",
+    "The measured CPU ratio does not predict RTX 4090 Laptop timings",
+    "Projected reference-space normalization and unchanged attention/MLP widths still incur costs in width-only execution",
+    "Existing launched runs and checkpoints retain their original representation; start a fresh WIDTH-only run after updating"
+  ]
+}

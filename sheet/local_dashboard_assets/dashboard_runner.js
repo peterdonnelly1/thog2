@@ -137,7 +137,8 @@
           Array.isArray(width_order) && !width_order.length) errors.push("WIDTH.order is required for a width-type-I Recipe");
     }
     const depth_options = parameters["--select-depth"];
-    if ((presets.includes("depth") || (Array.isArray(depth_options) ? depth_options.includes(true) : depth_options === true)) &&
+    const depth_selected = presets.includes("depth") || (Array.isArray(depth_options) ? depth_options.includes(true) : depth_options === true);
+    if (depth_selected &&
         parameters["--model-type"] !== "dense" &&
         (parameters["DEPTH.order"] === undefined || parameters["DEPTH.order"] === null || parameters["DEPTH.order"] === "" ||
           Array.isArray(parameters["DEPTH.order"]) && !parameters["DEPTH.order"].length)) {
@@ -164,7 +165,7 @@
       errors.push("--n-embd must be divisible by --n-head");
     if (Number.isFinite(scalar("--warmup-iters")) && Number.isFinite(scalar("--max-iters")) &&
         scalar("--warmup-iters") >= scalar("--max-iters")) errors.push("--warmup-iters must be less than --max-iters");
-    if (parameters["DEPTH.order"] !== undefined && scalar("DEPTH.order") > scalar("--n-layer"))
+    if (depth_selected && parameters["DEPTH.order"] !== undefined && scalar("DEPTH.order") > scalar("--n-layer"))
       errors.push("DEPTH.order must not exceed --n-layer");
     if (parameters["--min-lr"] !== undefined && scalar("--min-lr") > scalar("--learning-rate"))
       errors.push("--min-lr must not exceed --learning-rate");
@@ -180,6 +181,18 @@
     }
     // ^^^ THOG
     const presets=current_recipe().parameters?.["--geometry-preset"];
+    // vvv THOG keep inherited depth defaults editable and visibly inactive for WIDTH alone
+    const preset_values=Array.isArray(presets) ? presets : [presets];
+    const width_only=preset_values.every(preset=>width_presets.has(preset)) &&
+      current_recipe().parameters["--select-depth"] !== true;
+    const width_note=by_id("runner_width_selection_note");
+    if (width_note) width_note.hidden=!width_only;
+    for (const field of detail.querySelectorAll('input[data-runner-field^="DEPTH."]')) {
+      field.dataset.inactive=String(width_only);
+      field.title=field_help(snapshot.catalogue[field.dataset.runnerField]) +
+        (width_only ? " Inactive for width-only: enable --select-depth to combine WIDTH and DEPTH." : "");
+    }
+    // ^^^ THOG
     const dense_only=(Array.isArray(presets) ? presets.length===1 && presets[0]==="dense" : presets==="dense") ||
       current_recipe().parameters?.["--model-type"]==="dense";
     for (const field of detail.querySelectorAll("input[data-runner-field]")) {
@@ -429,6 +442,10 @@
         last_history_grid=launched.grid_id;chosen=launched.grid_id;manual_grid_selection=true;tab="progress";render();
       } catch (_) { /* The error is displayed above. */ }
     });
+    // vvv THOG state the active axes beside the selected Recipe
+    const width_note=add(detail,"p","Width only: inherited DEPTH fields are inactive. Enable --select-depth in Geometry to combine both axes.","runner-gpu-note");
+    width_note.id="runner_width_selection_note";
+    // ^^^ THOG
     const eligible=(network?.hosts||[]).filter(host=>(host.local||host.execution_enabled) &&
       host.last_discovered?.execution_profiles?.length)
       .flatMap(host=>(host.last_discovered?.gpus||[]).map(gpu=>({host,gpu})));

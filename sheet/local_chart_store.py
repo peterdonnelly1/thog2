@@ -866,6 +866,13 @@ class LocalChartReader:
                 ).fetchone()
             except sqlite3.OperationalError:
                 premat = {"count": 0, "minimum_update": None, "maximum_update": None}
+            # vvv THOG loss-only WIDTH runs still report their completed optimizer updates
+            try:
+                loss_step = connection.execute("SELECT MAX(optimizer_update) AS maximum_update FROM training_losses").fetchone()
+                loss_maximum_update = loss_step["maximum_update"]
+            except sqlite3.OperationalError:
+                loss_maximum_update = None
+            # ^^^ THOG
             # vvv THOG expose the already-recorded full run configuration to local dashboard consumers without duplicating storage
             config_row = connection.execute(
                 "SELECT value FROM metadata WHERE key = 'config_json'"
@@ -889,6 +896,9 @@ class LocalChartReader:
         finally:
             connection.close()
         return {
+            # vvv THOG normal loss recording supplies progress independently of optional geometry captures
+            "training_loss_maximum_update": None if loss_maximum_update is None else int(loss_maximum_update),
+            # ^^^ THOG
             "heatmap_count": int(heatmap["count"]),
             "heatmap_minimum_update": (
                 None if heatmap["minimum_update"] is None else int(heatmap["minimum_update"])
