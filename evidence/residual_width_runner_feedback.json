@@ -1,0 +1,189 @@
+{
+  "date": "2026-10-06",
+  "starting_commit": "a31cd68af936ec810a5cc1d16595971faa5b1674",
+  "root_cause": "Runner WIDTH validation passed public commands to the core parser, which rejects --optimizer. Uncaught argparse SystemExit dropped the HTTP response, displayed by Firefox as NetworkError.",
+  "changes": [
+    "Use the public lifecycle training parser and raise readable validation errors",
+    "Return HTTP 400 for any escaping argparse SystemExit",
+    "Require DEPTH.order only for DEPTH or explicit depth selection; omit dormant depth defaults in WIDTH-only commands",
+    "Show WIDTH.order in Frequently Used and Geometry",
+    "Accept width as an alias in Python, shell wrappers and Runner while persisting width-type-I identity",
+    "Select WIDTH automatically in Runner and scope its flag to WIDTH trials in mixed grids"
+  ],
+  "targeted_python": {
+    "tests": 239,
+    "failures": 1,
+    "errors": 0,
+    "skipped": 0
+  },
+  "inherited_failure": {
+    "case": "tests/test_geometry_registry_phase1.py::GeometryRegistryPhase1Tests::test_registry_console_report_is_complete_and_explicit",
+    "reason": "Expected text axes / uncompressed axes is absent from the unchanged registry report",
+    "reproduced_on_starting_commit": true
+  },
+  "javascript_passed": [
+    "instra_runner_followup_regression.js",
+    "instra_runner_current_grid_regression.js",
+    "instra_sep30_feedback_regression.js",
+    "instra_sep30_ui_regression.js",
+    "instra_sep20_runtime_owner_regression.js"
+  ],
+  "browser": {
+    "browser": "153.0.8010.0",
+    "checks": [
+      "three Plotly charts",
+      "step selection",
+      "residual-site selection",
+      "bounded curves",
+      "correct axis labels",
+      "maximize/restore",
+      "paired Multiview identity and step",
+      "rapid run switching",
+      "legacy run hides width charts",
+      "API pairing metadata",
+      "Runner real Save",
+      "Runner real width-only single Preview with optimizer",
+      "Runner real width-only grid Preview with optimizer",
+      "Runner real joint grid Preview",
+      "Runner width aliases and automatic selection",
+      "WIDTH.order in Frequently Used and Geometry",
+      "Runner HTTP validation error and recovery",
+      "Runner unbounded capture window edit"
+    ],
+    "width_requests": 22,
+    "console_errors": [],
+    "pairing": [
+      {
+        "run": "fixture_01",
+        "step": 1,
+        "D": 8,
+        "r": 3
+      },
+      {
+        "run": "fixture_00",
+        "step": 1,
+        "D": 8,
+        "r": 3
+      }
+    ],
+    "runner_preview_parameters": [
+      {
+        "--max-iters": 50,
+        "--batch-size": 16,
+        "--geometry-preset": [
+          "width"
+        ],
+        "--n-layer": 16,
+        "--n-embd": 1024,
+        "--n-head": 16,
+        "--block-size": 1024,
+        "--gradient-accumulation-steps": 6,
+        "--checkpoint-segment-size": 4,
+        "--optimizer": "adamw",
+        "--learning-rate": 0.0009,
+        "--min-lr": 9e-05,
+        "--warmup-iters": 0,
+        "--select-width": true,
+        "WIDTH.order": [
+          16
+        ],
+        "WIDTH.compressor": "dct",
+        "DEPTH.compressor": "chebyshev",
+        "DEPTH.compressor_version": "auto",
+        "--instrumentation__width_activation_curves__end_step": -1
+      },
+      {
+        "--max-iters": 50,
+        "--batch-size": 16,
+        "--geometry-preset": [
+          "width-type-I"
+        ],
+        "--n-layer": 16,
+        "--n-embd": 1024,
+        "--n-head": 16,
+        "--block-size": 1024,
+        "--gradient-accumulation-steps": 6,
+        "--checkpoint-segment-size": 4,
+        "--optimizer": "adamw",
+        "--learning-rate": 0.0009,
+        "--min-lr": 9e-05,
+        "--warmup-iters": 0,
+        "--select-width": true,
+        "WIDTH.order": [
+          16,
+          32,
+          64
+        ],
+        "WIDTH.compressor": "dct",
+        "DEPTH.compressor": "chebyshev",
+        "DEPTH.compressor_version": "auto",
+        "--instrumentation__width_activation_curves__end_step": -1
+      },
+      {
+        "--max-iters": 50,
+        "--batch-size": 16,
+        "--geometry-preset": [
+          "width-type-I"
+        ],
+        "--n-layer": 16,
+        "--n-embd": 1024,
+        "--n-head": 16,
+        "--block-size": 1024,
+        "--gradient-accumulation-steps": 6,
+        "--checkpoint-segment-size": 4,
+        "--optimizer": "adamw",
+        "--learning-rate": 0.0009,
+        "--min-lr": 9e-05,
+        "--warmup-iters": 0,
+        "--select-width": true,
+        "WIDTH.order": [
+          16,
+          32,
+          64
+        ],
+        "WIDTH.compressor": "dct",
+        "DEPTH.compressor": "chebyshev",
+        "DEPTH.compressor_version": "auto",
+        "--instrumentation__width_activation_curves__end_step": -1,
+        "DEPTH.order": [
+          1,
+          2
+        ]
+      },
+      {
+        "--max-iters": 50,
+        "--batch-size": 16,
+        "--geometry-preset": [
+          "width-type-I"
+        ],
+        "--n-layer": 16,
+        "--n-embd": 1024,
+        "--n-head": 16,
+        "--block-size": 1024,
+        "--gradient-accumulation-steps": 6,
+        "--checkpoint-segment-size": 4,
+        "--optimizer": "adamw",
+        "--learning-rate": 0.0009,
+        "--min-lr": 9e-05,
+        "--warmup-iters": 0,
+        "--select-width": true,
+        "WIDTH.order": [
+          16,
+          32,
+          64
+        ],
+        "WIDTH.compressor": "dct",
+        "DEPTH.compressor": "chebyshev",
+        "DEPTH.compressor_version": "auto",
+        "--instrumentation__width_activation_curves__end_step": -1
+      }
+    ],
+    "runner_preview_counts": [
+      1,
+      3,
+      6,
+      3
+    ]
+  },
+  "test_scope": "Targeted geometry, WIDTH, Runner, resume and real Chromium HTTP Save/Preview checks. GPU launches and a full suite rerun were not performed."
+}

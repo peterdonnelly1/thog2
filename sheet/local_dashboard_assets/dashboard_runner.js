@@ -8,7 +8,7 @@
   const multiview = by_id("runner_multiview_panel");
   const categories = ["GPT-2 Hyperparameters", "Resume and Fork", "Run Control Parameters", "Geometry", "Width Activation Curves", "Premat", "NSIGHT",
     "Coarse", "Layer Spacing", "Variable Depth", "Chaos Bumps", "Instrumentation"];
-  const main_table_order = ["--geometry-preset", "--optimizer", "--n-layer", "DEPTH.order", "--warmup-iters",
+  const main_table_order = ["--geometry-preset", "--optimizer", "--n-layer", "DEPTH.order", "WIDTH.order", "--warmup-iters",
     "--block-size", "--n-embd", "--n-head", "--gradient-accumulation-steps", "--checkpoint-segment-size",
     "--learning-rate", "--min-lr", "--max-iters", "--batch-size", "--log-interval", "--eval-iters", "--eval-interval"];
   const category_first_fields = {"Coarse":["--plastic__coarse_phase"],
@@ -90,8 +90,18 @@
       throw error;
     }
   }
+  // vvv THOG WIDTH is derived from the chosen preset and remains visible in Geometry
+  const width_presets = new Set(["width", "width-type-I"]);
+  function apply_width_selection(recipe) {
+    const parameters = recipe.parameters || {};
+    const presets = Array.isArray(parameters["--geometry-preset"]) ? parameters["--geometry-preset"] : [parameters["--geometry-preset"]];
+    if (presets.some(preset=>width_presets.has(preset))) parameters["--select-width"] = true;
+    else delete parameters["--select-width"];
+    return recipe;
+  }
+  // ^^^ THOG
   function current_recipe() {
-    if (draft) return draft;
+    if (draft) return apply_width_selection(draft);
     const defaults = saved_defaults();
     const power_caps = {};
     for (const host of network?.hosts || []) if (/^dreedle$/i.test(host.display_name || ""))
@@ -101,12 +111,12 @@
       if (cap == null) delete power_caps[gpu_id];else power_caps[gpu_id]=cap;
     }
     const special = new Set(["profiling_mode","recipe_label","gpu_pool","power_caps"]);
-    return {label:defaults.recipe_label||"New Grid Recipe", parameters:{...{"--max-iters":50,"--batch-size":16,"--geometry-preset":"depth",
+    return apply_width_selection({label:defaults.recipe_label||"New Grid Recipe", parameters:{...{"--max-iters":50,"--batch-size":16,"--geometry-preset":"depth",
       "--n-layer":16,"DEPTH.order":12,"--n-embd":1024,"--n-head":16,"--block-size":1024,
       "--gradient-accumulation-steps":6,"--checkpoint-segment-size":4,"--optimizer":"adamw",
       "--learning-rate":.0009,"--min-lr":.00009,"--warmup-iters":0},...Object.fromEntries(Object.entries(defaults).filter(([key])=>!special.has(key)))},
       power_caps, gpu_pool:defaults.gpu_pool||[],
-      profilers:defaults.profiling_mode==="pair"?["nsys","ncu"]:[defaults.profiling_mode||"none"]};
+      profilers:defaults.profiling_mode==="pair"?["nsys","ncu"]:[defaults.profiling_mode||"none"]});
   }
   function recipe_problems(recipe, hosts, require_gpu=true) {
     const errors = [];
@@ -121,14 +131,16 @@
       for (const key of Object.keys(parameters)) if (snapshot?.catalogue[key]?.dense_compatible===false)
         errors.push(`${key} is not applicable to a dense-only Recipe`);
     // vvv THOG require the selected width axis without implicitly selecting fixed depth
-    if (presets.includes("width-type-I") && parameters["--model-type"] !== "dense") {
-      if (parameters["--select-width"] !== true) errors.push("--select-width is required for a width-type-I Recipe");
+    if (presets.some(preset=>width_presets.has(preset)) && parameters["--model-type"] !== "dense") {
       const width_order = parameters["WIDTH.order"];
       if (width_order === undefined || width_order === null || width_order === "" ||
           Array.isArray(width_order) && !width_order.length) errors.push("WIDTH.order is required for a width-type-I Recipe");
     }
-    if (presets.some(preset=>preset !== "dense" && preset !== "width-type-I") && parameters["--model-type"] !== "dense" &&
-        (parameters["DEPTH.order"] === undefined || parameters["DEPTH.order"] === "")) {
+    const depth_options = parameters["--select-depth"];
+    if ((presets.includes("depth") || (Array.isArray(depth_options) ? depth_options.includes(true) : depth_options === true)) &&
+        parameters["--model-type"] !== "dense" &&
+        (parameters["DEPTH.order"] === undefined || parameters["DEPTH.order"] === null || parameters["DEPTH.order"] === "" ||
+          Array.isArray(parameters["DEPTH.order"]) && !parameters["DEPTH.order"].length)) {
       errors.push("DEPTH.order is required for a DEPTH Recipe");
     }
     // ^^^ THOG
@@ -160,6 +172,13 @@
   }
   function check_recipe(require_gpu=true) {
     const errors = recipe_problems(current_recipe(), network?.hosts, require_gpu);
+    // vvv THOG update the visible selector immediately when the preset changes
+    const width_field = detail.querySelector('input[data-runner-field="--select-width"]');
+    if (width_field) {
+      width_field.value = current_recipe().parameters["--select-width"] === true ? "true" : "";
+      width_field.readOnly = current_recipe().parameters["--select-width"] === true;
+    }
+    // ^^^ THOG
     const presets=current_recipe().parameters?.["--geometry-preset"];
     const dense_only=(Array.isArray(presets) ? presets.length===1 && presets[0]==="dense" : presets==="dense") ||
       current_recipe().parameters?.["--model-type"]==="dense";
@@ -930,6 +949,6 @@
     render();
   });
   setInterval(()=>{if(visible && tab!=="recipes")refresh();},5000);
-  window.instra_runner_test_hooks = Object.freeze({recipe_problems,current_recipe,remember_default,format_duration,grid_elapsed,estimate_range,history_outcome,field_help,invalid_field_value,premat_enabled,category_enabled,categories_for_field,matches_search,compare_fields});
+  window.instra_runner_test_hooks = Object.freeze({recipe_problems,apply_width_selection,current_recipe,remember_default,format_duration,grid_elapsed,estimate_range,history_outcome,field_help,invalid_field_value,premat_enabled,category_enabled,categories_for_field,matches_search,compare_fields});
 })();
 // ^^^ THOG

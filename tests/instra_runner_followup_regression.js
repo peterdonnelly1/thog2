@@ -16,7 +16,7 @@ const sandbox = {
   setInterval() {},
 };
 vm.runInNewContext(runner, sandbox);
-const {recipe_problems, invalid_field_value} = sandbox.window.instra_runner_test_hooks;
+const {recipe_problems, invalid_field_value, apply_width_selection} = sandbox.window.instra_runner_test_hooks;
 const parameters = {
   "--geometry-preset":"depth", "--optimizer":"adamw", "--n-layer":2, "DEPTH.order":1,
   "--warmup-iters":0, "--block-size":32, "--n-embd":64, "--n-head":4,
@@ -46,7 +46,15 @@ assert.equal(recipe_problems({...recipe,parameters:{...width_parameters,"WIDTH.o
   "independent width/depth grids remain valid");
 assert.equal(recipe_problems({...recipe,parameters:{...width_parameters,"--geometry-preset":["dense","width-type-I"]}},hosts).length,0,
   "a dense reference can accompany width-only trials");
-assert.match(recipe_problems({...recipe,parameters:{...width_parameters,"--select-width":false}},hosts).join(" "), /--select-width.*required/);
+assert.equal(recipe_problems({...recipe,parameters:{...width_parameters,"--select-width":false}},hosts).length,0);
+for (const preset of ["width", "width-type-I", ["dense", "width"]]) {
+  const selected = apply_width_selection({...recipe,parameters:{...width_parameters,"--geometry-preset":preset,"--select-width":false}});
+  assert.equal(selected.parameters["--select-width"],true);
+  assert.equal(recipe_problems(selected,hosts).length,0);
+}
+assert.equal(Object.hasOwn(apply_width_selection({...recipe,parameters:{...parameters,"--select-width":true}}).parameters,"--select-width"),false);
+assert.match(recipe_problems({...recipe,parameters:{...width_parameters,"--select-depth":[true]}},hosts).join(" "), /DEPTH.order is required/);
+assert.equal(recipe_problems({...recipe,parameters:{...width_parameters,"--geometry-preset":"full_block","--select-width":false}},hosts).length,0);
 assert.match(recipe_problems({...recipe,parameters:{...width_parameters,"WIDTH.order":""}},hosts).join(" "), /WIDTH.order.*required/);
 assert.match(recipe_problems({...recipe,parameters:{...width_parameters,"--geometry-preset":["depth","width-type-I"]}},hosts).join(" "), /DEPTH.order is required/,
   "legacy depth trials must still select their depth order");

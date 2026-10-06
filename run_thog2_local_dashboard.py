@@ -1361,6 +1361,11 @@ def _runner_do_post(self):
         self._send_json(result)
     except (ValueError, TypeError, KeyError, RuntimeError, OSError, _instra_network.NetworkError) as error:
         self._send_json({"error": str(error)}, status=HTTPStatus.BAD_REQUEST)
+    # vvv THOG argparse must never close a Runner request without an HTTP response
+    except SystemExit as error:
+        self._send_json({"error": f"Runner rejected the generated training command (parser exit {error.code})"},
+                        status=HTTPStatus.BAD_REQUEST)
+    # ^^^ THOG
 
 
 _handler_for_before_runner = _base._handler_for

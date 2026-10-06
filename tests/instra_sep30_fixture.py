@@ -1,5 +1,6 @@
 # vvv THOG isolated dashboard fixture for browser regression tests; no agents or GPUs
 import json
+import os
 from pathlib import Path
 import sys
 from http.server import ThreadingHTTPServer
@@ -77,6 +78,22 @@ def fixture_file(grid_id,name):
     return file_paths[(grid_id,name)]
 
 dashboard._runner_service=SimpleNamespace(snapshot=lambda:snapshot,file=fixture_file)
+# vvv THOG width acceptance uses actual Runner Save/Preview resolution with isolated host discovery
+if os.environ.get("THOG_WIDTH_REAL_RUNNER") == "1":
+    instra_runner.STATE_DIR = fixture_root / "runner-state"
+    instra_runner.STATE_PATH = instra_runner.STATE_DIR / "runner.json"
+    instra_runner.LEASE_PATH = instra_runner.STATE_DIR / "controller.lock"
+    instra_runner.GRID_SCRIPTS = fixture_root / "runner-exports"
+    def runner_call(host_id, operation, args=None):
+        assert operation == "runner_reconcile"
+        return {"gpus": network["hosts"][0]["last_discovered"]["gpus"], "reservations": {}, "attempts": {}}
+    real_runner = instra_runner.RunnerService(SimpleNamespace(list_hosts=lambda:network, runner_call=runner_call), start_worker=False)
+    def runner_snapshot():
+        actual = real_runner.snapshot()
+        return {**snapshot, "recipes": [*snapshot["recipes"], *actual["recipes"]]}
+    dashboard._runner_service=SimpleNamespace(snapshot=runner_snapshot, file=fixture_file,
+        preview=real_runner.preview, save_recipe=real_runner.save_recipe)
+# ^^^ THOG
 # ^^^ THOG
 dashboard._network_service=SimpleNamespace(list_hosts=lambda:network)
 catalog=dashboard._base.DashboardCatalog(root=fixture_root)

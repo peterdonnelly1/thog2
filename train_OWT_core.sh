@@ -207,7 +207,7 @@ usage() {
 Usage: $0 [options] [-- extra ${RUN_MODULE} args]
 
 Model/run:
-  -p PRESET=${GEOMETRY_PRESET}                       dense | legacy_sheet_col | depth | jpeg_like_v1 | head_aware_block | mlp_block | full_block | width-type-I
+  -p PRESET=${GEOMETRY_PRESET}                       dense | legacy_sheet_col | depth | jpeg_like_v1 | head_aware_block | mlp_block | full_block | width-type-I | width
                                                    single value, comma list, or quoted space list
   -q RUN_MODE=${RUN_MODE}                        fresh | resume
   -g RUN_NAME=${RUN_NAME:-auto}
@@ -1004,7 +1004,10 @@ parse_geometry_preset_values() {
     case "$value" in
       dense) PRESET_VALUES+=("$value"); HAS_DENSE_PRESET=true ;;
       depth) PRESET_VALUES+=("$value"); HAS_COMPACT_PRESET=true ;;
-      width-type-I) PRESET_VALUES+=("$value"); HAS_COMPACT_PRESET=true ;;
+      # vvv THOG canonical width aliases follow the same scoped wrapper path
+      # width-type-I) PRESET_VALUES+=("$value"); HAS_COMPACT_PRESET=true ;;
+      width|width-type-I) PRESET_VALUES+=("width-type-I"); HAS_COMPACT_PRESET=true ;;
+      # ^^^ THOG
       legacy_sheet_col|head_aware_block|mlp_block|full_block) PRESET_VALUES+=("$value"); HAS_COMPACT_PRESET=true; HAS_NON_DEPTH_COMPACT_PRESET=true ;;
       jpeg_like_v1) PRESET_VALUES+=("$value"); HAS_COMPACT_PRESET=true; HAS_NON_DEPTH_COMPACT_PRESET=true; HAS_JPEG_LIKE_PRESET=true ;;
       hyperblock) PRESET_VALUES+=("$value"); HAS_COMPACT_PRESET=true; HAS_NON_DEPTH_COMPACT_PRESET=true ;;

@@ -19,6 +19,7 @@ def test_width_runs_multiview_and_legacy_browser_acceptance(tmp_path):
         listener.bind(('127.0.0.1', 0))
         port = listener.getsockname()[1]
     environment = dict(os.environ)
+    environment['THOG_WIDTH_REAL_RUNNER'] = '1'
     if 'NODE_PATH' not in environment and os.environ.get('CODEX_PRIMARY_RUNTIME_NODE_MODULES'):
         environment['NODE_PATH'] = os.environ['CODEX_PRIMARY_RUNTIME_NODE_MODULES']
     log = tmp_path / 'server.log'

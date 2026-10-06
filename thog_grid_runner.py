@@ -11,7 +11,7 @@ import shlex
 import uuid
 
 CATALOGUE = json.loads(Path(__file__).with_name("instra_runner_catalogue.json").read_text())
-COMMON = ("--geometry-preset", "--optimizer", "--n-layer", "DEPTH.order", "--warmup-iters",
+COMMON = ("--geometry-preset", "--optimizer", "--n-layer", "DEPTH.order", "WIDTH.order", "--warmup-iters",
           "--block-size", "--n-embd", "--n-head", "--gradient-accumulation-steps",
           "--checkpoint-segment-size", "--learning-rate", "--min-lr", "--max-iters", "--batch-size",
           "--log-interval", "--eval-iters", "--eval-interval")
@@ -21,6 +21,7 @@ WRAPPER_ENV_OPTIONS = {"--depth-materialisation-matmul": "THOG2_DEPTH_MATERIALIS
                        "--materialisation-profiling": "THOG2_MATERIALISATION_PROFILING",
                        "--torch-compile": "THOG2_TORCH_COMPILE"}
 MAX_RUNS = 4096
+WIDTH_PRESETS = {"width", "width-type-I"}
 # vvv THOG share dense compatibility between Recipe validation, UI and mixed Grid resolution
 DENSE_GEOMETRY_OPTIONS = {"--geometry-preset", "--residual-init-policy", "--residual-init-depth-source",
                           "--residual-init-depth-value", "--explain-geometry"}
@@ -143,6 +144,10 @@ def validate_recipe(recipe):
     if not isinstance(caps, dict) or any(not isinstance(key, str) or not re.fullmatch(r"[\w.:-]{1,150}", key)
                                        or type(value) is not int or not 50 <= value <= 600 for key, value in caps.items()):
         raise ValueError("power_caps must map GPU identities to integer watts in 50–600")
+    # vvv THOG Runner presets select WIDTH automatically, including saved Recipes
+    if any(preset in WIDTH_PRESETS for preset in choices.get("--geometry-preset", [])):
+        choices["--select-width"] = True
+    # ^^^ THOG
     return choices
 
 
@@ -163,6 +168,13 @@ def expand(recipe, *, stable_preview=False):
     max_layers = max(choices.get("--n-layer", [0]))
     for selected in itertools.product(*(choices[key] for key in keys)):
         values = {**fixed, **dict(zip(keys, selected))}
+        # vvv THOG resolve aliases once and keep width selection local to each concrete preset
+        if values.get("--geometry-preset") in WIDTH_PRESETS:
+            values["--geometry-preset"] = "width-type-I"
+        elif any(preset in WIDTH_PRESETS for preset in presets):
+            values = {name: value for name, value in values.items()
+                      if name != "--select-width" and not name.startswith("WIDTH.")}
+        # ^^^ THOG
         dense = values.get("--geometry-preset") == "dense" or values.get("--model-type") == "dense"
         if mixed_presets and not dense and values.get("--n-layer", max_layers) != max_layers:
             continue
@@ -188,10 +200,20 @@ def expand(recipe, *, stable_preview=False):
         if values.get("--select-width") or values.get("--geometry-preset") == "width-type-I" or any(name.startswith("WIDTH.") for name in values):
             if not values.get("--select-width") or values.get("--geometry-preset") != "width-type-I":
                 raise ValueError("width-type-I requires --select-width and WIDTH.order")
-            from run_thog2_owt_core import build_parser, geometry_plan_from_arguments, config_from_arguments
+            # vvv THOG validate the public command surface and return parse errors to the HTTP caller
+            # from run_thog2_owt_core import build_parser, geometry_plan_from_arguments, config_from_arguments
+            from run_thog2_lifecycle import build_parser
+            from run_thog2_owt_core import geometry_plan_from_arguments, config_from_arguments
             check_run = {"parameters": values, "grid_tag": "G-00000", "run_id": "width-validation", "profiler": "none"}
-            arguments = build_parser().parse_args(command_for(check_run, {})[3:])
+            parser = build_parser()
+            def reject_command(message):
+                raise ValueError(f"Invalid WIDTH Recipe command: {message}")
+            parser.error = reject_command
+            arguments = parser.parse_args(command_for(check_run, {})[3:])
+            if arguments.max_iters is None:
+                arguments.max_iters = 100
             config_from_arguments(arguments, geometry_plan=geometry_plan_from_arguments(arguments))
+            # ^^^ THOG
         # ^^^ THOG
         identity = json.dumps(values, sort_keys=True, separators=(",", ":"))
         if identity in seen:
@@ -218,12 +240,22 @@ def command_for(run, gpu, *, python="python", entry="run_thog2_owt", host_label=
     if run.get("attention_backend"):
         args += ["--attention-backend", run["attention_backend"]]
     preset = values.get("--geometry-preset", "depth")
+    # vvv THOG direct exports also honor width aliases and automatic selection
+    width_selected = preset in WIDTH_PRESETS
+    depth_selected = bool(values.get("DEPTH.order") or values.get("--select-depth"))
+    if width_selected:
+        args.append("--select-width")
+    # ^^^ THOG
     args += ["--model-type", values.get("--model-type", "dense" if preset == "dense" else "sheet")]
     if (any(name.startswith("--plastic__") and name != "--plastic__enabled" and
             (CATALOGUE[name]["type"] != "flag" or value is True) for name, value in values.items())
             and "--plastic__enabled" not in values and "--no-plastic__enabled" not in values):
         args.append("--plastic__enabled")
     for name, value in values.items():
+        # vvv THOG dormant depth defaults do not silently activate or invalidate width-only runs
+        if width_selected and (name == "--select-width" or name.startswith("DEPTH.") and not depth_selected):
+            continue
+        # ^^^ THOG
         # vvv THOG scoped basis controls share existing --option forwarding
         if name.startswith("WIDTH.") or name.startswith("DEPTH.") and name != "DEPTH.order":
             args += ["--option", f"{name}={value}"]

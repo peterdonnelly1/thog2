@@ -364,10 +364,11 @@
       "head_aware_block",
       "mlp_block",
       "full_block",
-      "width-type-I"
+      "width-type-I",
+      "width"
     ],
     "default": null,
-    "help": "dense | legacy_sheet_col | depth | jpeg_like_v1 | head_aware_block | mlp_block | full_block | width-type-I",
+    "help": "dense | legacy_sheet_col | depth | jpeg_like_v1 | head_aware_block | mlp_block | full_block | width-type-I | width (alias)",
     "kind": "dimension",
     "short": "-p",
     "type": "string"
@@ -1561,7 +1562,7 @@
     "default": false,
     "choices": [],
     "kind": "fixed",
-    "help": "Activate width-type-I compact residuals; pair with WIDTH.order."
+    "help": "Enabled automatically in Runner when the preset includes width or width-type-I; pair with WIDTH.order."
   },
   "WIDTH.order": {
     "category": "Geometry",

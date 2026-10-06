@@ -394,7 +394,11 @@ def build_parser() -> argparse.ArgumentParser:
     )                                                                                                                                                     # <<< THOG literal public spelling requested for the default-off relay
     # ^^^ THOG
     parser.add_argument("--depth-compress-layer-norm-and-bias", action=argparse.BooleanOptionalAction, default=False)                                      # <<< THOG DEPTH-only vector participation control
-    parser.add_argument("--geometry-preset", choices=GEOMETRY_PRESETS, default=GEOMETRY_PRESET_DEPTH)
+    # vvv THOG canonicalize the public width alias before geometry and checkpoint resolution
+    # parser.add_argument("--geometry-preset", choices=GEOMETRY_PRESETS, default=GEOMETRY_PRESET_DEPTH)
+    from sheet.compact_identity import normalize_geometry_preset
+    parser.add_argument("--geometry-preset", type=normalize_geometry_preset, choices=GEOMETRY_PRESETS, default=GEOMETRY_PRESET_DEPTH)
+    # ^^^ THOG
     parser.add_argument("--attention-geometry", choices=ATTENTION_GEOMETRIES)
     parser.add_argument("--mlp-geometry", choices=MLP_GEOMETRIES)
     parser.add_argument("--basis-family", action=ExplicitLegacyBasisAction, choices=BASIS_FAMILIES, default=BASIS_FAMILY_CHEBYSHEV)

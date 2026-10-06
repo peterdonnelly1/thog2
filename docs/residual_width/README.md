@@ -39,13 +39,13 @@ After updating the branch, restart the Instra backend to reload the catalogue, a
 
 | Field | Width-only smoke setting |
 | --- | --- |
-| `--geometry-preset` | `width-type-I` |
-| `--select-width` | `true` |
+| `--geometry-preset` | `width` or `width-type-I` |
+| `--select-width` | Enabled automatically by Runner; visible in Geometry |
 | `WIDTH.order` | `64` |
 | `WIDTH.compressor` | `dct` |
 | `WIDTH.compressor_version` | Blank (resolves `auto`) |
 | `DEPTH.order` | Clear the inherited default; leaving a value selects joint depth compression |
-| `DEPTH.compressor`, `DEPTH.compressor_version` | Blank for width alone |
+| `DEPTH.compressor`, `DEPTH.compressor_version` | Inactive when neither `DEPTH.order` nor `--select-depth` selects depth |
 | `--n-embd`, `--n-layer`, `--n-head` | `256`, `4`, `4` |
 | `--block-size`, `--batch-size`, `--gradient-accumulation-steps` | `128`, `1`, `1` |
 | `--checkpoint-segment-size` | `2` |

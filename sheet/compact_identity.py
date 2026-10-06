@@ -26,6 +26,11 @@ GEOMETRY_PRESET_FULL_BLOCK = "full_block"
 GEOMETRY_PRESET_CONVENTIONAL = "conventional"
 # vvv THOG new explicitly selected residual architecture
 GEOMETRY_PRESET_WIDTH = "width-type-I"
+GEOMETRY_PRESET_WIDTH_ALIAS = "width"
+
+
+def normalize_geometry_preset(value: str) -> str:
+    return GEOMETRY_PRESET_WIDTH if value == GEOMETRY_PRESET_WIDTH_ALIAS else value
 # ^^^ THOG
 
 ATTENTION_GEOMETRY_LEGACY_SHEET_COL = "legacy_sheet_col"
@@ -58,6 +63,7 @@ DEFAULT_MLP_HIDDEN_COMPRESSOR = BASIS_FAMILY_DCT
 
 GEOMETRY_PRESETS = (
     GEOMETRY_PRESET_WIDTH,
+    GEOMETRY_PRESET_WIDTH_ALIAS,
     GEOMETRY_PRESET_LEGACY_SHEET_COL,
     GEOMETRY_PRESET_DEPTH,
     GEOMETRY_PRESET_JPEG_LIKE_V1,
@@ -156,7 +162,7 @@ def _canonical_optional_string(name: str, value: Optional[str]) -> Optional[str]
 def _require_member(name: str, value: Optional[str], allowed: Tuple[str, ...]) -> Optional[str]:
     normalized = _canonical_optional_string(name, value)
     # vvv THOG preserve the registered mixed-case width variant spelling
-    if normalized == "width-type-i":
+    if normalized in ("width-type-i", GEOMETRY_PRESET_WIDTH_ALIAS):
         normalized = GEOMETRY_PRESET_WIDTH
     # ^^^ THOG
     if normalized is not None and normalized not in allowed:

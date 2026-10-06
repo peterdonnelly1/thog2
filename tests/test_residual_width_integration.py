@@ -258,9 +258,10 @@ def test_complete_pilot_run_emits_width_diagnostics_without_materialization(tmp_
     trainer.close()
 
 
+@pytest.mark.parametrize('preset', ['width', 'width-type-I'])
 @pytest.mark.parametrize('suffix', [[], ['--select-depth', '--option', 'DEPTH.order=1', '--option', 'DEPTH.compressor=haar']])
-def test_public_shell_launch_preserves_width_options_and_capture_namespace(suffix):
-    command = ['bash', 'train_OWT.sh', '-p', 'width-type-I', '--select-width', '--option', 'WIDTH.order=3',
+def test_public_shell_launch_preserves_width_options_and_capture_namespace(suffix, preset):
+    command = ['bash', 'train_OWT.sh', '-p', preset, '--select-width', '--option', 'WIDTH.order=3',
                '--option', 'WIDTH.compressor=dct', '-L', '2', '-D', '8', '-H', '2', '-C', '8', '-P', '2',
                '-n', '5', '-w', '0', '-b', '1', '-A', '1', '-x', 'true', '-I', 'none',
                '--instrumentation__width_activation_curves__mode=basic', *suffix, '--', '--print-resolved-json']

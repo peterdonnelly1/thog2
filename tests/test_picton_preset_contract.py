@@ -88,6 +88,7 @@ def test_picton_final_preset_maps_to_exact_subsystem_geometries(
 def test_picton_preset_registry_contains_only_final_names_plus_internal_conventional() -> None:
     assert GEOMETRY_PRESETS == (
         GEOMETRY_PRESET_WIDTH,  # THOG preserve every existing preset and add the width path
+        "width",  # THOG public alias resolves to the same canonical representation
         GEOMETRY_PRESET_LEGACY_SHEET_COL,
         GEOMETRY_PRESET_DEPTH,
         GEOMETRY_PRESET_JPEG_LIKE_V1,

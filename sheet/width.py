@@ -172,6 +172,10 @@ def width_identity(config, *, analysis_metadata=None):
 
 
 def validate_width_configuration(config):
+    # vvv THOG script and programmatic aliases persist the same canonical representation
+    if config.geometry_preset == "width":
+        config.geometry_preset = WIDTH_PRESET
+    # ^^^ THOG
     if not isinstance(config.width_enabled, bool) or not isinstance(config.width_depth_enabled, bool):
         raise ValueError("width selection fields must be bool")
     if not config.width_enabled:
