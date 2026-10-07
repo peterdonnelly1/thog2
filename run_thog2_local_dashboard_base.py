@@ -141,6 +141,26 @@ def _timestamp_from_epoch(value: float) -> str:
     return datetime.fromtimestamp(value, tz=timezone.utc).isoformat()
 
 
+# vvv THOG fresh recorded model data is an implicit heartbeat, including already-running loss-only jobs
+def _model_activity_timestamp(metadata: Dict[str, str], fallback: str) -> str:
+    latest = None
+    for key in ("heartbeat_at", "data_updated_at", "updated_at"):
+        value = metadata.get(key)
+        if not value:
+            continue
+        try:
+            timestamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            timestamp = timestamp.replace(tzinfo=timezone.utc) if timestamp.tzinfo is None else timestamp.astimezone(timezone.utc)
+        except (ValueError, OverflowError):
+            continue
+        if latest is None or timestamp > latest:
+            latest = timestamp
+    # Reader checkpoints and remote copies can alter file mtime without model
+    # activity. Use it only when the legacy store has no valid activity metadata.
+    return latest.isoformat() if latest is not None else fallback
+# ^^^ THOG
+
+
 def _normalise_relative_path(value: str) -> PurePosixPath:
     if "\\" in value:
         raise ValueError("backslashes are not permitted in file paths")
@@ -264,6 +284,7 @@ class RunDashboardState:
             target_update=target_update,
         )
         modified_at = _timestamp_from_epoch(_modified_time(self.database_path))
+        activity_at = _model_activity_timestamp(metadata, modified_at)
         artifact_name = metadata.get(
             "artifact_name",
             metadata.get("run_name", self.database_path.parent.name),
@@ -304,14 +325,8 @@ class RunDashboardState:
             ),
             "is_legacy_layout": is_legacy_layout,
             "created_at": metadata.get("created_at", modified_at),
-            "updated_at": metadata.get(
-                "heartbeat_at",
-                metadata.get("updated_at", modified_at),
-            ),
-            "heartbeat_at": metadata.get(
-                "heartbeat_at",
-                metadata.get("updated_at", modified_at),
-            ),
+            "updated_at": activity_at,
+            "heartbeat_at": activity_at,
             "data_updated_at": data_updated_at or modified_at,
             "host_label": str(configuration.get("host_label", "")),
             "model_type": str(configuration.get("model_type", "")),

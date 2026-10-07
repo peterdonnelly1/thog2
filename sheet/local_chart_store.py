@@ -338,6 +338,7 @@ class LocalChartStore:
             "INSERT OR REPLACE INTO metadata(key, value) VALUES (?, ?)",
             (
                 ("run_state", "recording"),
+                ("heartbeat_at", now),  # THOG loss/throughput recording proves activity without optional capture hooks
                 ("data_updated_at", now),
                 ("updated_at", now),
             ),

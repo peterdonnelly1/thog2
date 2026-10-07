@@ -39,6 +39,8 @@ After updating the branch, restart the Instra backend to reload the catalogue, a
 
 Update every selected execution host to the same branch and restart Instra on each host. Startup now compares the serving Node Agent's loaded Runner code and catalogue with the updated checkout, replacing a stale agent automatically. Its persisted reservations and already-running child jobs remain intact. A browser refresh alone does not reload the agent. This repairs `Unsupported or automatic Runner option: --select-width` when an older agent survives a code update.
 
+The Runs timeout uses the newest model heartbeat or recorded-data timestamp. Loss-only runs refresh their heartbeat when loss or throughput is recorded. Already-running jobs with an older startup heartbeat are also handled: fresh data clears **Timed out** on the next catalogue poll, without restarting training. Read-only polling, database checkpoints and remote file transfers do not count as new model activity. A timeout indicates missing recent telemetry; it does not establish that the training process has exited.
+
 | Field | Width-only smoke setting |
 | --- | --- |
 | `--geometry-preset` | `width` or `width-type-I` |
