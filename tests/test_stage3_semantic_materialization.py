@@ -29,7 +29,7 @@ from sheet.semantic_materializer import (
 from sheet.trajectory import SheetTrajectory
 
 
-FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "stage0_legacy_sheet_col_fixture.json"
+FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "stage0_root_sheet_col_fixture.json"
 
 
 class Stage3SemanticMaterializationTests(unittest.TestCase):

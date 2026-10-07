@@ -753,7 +753,7 @@ def _validate_mapping_target(model: nn.Module, config: Any) -> Tuple[str, int, s
     version = str(version)
     if version != BASIS_VERSION:
         raise ValueError(
-            "DENSE snapshot v1 requires the current QR-stabilised Chebyshev version; "
+            "DENSE snapshot v1 requires the current root-sampled Chebyshev version; "
             f"expected={BASIS_VERSION!r}, got={version!r}"
         )
     if order < 1 or order > int(config.n_layer):

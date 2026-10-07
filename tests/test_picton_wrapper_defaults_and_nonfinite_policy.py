@@ -58,7 +58,7 @@ if len(sys.argv) >= 2 and sys.argv[1] == '-c':
         family = sys.argv[3]
         aliases = {
             'cheby': 'chebyshev',
-            'chebyshev_first_kind_qr': 'chebyshev',
+            'chebyshev_first_kind_roots': 'chebyshev',
             'dct_ii': 'dct',
             'dct_ii_orthonormal': 'dct',
             'balanced_haar': 'haar',

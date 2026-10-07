@@ -51,7 +51,7 @@ def worker(variant, seed, updates):
         geometry_preset='width-type-I' if width else 'depth' if depth else None,
         n_embd=32, n_head=4, n_layer=4, block_size=16, vocab_size=len(characters),
         depth_order=2, base_row_order=8, basis_family=None if variant == 'dense' else 'dct',
-        basis_version='chebyshev_first_kind_qr_v1' if variant == 'dense' else 'dct_ii_orthonormal_v1',
+        basis_version='chebyshev_first_kind_roots_v1' if variant == 'dense' else 'dct_ii_orthonormal_v1',
         width_enabled=width, width_order=12 if width else None,
         width_compressor='dct', width_depth_enabled=width and depth,
         batch_size=2, gradient_accumulation_steps=2, max_updates=updates,

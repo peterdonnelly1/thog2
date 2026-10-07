@@ -1,0 +1,92 @@
+{
+  "browser": "Chromium",
+  "retention": {
+    "same": true,
+    "rendered": 0,
+    "skipped": 100
+  },
+  "columns": [
+    "menu",
+    "select",
+    "grid_visibility",
+    "visibility",
+    "steps",
+    "duration",
+    "loss",
+    "state",
+    "name",
+    "wandb",
+    "host",
+    "gpu",
+    "preset",
+    "optimizer",
+    "gb",
+    "layers",
+    "depth_order",
+    "d_model",
+    "width_order",
+    "premat",
+    "parms",
+    "equiv",
+    "warmup",
+    "context",
+    "heads",
+    "grad_accum",
+    "activation_checkpointing",
+    "learning_rate",
+    "min_learning_rate",
+    "probe_start",
+    "probe_end",
+    "curve_start",
+    "curve_end",
+    "capture_period",
+    "updated"
+  ],
+  "states": [
+    {
+      "state": "ready",
+      "color": "rgb(22, 131, 59)"
+    },
+    {
+      "state": "queued",
+      "color": "rgb(22, 131, 59)"
+    },
+    {
+      "state": "dispatching",
+      "color": "rgb(22, 131, 59)"
+    },
+    {
+      "state": "running",
+      "color": "rgb(22, 131, 59)"
+    },
+    {
+      "state": "blocked",
+      "color": "rgb(37, 40, 45)"
+    },
+    {
+      "state": "stopping",
+      "color": "rgb(37, 40, 45)"
+    },
+    {
+      "state": "flushing",
+      "color": "rgb(179, 38, 46)"
+    },
+    {
+      "state": "unknown",
+      "color": "rgb(179, 38, 46)"
+    },
+    {
+      "state": "completed",
+      "color": "rgb(179, 38, 46)"
+    },
+    {
+      "state": "failed",
+      "color": "rgb(179, 38, 46)"
+    },
+    {
+      "state": "cancelled",
+      "color": "rgb(179, 38, 46)"
+    }
+  ],
+  "page_errors": []
+}

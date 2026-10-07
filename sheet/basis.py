@@ -17,6 +17,7 @@ from .basis_kernel import (
     basis_kernel_metadata,
     basis_version_for_family,
     chebyshev_coordinates,
+    chebyshev_normalization,
     chebyshev_raw_basis,
     deterministic_reduced_qr_positive_diagonal,
     get_basis_kernel,
@@ -95,7 +96,7 @@ def build_stabilized_basis(sample_count: int, order: int, *, runtime_dtype: torc
     return kernel.build(sample_count, order, runtime_dtype=runtime_dtype, device=device, version=version)
 
 
-# vvv THOG PLASTIC DEPTH evaluates the existing QR-stabilised Chebyshev coefficient coordinates at arbitrary real-valued DEPTH positions
+# vvv THOG evaluate the same analytically normalized root basis at arbitrary coordinates, retaining autograd
 def stabilized_chebyshev_basis_at_coordinates(
     coordinates: Tensor,
     *,
@@ -123,19 +124,12 @@ def stabilized_chebyshev_basis_at_coordinates(
         )
     target_dtype = coordinates.dtype if runtime_dtype is None else runtime_dtype
     _validate_floating_dtype(target_dtype)
-    reference_coordinates = normalized_coordinates(
-        reference_sample_count,
-        dtype=torch.float64,
-        device="cpu",
-    )
-    reference_raw = chebyshev_first_kind_basis(reference_coordinates, order)
-    _, reference_r = deterministic_reduced_qr(reference_raw)
-    inverse_r = torch.linalg.inv(reference_r).to(
-        device=coordinates.device,
-        dtype=coordinates.dtype,
-    )
+    if not torch.isfinite(coordinates).all():
+        raise ValueError("coordinates must be finite")
+    scales = chebyshev_normalization(reference_sample_count, order,
+                                    device=coordinates.device, dtype=coordinates.dtype)
     raw = differentiable_chebyshev_first_kind_basis(coordinates, order)
-    return (raw @ inverse_r).to(dtype=target_dtype)
+    return (raw * scales).to(dtype=target_dtype)
 # ^^^ THOG
 
 
@@ -209,7 +203,7 @@ def basis_sha256(basis: Tensor) -> str:
 
 
 def estimated_peak_tensor_bytes(sample_count: int, order: int, *, runtime_dtype: torch.dtype = torch.float64) -> int:
-    """Conservative tensor-only estimate for coordinates, QR, cast, and Gram work."""
+    """Conservative tensor-only estimate for root sampling, normalization, casts and validation."""
 
     _validate_positive_integer("sample_count", sample_count)
     _validate_positive_integer("order", order)
@@ -220,9 +214,9 @@ def estimated_peak_tensor_bytes(sample_count: int, order: int, *, runtime_dtype:
     runtime_bytes = torch.tensor([], dtype=runtime_dtype).element_size()
     coordinate_bytes = sample_count * float64_bytes
     raw_bytes = sample_count * order * float64_bytes
-    q_bytes = sample_count * order * float64_bytes
-    r_bytes = order * order * float64_bytes
+    normalized_bytes = sample_count * order * float64_bytes
+    scale_bytes = order * float64_bytes
     runtime_basis_bytes = sample_count * order * runtime_bytes
-    gram_bytes = order * order * runtime_bytes
-    return coordinate_bytes + raw_bytes + q_bytes + r_bytes + runtime_basis_bytes + gram_bytes
+    gram_bytes = order * order * max(float64_bytes, runtime_bytes)
+    return coordinate_bytes + raw_bytes + normalized_bytes + scale_bytes + runtime_basis_bytes + 3 * gram_bytes
 # ^^^ THOG

@@ -138,6 +138,13 @@ window.addEventListener("load", () => setTimeout(() => {
     if(!layout.order.includes("grid_visibility") && keys.includes("grid_visibility")) {
       keys.splice(keys.indexOf("grid_visibility"),1);keys.splice(keys.indexOf("visibility"),0,"grid_visibility");
     }
+    // vvv THOG one migration puts D/r after L/P; later drag choices remain persistent
+    if(!layout.width_pair_migrated && keys.includes("width_order")) {
+      for(const key of ["d_model","width_order"])keys.splice(keys.indexOf(key),1);
+      keys.splice(keys.indexOf("depth_order")+1,0,"d_model","width_order");
+      layout.order=keys;layout.width_pair_migrated=true;save_layout();
+    }
+    // ^^^ THOG
     // ^^^ THOG
     for(const row of [header_row,...table.querySelectorAll("tbody tr[data-run-id]")]) {
       const cells=new Map([...row.children].map(cell=>[cell.dataset.instraColumnKey,cell]));

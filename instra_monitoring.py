@@ -92,11 +92,28 @@ class MonitoringService:
             self.deletions = loaded_deletions if isinstance(loaded_deletions, dict) else {}
         except (OSError, ValueError):
             self.deletions = {}
-        self.force_delete_requests = {}                                                                                                                       # <<< THOG serialize local-force cleanup with in-flight acquisitions without persistent suppression
+        # vvv THOG forced local deletion persists across polls and restarts; explicit resume restores acquisition
+        self.excluded_copies_path = self.storage_root / "excluded_local_copies.json"
+        try:
+            excluded = json.loads(self.excluded_copies_path.read_text())
+            self.excluded_copies = {str(host): {str(path): record for path, record in copies.items() if isinstance(record, dict)}
+                                   for host, copies in excluded.items() if isinstance(copies, dict)} if isinstance(excluded, dict) else {}
+        except (OSError, ValueError):
+            self.excluded_copies = {}
+        self.force_delete_requests = {}
+        # ^^^ THOG
         self.receipt_retry_root = self.storage_root / "deletion_receipts"                                                                                     # <<< THOG durable receiver receipts survive restart and failed uploads
         self.stop_event = threading.Event()
         self.executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="instra-monitor")
         self._load_manifests()
+        for host_id, copies in self.excluded_copies.items():
+            if isinstance(copies, dict):
+                manifest = self.manifests.get(host_id, {})
+                remaining = {relative for relative in set(copies) & set(manifest.get("runs", {}))
+                             if not copies[relative].get("logs_root") or copies[relative]["logs_root"] == manifest.get("logs_root")}
+                if remaining:
+                    self.force_delete_requests[host_id] = remaining
+                    self.pending.add(host_id)
         self.network.set_monitoring_provider(self.request_refresh)
         _active_service = self
         if start_worker:
@@ -188,7 +205,13 @@ class MonitoringService:
                     "timeout_days": item.get("timeout_days"),
                     "outstanding_hosts": [hosts.get(host_id, host_id) for host_id in expected if host_id not in received],
                 })
-        return {"deletion_confirmation_timeout_days": self.deletion_timeout_days(), "pending": pending}
+        with self.lock:
+            excluded = [{**record, "host_id": host_id, "source_chart_path": relative,
+                         "producing_host": hosts.get(host_id, host_id)}
+                        for host_id, copies in self.excluded_copies.items() if isinstance(copies, dict)
+                        for relative, record in copies.items() if isinstance(record, dict)]
+        return {"deletion_confirmation_timeout_days": self.deletion_timeout_days(), "pending": pending,
+                "excluded_local_copies": excluded}
 
     def begin_authoritative_delete(self, run_name, grid_tag=None):
         state = self.catalog.state_for_run(run_name)
@@ -404,12 +427,30 @@ class MonitoringService:
         host_id, relative, _record, _manifest = origin
         run_id = str(state.status()["dashboard_run_id"])
         with self.lock:
+            self.excluded_copies.setdefault(host_id, {})[relative] = {
+                "run_id": run_id, "excluded_at": _time_now(), "logs_root": _manifest.get("logs_root")}
+            _atomic_json(self.excluded_copies_path, self.excluded_copies)
             self.force_delete_requests.setdefault(host_id, set()).add(relative)
             self.pending.add(host_id)
             if host_id not in self.active:
                 self.active.add(host_id)
                 self.executor.submit(self._sync_host, host_id)
         return {"queued": True, "run_id": run_id, "producing_host_id": host_id}
+
+    def resume_local_copy(self, host_id, relative):
+        if not _chart_relative(relative):
+            raise ValueError("Invalid source chart identity")
+        self.network._host(host_id)
+        with self.lock:
+            copies = self.excluded_copies.get(host_id, {})
+            if relative not in copies:
+                raise KeyError("This local copy is not excluded")
+            del copies[relative]
+            if not copies:
+                self.excluded_copies.pop(host_id, None)
+            _atomic_json(self.excluded_copies_path, self.excluded_copies)
+            self.pending.add(host_id)
+        return {"resumed": True}
 
     def _apply_force_delete_requests(self, host_id, manifest):
         with self.lock:
@@ -453,6 +494,9 @@ class MonitoringService:
         with self.lock:
             manifests = {key: dict(value.get("runs", {})) for key, value in self.manifests.items()}
             force_hidden = {(host_id, relative) for host_id, relatives in self.force_delete_requests.items() for relative in relatives}
+            force_hidden.update((host_id, relative) for host_id, copies in self.excluded_copies.items()
+                                if isinstance(copies, dict) for relative, record in copies.items()
+                                if not record.get("logs_root") or record["logs_root"] == self.manifests.get(host_id, {}).get("logs_root"))
         paths = []
         for host_id, runs in manifests.items():
             for relative in runs:
@@ -574,6 +618,9 @@ class MonitoringService:
             listing = self.network.monitor_files(host_id, "logs")
             files = {relative: (size, modified) for relative, size, modified in listing}
             suppressed = self._process_deletion_notices(host_id, listing, manifest)                                                                            # <<< THOG deletion notices win before any ordinary acquisition can restore a stale copy
+            with self.lock:
+                suppressed.update(relative for relative, record in self.excluded_copies.get(host_id, {}).items()
+                                  if isinstance(record, dict) and (not record.get("logs_root") or record["logs_root"] == discovery["instra_logs_root"]))
             databases = [relative for relative in files if Path(relative).name == "charts.sqlite3" and relative not in suppressed]
             # vvv THOG index each local-log file to its run once; the old nested full-list scan became quadratic as monitored history grew
             database_parents = {str(PurePosixPath(relative).parent): relative for relative in databases}
@@ -829,7 +876,8 @@ def install(dashboard_module, network):
     catalog_type.delete_local_file = guard_file
     catalog_type.remote_wandb_path = remote_wandb_path
     catalog_type.wandb_files = wandb_files
-    catalog_type.force_delete_local_copy = lambda self, run_name: self.monitoring.force_delete_local_copy(run_name)                                           # <<< THOG explicit disposable-cache action without producer suppression
+    catalog_type.force_delete_local_copy = lambda self, run_name: self.monitoring.force_delete_local_copy(run_name)                                           # <<< THOG exclude this acquired copy until explicit resume, without touching the producer
+    catalog_type.resume_local_copy = lambda self, host_id, relative: self.monitoring.resume_local_copy(host_id, relative)
     catalog_type.deletion_snapshot = lambda self: self.monitoring.deletion_snapshot()                                                                         # <<< THOG expose pending/outstanding deletion state to the UI
     catalog_type.set_deletion_timeout_days = lambda self, days: self.monitoring.set_deletion_timeout_days(days)                                               # <<< THOG persist the global timeout used by future deletion requests
     state_type.status = status

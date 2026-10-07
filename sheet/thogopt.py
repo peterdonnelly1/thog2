@@ -20,6 +20,7 @@ from torch import Tensor
 import constants as _constants
 
 from .depth_trajectory import DepthTrajectory
+from .bases import chebyshev_coordinates
 from .thogopt_transfers import HostGradientTransfers, candidate_memory_budget
 from .thogopt_math import comparison_errors, fit_nonnegative, history_basis, resolve_history_count
 
@@ -128,8 +129,8 @@ class Thogopt(torch.optim.Optimizer):
                 "async_gradient_staging": self.gradient_transfers is not None,
                 "staging_fallback_reason": self.staging_fallback_reason,
                 "device_tile_columns": self.tile_columns, "weight_basis": self.weight_basis.detach().cpu(),
-                "history_basis_version":"chebyshev_equispaced_qr_positive_diagonal_or_full_samples_v1",
-                "history_coordinates":torch.linspace(-1,1,self.layers,dtype=torch.float64).tolist(),
+                "history_basis_version":"chebyshev_first_kind_roots_analytic_normalization_or_full_samples_v1",
+                "history_coordinates":chebyshev_coordinates(self.layers).tolist(),
                 "weight_basis_condition":float(torch.linalg.cond(self.weight_basis.double())),
                 "momentum_basis_condition":float(torch.linalg.cond(self.q_m.double())),
                 "scaling_basis_condition":float(torch.linalg.cond(self.q_v.double())),

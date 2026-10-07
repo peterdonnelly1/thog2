@@ -34,6 +34,14 @@ def supply(optimizer, gradient, scale=1.):
         optimizer.accumulate_layer_gradient("attention_query_weight", layer, row * scale)
 
 
+def test_history_metadata_records_the_executed_chebyshev_roots():
+    from sheet.bases import chebyshev_coordinates
+    _, _, optimizer = make_optimizer(layers=4, order=3, history=2)
+    configuration = optimizer.configuration()
+    assert configuration["history_coordinates"] == chebyshev_coordinates(4).tolist()
+    assert "roots" in configuration["history_basis_version"]
+
+
 @pytest.mark.parametrize("dtype", [torch.float64, torch.float32])
 def test_full_capacity_matches_adamw_500_updates(dtype):
     torch.manual_seed(54)

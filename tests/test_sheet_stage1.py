@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import subprocess
 import sys
@@ -43,7 +44,7 @@ class Stage1MathematicalCoreTests(unittest.TestCase):
         calibration_path = Path(calibration_path_value)
         cls.calibration = json.loads(calibration_path.read_text(encoding="utf-8"))
 
-    def test_s1_01_coordinate_endpoints(self) -> None:
+    def test_s1_01_root_coordinate_endpoints(self) -> None:
         for sample_count in (1, 2, 144, 768, 3072):
             with self.subTest(sample_count=sample_count):
                 coordinates = normalized_coordinates(sample_count)
@@ -52,8 +53,11 @@ class Stage1MathematicalCoreTests(unittest.TestCase):
                 if sample_count == 1:
                     self.assertEqual(float(coordinates[0]), 0.0)
                 else:
-                    self.assertEqual(float(coordinates[0]), -1.0)
-                    self.assertEqual(float(coordinates[-1]), 1.0)
+                    endpoint = math.cos(math.pi / (2 * sample_count))
+                    self.assertAlmostEqual(float(coordinates[0]), -endpoint, places=14)
+                    self.assertAlmostEqual(float(coordinates[-1]), endpoint, places=14)
+                    self.assertGreater(float(coordinates[0]), -1.0)
+                    self.assertLess(float(coordinates[-1]), 1.0)
 
     def test_s1_02_coordinate_monotonicity(self) -> None:
         for sample_count in (2, 3, 144, 768, 3072):
@@ -82,7 +86,7 @@ class Stage1MathematicalCoreTests(unittest.TestCase):
                 self.assertTrue(torch.isfinite(raw_basis).all())
                 self.assertLessEqual(float(torch.max(torch.abs(raw_basis))), 1.0 + 1.0e-12)
 
-    def test_s1_05_qr_orthonormality(self) -> None:
+    def test_s1_05_root_basis_orthonormality(self) -> None:
         basis_float64 = build_stabilized_basis(256, 64, runtime_dtype=torch.float64)
         basis_float32 = build_stabilized_basis(256, 64, runtime_dtype=torch.float32)
         self.assertLessEqual(orthonormality_max_error(basis_float64), 2.0e-12)

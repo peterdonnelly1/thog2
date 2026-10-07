@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import unittest
 from pathlib import Path
 from typing import Any, Dict
@@ -13,7 +14,7 @@ from sheet.model import SheetGPT, SheetGPTConfig
 from sheet.trajectory import SheetTrajectory
 
 
-FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "stage0_legacy_sheet_col_fixture.json"
+FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "stage0_root_sheet_col_fixture.json"
 
 
 class Stage0LegacySheetColBaselineTests(unittest.TestCase):

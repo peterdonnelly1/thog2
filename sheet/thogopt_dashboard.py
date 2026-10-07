@@ -10,6 +10,7 @@ import torch
 
 from .thogopt_telemetry import history_rows,history_quantities
 from .thogopt_math import comparison_errors
+from .bases import chebyshev_coordinates, chebyshev_normalization
 
 QUANTITIES = ("momentum","raw_momentum","second_moment","raw_second_moment","rms","scaling","adaptive_update")
 
@@ -25,14 +26,16 @@ def _curve(family,quantity,index):
     coeff = family.get("momentum_coefficients" if first else "scaling_coefficients")
     if q is None or len(q[0])==layers: return x.tolist(),values
     order = len(q[0])
-    nodes = np.linspace(-1,1,layers)
-    vandermonde = np.polynomial.chebyshev.chebvander(nodes,order-1)
-    polynomial = np.linalg.lstsq(vandermonde,np.asarray(q),rcond=None)[0] @ np.asarray(coeff[index])
-    dense_x = np.linspace(-1,1,max(layers,256))
-    y = np.polynomial.chebyshev.chebval(dense_x,polynomial)
+    nodes = chebyshev_coordinates(layers).numpy()
+    polynomial = chebyshev_normalization(layers, order).numpy() * np.asarray(coeff[index])
+    # Keep the visible ruler in executed layer indices while evaluating the
+    # polynomial in root coordinates. Include every executed sample exactly.
+    dense_x = np.unique(np.concatenate((np.linspace(1, layers, max(layers,256)), x)))
+    internal = np.interp(dense_x, x, nodes)
+    y = np.polynomial.chebyshev.chebval(internal,polynomial)
     if quantity in ("momentum","second_moment"):
         y /= 1-family["betas"][0 if first else 1]**family["step"]
-    return (1+(dense_x+1)*(layers-1)/2).tolist(),y.tolist()
+    return dense_x.tolist(),y.tolist()
 
 
 def history_payload(path,*,quantity="momentum",step_min=0,step_max=2**63-1,reference_path=None,latest=False):

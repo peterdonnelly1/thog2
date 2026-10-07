@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import unittest
 from pathlib import Path
 from typing import Any, Dict
@@ -28,7 +29,7 @@ from sheet.model import SheetGPTConfig
 from sheet.trajectory import SheetTrajectory
 
 
-FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "stage0_legacy_sheet_col_fixture.json"
+FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "stage0_root_sheet_col_fixture.json"
 
 
 class Stage2BasisKernelTests(unittest.TestCase):
@@ -55,7 +56,7 @@ class Stage2BasisKernelTests(unittest.TestCase):
         self.assertEqual(metadata["basis_family"], BASIS_FAMILY_CHEBYSHEV)
         self.assertEqual(metadata["basis_version"], BASIS_VERSION)
         self.assertIn("single_point_zero", metadata["coordinate_policy"])
-        self.assertIn("positive_diagonal", metadata["stabilization_policy"])
+        self.assertIn("analytic_column_normalization", metadata["stabilization_policy"])
         dct_kernel = get_basis_kernel("dct")
         self.assertIs(dct_kernel, get_basis_kernel(DCT_BASIS_VERSION))
         self.assertEqual(dct_kernel.basis_family, BASIS_FAMILY_DCT)
@@ -63,7 +64,7 @@ class Stage2BasisKernelTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unknown"):
             get_basis_kernel("made_up_basis")
 
-    def test_cheby_kernel_matches_legacy_build_and_stage0_hashes(self) -> None:
+    def test_cheby_kernel_matches_root_baseline_hashes(self) -> None:
         kernel = get_basis_kernel("chebyshev")
         for sample_count, order in ((1, 1), (4, 3), (16, 8), (48, 24), (64, 32)):
             with self.subTest(sample_count=sample_count, order=order):
@@ -77,12 +78,12 @@ class Stage2BasisKernelTests(unittest.TestCase):
         self.assertEqual(basis_sha256(trajectory.row_basis("attention_input_bias")), expected_hashes["row_48_order_24_float32"])
         self.assertEqual(basis_sha256(trajectory.row_basis("mlp_contraction_weight")), expected_hashes["row_64_order_32_float32"])
 
-    def test_coordinate_recurrence_qr_and_orthonormality_behaviour_is_unchanged(self) -> None:
+    def test_root_coordinates_recurrence_and_orthonormality(self) -> None:
         one = normalized_coordinates(1)
         self.assertEqual(float(one[0]), 0.0)
         coordinates = normalized_coordinates(7)
-        self.assertEqual(float(coordinates[0]), -1.0)
-        self.assertEqual(float(coordinates[-1]), 1.0)
+        self.assertAlmostEqual(float(coordinates[0]), -math.cos(math.pi / 14))
+        self.assertAlmostEqual(float(coordinates[-1]), math.cos(math.pi / 14))
         raw = chebyshev_first_kind_basis(coordinates, 6)
         analytic = torch.cos(torch.acos(coordinates).unsqueeze(1) * torch.arange(6, dtype=torch.float64).unsqueeze(0))
         torch.testing.assert_close(raw, analytic, rtol=0.0, atol=2.0e-14)

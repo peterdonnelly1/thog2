@@ -157,13 +157,11 @@ def _executed_public_coordinates(trajectory: Any, reference: torch.Tensor) -> to
             device=reference.device,
             dtype=torch.float64,
         )
-    return torch.linspace(
-        1.0,
-        100.0,
-        int(trajectory.config.n_layer),
-        device=reference.device,
-        dtype=torch.float64,
-    )
+    from .basis import normalized_coordinates
+    from .plastic_depth import internal_to_public_depth
+    return internal_to_public_depth(normalized_coordinates(
+        int(trajectory.config.n_layer), device=reference.device, dtype=torch.float64,
+    ))
 
 
 def _public_coordinates_from_layer_axis(

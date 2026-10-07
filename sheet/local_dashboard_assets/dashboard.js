@@ -79,6 +79,7 @@ const app = {
   manual_selection: false,
   initial_route_run_id: route_run_id(),
   colours: load_json("thog2_local_run_colours", {}),
+  initial_run_colour: localStorage.getItem("thog2_initial_run_colour") || "light",
   visibility: load_json("thog2_local_run_visibility", {}),
   grid_visibility: load_json("thog2_grid_visibility_v1", {}),
   panel_sizes: load_json("thog2_local_panel_sizes", {}),
@@ -184,6 +185,8 @@ let grid_palette_source = null;
 let grid_palette = new Map();
 let grid_hues = null;
 let grid_tones = load_json("thog2_grid_tones_v1", {}); // <<< THOG persist each Grid's chosen centre independently of manual run overrides
+const initial_colour_bands = Object.freeze({very_light:[86,5], light:[72,7], medium:[54,8], dark:[33,6]});
+function initial_colour_band() { return initial_colour_bands[app.initial_run_colour] || initial_colour_bands.light; }
 function colour_for_run(run_id) {
   if (grid_palette_source !== app.runs) {
     grid_palette_source = app.runs;
@@ -217,8 +220,8 @@ function colour_for_run(run_id) {
       const tone = grid_tones[tag];
       const hue = Number.isFinite(tone?.hue) ? tone.hue : grid_hues[tag];
       const saturation = Number.isFinite(tone?.saturation) ? tone.saturation : 56;
-      const centre = Number.isFinite(tone?.lightness) ? tone.lightness : 54;
-      const span = tone ? Math.max(0,Math.min(18,centre,100-centre)) : 18;
+      const centre = Number.isFinite(tone?.lightness) ? tone.lightness : initial_colour_band()[0];
+      const span = tone ? Math.max(0,Math.min(18,centre,100-centre)) : initial_colour_band()[1];
       members.forEach((run,index)=>{
         const lightness = members.length < 2 ? centre : centre+span-index*2*span/(members.length-1);
         grid_palette.set(run_identifier(run),`hsl(${hue} ${saturation.toFixed(1)}% ${lightness.toFixed(1)}%)`);
@@ -228,7 +231,8 @@ function colour_for_run(run_id) {
   }
   if (app.colours[run_id]) return app.colours[run_id]; // <<< THOG explicit choices override automatic Grid shades
   if (grid_palette.has(String(run_id))) return grid_palette.get(String(run_id));
-  return app.colours[run_id] || default_palette[hash_text(run_id) % default_palette.length];
+  const hue=(hash_text(run_id)*137.507764)%360;
+  return `hsl(${hue.toFixed(1)} 58% ${initial_colour_band()[0]}%)`;
 }
 // ^^^ THOG
 
@@ -2444,7 +2448,7 @@ async function delete_grid_menu_runs() {
 async function force_delete_local_copy() {
   const run = run_for_id(app.menu_run_id);
   if (!run?.remote_copy) return;
-  const confirmed = window.confirm("This deletes only this Instra’s local copy. The authoritative run on the producing host is unaffected. If that run still exists, monitoring will download it again.");
+  const confirmed = window.confirm("This deletes only this Instra’s local copy. The authoritative run on the producing host is unaffected. Monitoring will keep this copy excluded until you resume it in Instra settings.");
   if (!confirmed) return;
   const run_id = run_identifier(run);
   close_run_menu();
@@ -2475,6 +2479,24 @@ async function refresh_deletion_settings(update_timeout = true) {
       container.appendChild(line);
     }
     if (!pending.length) container.textContent = "No distributed deletions are pending.";
+    const excluded=by_id("excluded_local_copies_status");
+    excluded.replaceChildren();
+    for (const item of snapshot.excluded_local_copies || []) {
+      const line=document.createElement("p"), button=document.createElement("button");
+      line.className="excluded-copy-row";
+      const name=document.createElement("span");name.textContent=`${item.run_id} · ${item.producing_host}`;
+      button.type="button";button.textContent="Resume monitoring";
+      button.addEventListener("click",async()=>{
+        button.disabled=true;
+        try {
+          await fetch_json("/api/deletion/action",{method:"POST",headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({action:"resume_local_copy",host_id:item.host_id,source_chart_path:item.source_chart_path})});
+          await refresh_deletion_settings(false);
+        } catch(error){show_toast(`Resume failed: ${error.message}`);button.disabled=false;}
+      });
+      line.append(name,button);excluded.appendChild(line);
+    }
+    if (!excluded.childElementCount) excluded.textContent="No local copies are excluded.";
     if (!by_id("settings_overlay").hidden) {
       app.deletion_status_timer = setTimeout(() => { if (!by_id("settings_overlay").hidden) void refresh_deletion_settings(false); }, 5000);                                                // <<< THOG refresh outstanding receipts while preserving an edited timeout value
     }
@@ -2489,7 +2511,9 @@ function open_settings() {
   close_colour_picker();
   close_chart_settings();
   by_id("timeout_minutes").value = String(app.timeout_minutes);
-  by_id("grid_eye_grouping").checked = localStorage.getItem("thog2_grid_eye_grouping") !== "false";
+  by_id("initial_run_colour").value = Object.hasOwn(initial_colour_bands,app.initial_run_colour) ? app.initial_run_colour : "light";
+  by_id("deletion_pending_details").open=false;
+  by_id("excluded_local_copies_details").open=false;
   void refresh_deletion_settings();                                                                                                                           // <<< THOG show the persisted global timeout and outstanding host names while the settings window is open
   by_id("settings_overlay").hidden = false;
   by_id("settings_nav").classList.add("selected");
@@ -2526,7 +2550,11 @@ async function save_settings() {
   }
   app.timeout_minutes = Math.round(value);
   localStorage.setItem("thog2_local_timeout_minutes", String(app.timeout_minutes));
-  localStorage.setItem("thog2_grid_eye_grouping", String(by_id("grid_eye_grouping").checked));
+  app.initial_run_colour=by_id("initial_run_colour").value;
+  localStorage.setItem("thog2_initial_run_colour",app.initial_run_colour);
+  grid_palette_source=null;
+  window.__thog2_metric_groups?.invalidate?.();
+  window.__thog2_metric_groups?.refresh?.();
   reset_pagination();
   render_run_heading();
   close_settings();

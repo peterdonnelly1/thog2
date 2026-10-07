@@ -117,7 +117,7 @@ window.addEventListener("load", () => {
       select:"select", grid_visibility:"Grid visible", visibility:"visible", steps:"logged", duration:"t", loss:"loss", state:"state", name:"name",
       wandb:"W&B ID", host:"host", gpu:"GPU", preset:"p", optimizer:"OPT", gb:"GB", layers:"L",
       depth_order:"P", premat:"premat", parms:"PARMS", equiv:"EQUIV", warmup:"w", context:"C",
-      d_model:"D", heads:"H", grad_accum:"A", activation_checkpointing:"S", learning_rate:"c",
+      d_model:"D", width_order:"r", heads:"H", grad_accum:"A", activation_checkpointing:"S", learning_rate:"c",
       min_learning_rate:"f", probe_start:"P_s", probe_end:"P_e", curve_start:"C_s", curve_end:"C_e",
       capture_period:"C_p", updated:"updated", menu:"menu",
     });
@@ -222,7 +222,7 @@ window.addEventListener("load", () => {
         : 0;
       return JSON.stringify({
         front_run_id:String(window.instra_front_run_id || ""),                                                                                               // <<< THOG z-order changes invalidate the retained table render signature
-        active_tick, grid_tones,
+        active_tick, grid_tones, initial_run_colour:app.initial_run_colour, timeout_minutes:app.timeout_minutes,
         current:String(app.current_run_id || ""), workspace:Boolean(app.workspace_mode), page:app.current_page,
         page_size:app.page_size, search:by_id("run_search")?.value || "",
         filter:by_id("state_filter")?.value || "all", sort:by_id("run_sort")?.value || "created",
@@ -237,6 +237,10 @@ window.addEventListener("load", () => {
           run.preset || null, run.configuration?.geometry_preset || null, run.configuration?.model_type || null,
           run.remote_copy === true, // <<< THOG repaint changed preset emphasis and acquired-copy controls even without a chart revision
           run.configuration?.premat ?? null, run.configuration?.premat_target_matrix ?? null,
+          run.configuration?.n_embd,run.configuration?.width_order,run.configuration?.n_layer,run.configuration?.o_depth,
+          run.configuration?.width_enabled,run.configuration?.gpu_peak_memory_allocated_gb,
+          run.acquisition_state,run.acquisition_error,run.acquired_at,run.gpu_assignment,
+          run.name,run.label,run.host_label,run.host_id,run.run_id,run.wandb_run_id,run.configuration,
         ]),
       });
     }

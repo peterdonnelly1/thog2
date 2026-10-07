@@ -96,7 +96,7 @@ async function check(type) {
     await row("fixture_02").locator('.check-column input').uncheck();await row("fixture_01").locator('.check-column input').check();
     assert.equal(await bin.isEnabled(),true);assert.match(await bin.getAttribute("title"),/force delete local copies/);
     let dialog_promise=page.waitForEvent("dialog"),click=bin.click(),dialog=await dialog_promise;
-    assert.match(dialog.message(),/^Delete Instra data for 2 selected runs/);assert.match(dialog.message(),/monitoring will download them again/);
+    assert.match(dialog.message(),/^Delete Instra data for 2 selected runs/);assert.match(dialog.message(),/excluded until you resume/);
     await dialog.dismiss();await click;assert.equal(deletes.length,0,"cancelled delete reached backend");
     await row("fixture_00").locator(".run-menu-button").click();assert.equal(await page.locator("#force_delete_local_copy").isVisible(),true);
     await page.evaluate(()=>close_run_menu());
@@ -143,6 +143,7 @@ async function check(type) {
     await page.waitForFunction(()=>{
       const mount=by_id("chart_settings_preview");return mount._fullLayout?.xaxis.minor?.dtick===mount._fullLayout?.xaxis.dtick/10;
     });
+    await page.locator('[data-chart-settings-tab="data"]').click();
     await click_settings_button("reset_chart_ranges");
     try {await page.waitForFunction(()=>["x_min","x_max","y_min","y_max"].every(name=>by_id(`chart_${name}`).value===""));}
     catch(error) {
@@ -229,6 +230,8 @@ async function check(type) {
     await page.waitForFunction(()=>["x_min","x_max","y_min","y_max"].every(name=>by_id(`chart_${name}`).value===""));
     await click_settings_button("cancel_chart_settings");
     dense_mode=true;await page.evaluate(()=>refresh_catalog());
+    // An existing poll may have started before the fixture changed its preset.
+    await page.waitForFunction(()=>app.runs.find(run=>run_identifier(run)==="fixture_00")?.preset==="dense");
     assert.ok(Number(await row("fixture_00").locator('[data-instra-column-key="preset"]').evaluate(node=>getComputedStyle(node).fontWeight))>=700);
     assert.deepEqual(errors,[]);
     console.log("PASS",type.name(),"Edit/Rename identity, panel width, Progress columns/ETA, date spacing and bold dense");

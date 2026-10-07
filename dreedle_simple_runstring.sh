@@ -32,11 +32,11 @@ set -euo pipefail
 # Compact geometry:
 #    -a ATTENTION_GEOMETRY                          preset default when omitted
 #    -B BASIS_FAMILY                                canonical: chebyshev | dct | haar | lapped_cosine; single value, comma list, or quoted space list
-#    -B chebyshev aliases                           cheby | chebyshev_first_kind_qr
+#    -B chebyshev aliases                           cheby | chebyshev_first_kind_roots
 #    -B dct aliases                                 dct_ii | dct_ii_orthonormal
 #    -B haar aliases                                balanced_haar | haar_balanced
 #    -B lapped_cosine aliases                       lapped | local_cosine | lapped_local_cosine
-#    -v BASIS_VERSION                               auto recommended | chebyshev_first_kind_qr_v1 | dct_ii_orthonormal_v1 | haar_balanced_binary_orthonormal_v1 | lapped_cosine_dc_preserving_orthonormal_v1
+#    -v BASIS_VERSION                               auto recommended | chebyshev_first_kind_roots_v1 | dct_ii_orthonormal_v1 | haar_balanced_binary_orthonormal_v1 | lapped_cosine_dc_preserving_orthonormal_v1
 #    -i LAPPED_COSINE_OVERLAP_FRACTION              currently 0.5 only
 #    -W LAPPED_COSINE_WINDOW_LENGTH
 #    -m MLP_GEOMETRY                                preset default when omitted

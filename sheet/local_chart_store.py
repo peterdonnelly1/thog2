@@ -837,34 +837,23 @@ class LocalChartReader:
         finally:
             connection.close()
 
+    @staticmethod
+    def _record_summary(connection, table):
+        # Separate aggregates let SQLite use endpoint index lookups and its fast
+        # count operation instead of scanning every record alongside its payload.
+        if table not in {"heatmap_records", "depth_weight_snapshots", "premat_snapshots", "width_snapshots"}:
+            raise ValueError("unsupported chart record table")
+        return connection.execute(f"SELECT (SELECT COUNT(*) FROM {table}) AS count, "
+                                  f"(SELECT MIN(optimizer_update) FROM {table}) AS minimum_update, "
+                                  f"(SELECT MAX(optimizer_update) FROM {table}) AS maximum_update").fetchone()
+
     def status(self) -> Dict[str, Any]:
         connection = self._connection()
         try:
-            heatmap = connection.execute(
-                """
-                SELECT COUNT(*) AS count,
-                       MIN(optimizer_update) AS minimum_update,
-                       MAX(optimizer_update) AS maximum_update
-                FROM heatmap_records
-                """
-            ).fetchone()
-            depth = connection.execute(
-                """
-                SELECT COUNT(*) AS count,
-                       MIN(optimizer_update) AS minimum_update,
-                       MAX(optimizer_update) AS maximum_update
-                FROM depth_weight_snapshots
-                """
-            ).fetchone()
+            heatmap = self._record_summary(connection, "heatmap_records")
+            depth = self._record_summary(connection, "depth_weight_snapshots")
             try:
-                premat = connection.execute(
-                    """
-                    SELECT COUNT(*) AS count,
-                           MIN(optimizer_update) AS minimum_update,
-                           MAX(optimizer_update) AS maximum_update
-                    FROM premat_snapshots
-                    """
-                ).fetchone()
+                premat = self._record_summary(connection, "premat_snapshots")
             except sqlite3.OperationalError:
                 premat = {"count": 0, "minimum_update": None, "maximum_update": None}
             # vvv THOG loss-only WIDTH runs still report their completed optimizer updates

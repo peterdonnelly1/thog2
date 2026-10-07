@@ -250,7 +250,7 @@ class DistributedDeletionTests(unittest.TestCase):
         self.assertEqual(self.catalog.runs()['runs'], [])
         self.assertEqual(self.uploads[-1]['deletion_request_id'], request['deletion_request_id'])
 
-    def test_force_delete_is_background_work_and_next_poll_reacquires(self):
+    def test_force_delete_is_background_work_and_excludes_until_explicit_resume(self):
         host, path = self._producer('producer')
         self.monitor._sync_host(host)
         run_id = self.catalog.runs()['runs'][0]['dashboard_run_id']
@@ -271,8 +271,13 @@ class DistributedDeletionTests(unittest.TestCase):
         self.assertEqual(self.catalog.runs()['runs'], [])
         self.assertTrue(path.exists())
         self.monitor._sync_host(host)
-        self.assertEqual(len(self.catalog.runs()['runs']), 1)
+        self.assertEqual(self.catalog.runs()['runs'], [])
         self.assertEqual(self.monitor.force_delete_requests, {})
+        excluded = self.monitor.deletion_snapshot()['excluded_local_copies']
+        self.assertEqual(len(excluded), 1)
+        self.monitor.resume_local_copy(host,excluded[0]['source_chart_path'])
+        self.monitor._sync_host(host)
+        self.assertEqual(len(self.catalog.runs()['runs']), 1)
 
     def test_force_delete_during_failed_acquisition_works_with_monitoring_disabled(self):
         host, _path = self._producer('producer')
@@ -283,6 +288,39 @@ class DistributedDeletionTests(unittest.TestCase):
         self.wait_idle(host)
         self.assertEqual(self.catalog.runs()['runs'], [])
         self.assertEqual(self.monitor.force_delete_requests, {})
+
+    def test_force_exclusion_survives_restart_and_can_be_resumed(self):
+        host, path = self._producer('producer')
+        self.monitor._sync_host(host)
+        run_id = self.catalog.runs()['runs'][0]['dashboard_run_id']
+        self.monitor.force_delete_local_copy(run_id)
+        self.wait_idle(host)
+        replacement = instra_monitoring.MonitoringService(self.network,self.catalog,
+            storage_root=self.monitor.storage_root,start_worker=False)
+        self.addCleanup(replacement.close)
+        self.catalog.monitoring = replacement
+        for _ in range(3):
+            replacement._sync_host(host)
+            self.assertEqual(replacement.paths(), ())
+        self.assertTrue(path.exists())
+        item = replacement.deletion_snapshot()['excluded_local_copies'][0]
+        self.assertEqual(item['run_id'], run_id)
+        replacement.resume_local_copy(host,item['source_chart_path'])
+        replacement._sync_host(host)
+        self.assertEqual(len(replacement.paths()), 1)
+
+    def test_old_producer_root_exclusion_does_not_delete_a_new_root_copy_on_restart(self):
+        host, _path = self._producer('producer')
+        self.monitor._sync_host(host)
+        manifest = self.monitor.manifests[host]
+        relative = next(iter(manifest['runs']))
+        self.monitor.excluded_copies = {host: {relative: {'run_id': 'old_run', 'logs_root': '/retired-producer-logs'}}}
+        instra_monitoring._atomic_json(self.monitor.excluded_copies_path, self.monitor.excluded_copies)
+        replacement = instra_monitoring.MonitoringService(self.network, self.catalog,
+            storage_root=self.monitor.storage_root, start_worker=False)
+        self.addCleanup(replacement.close)
+        self.assertEqual(replacement.force_delete_requests, {})
+        self.assertEqual(len(replacement.paths()), 1)
 
     def test_grid_requests_each_member_and_retains_unrelated_run(self):
         host, path, producer, catalog, request = self.setup_deletion()

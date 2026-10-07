@@ -208,7 +208,7 @@ window.addEventListener("load", () => {
           const multiple_series = (chart.series || []).length > 1;
           for (const series of chart.series || []) {
             merged.series.push({
-              ...clone(series),
+              ...series, // <<< THOG merging only decorates a series; retain immutable history arrays instead of copying every point on every poll
               name: multiple_series
                 ? `${run_name(entry.run)} · ${String(series.name || chart.title)}`
                 : run_name(entry.run),

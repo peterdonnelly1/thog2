@@ -23,7 +23,6 @@ from . import plastic_depth_controller as _controller
 from . import plastic_depth_lookahead_patch as _lookahead
 from . import stage6_trainer as _stage6
 from . import trainer_step as _trainer_step
-from .basis import chebyshev_first_kind_basis, deterministic_reduced_qr, normalized_coordinates
 
 
 _FIXED_TIMING_FRACTION = 0.20
@@ -220,14 +219,10 @@ def _init_depth_trajectory_absolute(self: Any, *args: Any, **kwargs: Any) -> Non
     if not bool(getattr(self, "plastic_enabled", False)) or self.plastic_sampling is None:
         return
     reference_sample_count = max(int(self.config.depth_order), int(self.config.n_layer))
-    reference_coordinates = normalized_coordinates(
-        reference_sample_count,
-        dtype=torch.float64,
-        device="cpu",
+    from .bases import chebyshev_normalization
+    self._buffers["plastic_depth_inverse_r"] = torch.diag(
+        chebyshev_normalization(reference_sample_count, int(self.config.depth_order))
     )
-    reference_raw = chebyshev_first_kind_basis(reference_coordinates, int(self.config.depth_order))
-    _, reference_r = deterministic_reduced_qr(reference_raw)
-    self._buffers["plastic_depth_inverse_r"] = torch.linalg.inv(reference_r)
     self._buffers["plastic_depth_reference_sample_count"] = torch.tensor(
         reference_sample_count,
         dtype=torch.long,

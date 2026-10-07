@@ -1,0 +1,388 @@
+{
+  "fixture_version": 2,
+  "purpose": "THOG root-node CHEBY_SHEET_COL baseline; historical QR fixture is retained separately.",
+  "seed": 12345,
+  "config": {
+    "block_size": 8,
+    "vocab_size": 32,
+    "n_layer": 4,
+    "n_head": 2,
+    "n_embd": 16,
+    "dropout": 0.0,
+    "bias": true,
+    "depth_order": 3,
+    "base_row_order": 8,
+    "basis_version": "chebyshev_first_kind_roots_v1"
+  },
+  "head_packing_audit": {
+    "head_dim": 8,
+    "attention_input_weight_shape": [
+      48,
+      16
+    ],
+    "attention_input_role_row_ranges": {
+      "query": [
+        0,
+        16
+      ],
+      "key": [
+        16,
+        32
+      ],
+      "value": [
+        32,
+        48
+      ]
+    },
+    "attention_input_role_head_row_ranges": {
+      "query": [
+        [
+          0,
+          8
+        ],
+        [
+          8,
+          16
+        ]
+      ],
+      "key": [
+        [
+          16,
+          24
+        ],
+        [
+          24,
+          32
+        ]
+      ],
+      "value": [
+        [
+          32,
+          40
+        ],
+        [
+          40,
+          48
+        ]
+      ]
+    },
+    "attention_output_weight_shape": [
+      16,
+      16
+    ],
+    "attention_output_input_head_column_ranges": [
+      [
+        0,
+        8
+      ],
+      [
+        8,
+        16
+      ]
+    ],
+    "legacy_sheet_col_compacts_attention_input_columns": true,
+    "legacy_sheet_col_compacts_attention_output_input_head_boundary": true,
+    "legacy_sheet_col_compacts_qkv_output_rows": false
+  },
+  "parameter_report": {
+    "persistent_parameters": 5592,
+    "sheet_coefficients": 4920,
+    "conventional_non_sheet_parameters": 672,
+    "dense_equivalent_repeated_parameters": 13120,
+    "dense_equivalent_total_parameters": 13792,
+    "matrix_sheet_coefficients": 4608,
+    "matrix_dense_equivalent_parameters": 12288
+  },
+  "basis_hashes": {
+    "depth_4_order_3_float32": "1e9cdbb3bce4cb99eaab6426411a8c36f3f5738262acba883576d9e92d17deca",
+    "row_16_order_8_float32": "aaf300fe9487b5c9ecd60ae911d324a01a75635b7f510c16ed278d44cc9687de",
+    "row_48_order_24_float32": "3b388fede300e71ab76f70adb0ec0ba18c325cd7c20d8b27cb118b4e9042684d",
+    "row_64_order_32_float32": "25204885fe20dcc2a928062336b38c4a58d9db37bb1096413a551c656b9ce04a"
+  },
+  "families": [
+    {
+      "name": "attention_input_weight",
+      "family_kind": "matrix",
+      "output_rows": 48,
+      "row_width": 16,
+      "row_order": 8,
+      "coefficient_shape": [
+        48,
+        3,
+        8
+      ],
+      "sheet_parameters": 1152,
+      "dense_equivalent_parameters": 3072
+    },
+    {
+      "name": "attention_output_weight",
+      "family_kind": "matrix",
+      "output_rows": 16,
+      "row_width": 16,
+      "row_order": 8,
+      "coefficient_shape": [
+        16,
+        3,
+        8
+      ],
+      "sheet_parameters": 384,
+      "dense_equivalent_parameters": 1024
+    },
+    {
+      "name": "mlp_expansion_weight",
+      "family_kind": "matrix",
+      "output_rows": 64,
+      "row_width": 16,
+      "row_order": 8,
+      "coefficient_shape": [
+        64,
+        3,
+        8
+      ],
+      "sheet_parameters": 1536,
+      "dense_equivalent_parameters": 4096
+    },
+    {
+      "name": "mlp_contraction_weight",
+      "family_kind": "matrix",
+      "output_rows": 16,
+      "row_width": 64,
+      "row_order": 32,
+      "coefficient_shape": [
+        16,
+        3,
+        32
+      ],
+      "sheet_parameters": 1536,
+      "dense_equivalent_parameters": 4096
+    },
+    {
+      "name": "ln_1_weight",
+      "family_kind": "vector",
+      "output_rows": 1,
+      "row_width": 16,
+      "row_order": 8,
+      "coefficient_shape": [
+        1,
+        3,
+        8
+      ],
+      "sheet_parameters": 24,
+      "dense_equivalent_parameters": 64
+    },
+    {
+      "name": "ln_2_weight",
+      "family_kind": "vector",
+      "output_rows": 1,
+      "row_width": 16,
+      "row_order": 8,
+      "coefficient_shape": [
+        1,
+        3,
+        8
+      ],
+      "sheet_parameters": 24,
+      "dense_equivalent_parameters": 64
+    },
+    {
+      "name": "ln_1_bias",
+      "family_kind": "vector",
+      "output_rows": 1,
+      "row_width": 16,
+      "row_order": 8,
+      "coefficient_shape": [
+        1,
+        3,
+        8
+      ],
+      "sheet_parameters": 24,
+      "dense_equivalent_parameters": 64
+    },
+    {
+      "name": "ln_2_bias",
+      "family_kind": "vector",
+      "output_rows": 1,
+      "row_width": 16,
+      "row_order": 8,
+      "coefficient_shape": [
+        1,
+        3,
+        8
+      ],
+      "sheet_parameters": 24,
+      "dense_equivalent_parameters": 64
+    },
+    {
+      "name": "attention_input_bias",
+      "family_kind": "vector",
+      "output_rows": 1,
+      "row_width": 48,
+      "row_order": 24,
+      "coefficient_shape": [
+        1,
+        3,
+        24
+      ],
+      "sheet_parameters": 72,
+      "dense_equivalent_parameters": 192
+    },
+    {
+      "name": "attention_output_bias",
+      "family_kind": "vector",
+      "output_rows": 1,
+      "row_width": 16,
+      "row_order": 8,
+      "coefficient_shape": [
+        1,
+        3,
+        8
+      ],
+      "sheet_parameters": 24,
+      "dense_equivalent_parameters": 64
+    },
+    {
+      "name": "mlp_expansion_bias",
+      "family_kind": "vector",
+      "output_rows": 1,
+      "row_width": 64,
+      "row_order": 32,
+      "coefficient_shape": [
+        1,
+        3,
+        32
+      ],
+      "sheet_parameters": 96,
+      "dense_equivalent_parameters": 256
+    },
+    {
+      "name": "mlp_contraction_bias",
+      "family_kind": "vector",
+      "output_rows": 1,
+      "row_width": 16,
+      "row_order": 8,
+      "coefficient_shape": [
+        1,
+        3,
+        8
+      ],
+      "sheet_parameters": 24,
+      "dense_equivalent_parameters": 64
+    }
+  ],
+  "selected_materializations": {
+    "attention_input_weight": {
+      "layer_index": 2,
+      "shape": [
+        48,
+        16
+      ],
+      "first_values": [
+        0.028195206075906754,
+        0.03862626478075981,
+        0.03299687057733536,
+        0.005734141916036606,
+        -0.011515329591929913,
+        0.004946096334606409,
+        0.033025018870830536,
+        0.035047005861997604
+      ],
+      "sum": 1.0918645858764648,
+      "norm": 0.5564588308334351
+    },
+    "attention_output_weight": {
+      "layer_index": 2,
+      "shape": [
+        16,
+        16
+      ],
+      "first_values": [
+        0.017600351944565773,
+        0.009549315087497234,
+        0.0022631303872913122,
+        0.0010170376626774669,
+        0.0013694044901058078,
+        -0.0022786110639572144,
+        -0.0073853530921041965,
+        -0.0074122874066233635
+      ],
+      "sum": 0.11373254656791687,
+      "norm": 0.10672064870595932
+    },
+    "mlp_expansion_weight": {
+      "layer_index": 2,
+      "shape": [
+        64,
+        16
+      ],
+      "first_values": [
+        0.027805710211396217,
+        0.020906371995806694,
+        0.005721065681427717,
+        -0.012171270325779915,
+        -0.021503623574972153,
+        -0.01825776696205139,
+        -0.009543443098664284,
+        -0.0005568303167819977
+      ],
+      "sum": -0.384469211101532,
+      "norm": 0.632513165473938
+    },
+    "mlp_contraction_weight": {
+      "layer_index": 2,
+      "shape": [
+        16,
+        64
+      ],
+      "first_values": [
+        0.0067259809002280235,
+        0.008675395511090755,
+        0.009311789646744728,
+        0.0057580615393817425,
+        -0.0007292943191714585,
+        -0.005271767731755972,
+        -0.004549982026219368,
+        -0.0010782273020595312
+      ],
+      "sum": 0.5150867104530334,
+      "norm": 0.23127077519893646
+    },
+    "ln_1_weight": {
+      "layer_index": 2,
+      "shape": [
+        1,
+        16
+      ],
+      "first_values": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "sum": 16.0,
+      "norm": 4.0
+    },
+    "attention_input_bias": {
+      "layer_index": 2,
+      "shape": [
+        1,
+        48
+      ],
+      "first_values": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "sum": 0.0,
+      "norm": 0.0
+    }
+  }
+}

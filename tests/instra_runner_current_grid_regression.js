@@ -18,6 +18,7 @@ class Element {
       toggle: (name, enabled) => { if (enabled) names.add(name); else names.delete(name); }};
   }
   append(child) { this.children.push(child); return child; }
+  appendChild(child) { return this.append(child); }
   insertBefore(child, sibling) {
     this.children = this.children.filter(item => item !== child);
     const index = this.children.indexOf(sibling);
@@ -48,7 +49,7 @@ async function main() {
     const tab = new Element("button"); tab.dataset.runnerTab = name; roots.runner_tabs.append(tab);
   }
   const find = (node, id) => node.id === id ? node : node.children.map(child => find(child,id)).find(Boolean);
-  const document = {createElement: tag => new Element(tag), getElementById: id => roots[id] ||
+  const document = {createElement: tag => new Element(tag), createTextNode: text => Object.assign(new Element("#text"),{textContent:text}), getElementById: id => roots[id] ||
     Object.values(roots).map(node => find(node,id)).find(Boolean)};
   const run = (id, state, started_at) => ({run_id:id,grid_id:"grid-1",state,host_label:"scruffy",
     gpu:{ordinal:0,model:"GPU",gpu_key:"GPU-0"},profiler:"none",required_mib:2000,parameters:{},

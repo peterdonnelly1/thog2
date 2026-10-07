@@ -150,12 +150,12 @@ Systematic geometry (repeat --select-element as needed):
 
 Compact geometry:
   -B BASIS_FAMILY=${BASIS_FAMILY}                   canonical: chebyshev | dct | haar | lapped_cosine; single, comma, or quoted space list
-                                                    Chebyshev aliases: cheby | chebyshev_first_kind_qr
+                                                    Chebyshev aliases: cheby | chebyshev_first_kind_roots
                                                     DCT aliases: dct_ii | dct_ii_orthonormal
                                                     Haar aliases: balanced_haar | haar_balanced
                                                      Lapped cosine aliases: lapped | local_cosine | lapped_local_cosine
   -v BASIS_VERSION=${BASIS_VERSION}                 auto (recommended), or exact:
-                                                    chebyshev_first_kind_qr_v1
+                                                    chebyshev_first_kind_roots_v1
                                                     dct_ii_orthonormal_v1
                                                     haar_balanced_binary_orthonormal_v1
                                                      lapped_cosine_dc_preserving_orthonormal_v1

@@ -115,7 +115,7 @@
     const confirmed = window.confirm(
       `Delete Instra data for ${selected.length} selected runs?\n\n`
       + `${names.join("\n")}${extra}\n\n` + (mode==="remote"
-        ? "This deletes only this Instra’s local copies. The authoritative runs on the producing hosts are unaffected. If those runs still exist, monitoring will download them again."
+        ? "This deletes only this Instra’s local copies. The authoritative runs on the producing hosts are unaffected. Monitoring will keep these copies excluded until you resume them in Instra settings."
         : "This does not delete checkpoints, other logs, or W&B runs.")
     );
     if (!confirmed) return;

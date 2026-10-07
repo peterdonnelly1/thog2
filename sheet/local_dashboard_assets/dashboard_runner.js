@@ -192,7 +192,7 @@
     for (const field of detail.querySelectorAll('input[data-runner-field^="DEPTH."]')) {
       field.dataset.inactive=String(width_only);
       field.title=field_help(snapshot.catalogue[field.dataset.runnerField]) +
-        (width_only ? " Inactive for width-only: enable --select-depth to combine WIDTH and DEPTH." : "");
+        (width_only ? " Inactive for WIDTH alone: enable --select-depth to compress both WIDTH and DEPTH." : "");
     }
     // ^^^ THOG
     const dense_only=(Array.isArray(presets) ? presets.length===1 && presets[0]==="dense" : presets==="dense") ||
@@ -264,10 +264,10 @@
     return completed && completed === grid.runs.length ? "complete" : completed ? "partial" : "none";
   }
   function field_help(spec) {
-    const options = spec.choices?.length ? spec.choices.join(", ") :
+    const options = spec.options_help || (spec.choices?.length ? spec.choices.join(", ") :
       ["flag","bool_value"].includes(spec.type) ? "true, false" :
       spec.type === "int" ? "nonnegative whole numbers" : spec.type === "float" ? "finite numbers" :
-      spec.kind === "list" ? "one text value per line" : "text values";
+      spec.kind === "list" ? "one text value per line" : "text values");
     return `${spec.help || ""}\nAvailable options: ${options}.${spec.kind === "dimension" ? " Use commas for a sweep." : ""}`;
   }
   function invalid_field_value(key, raw, spec) {
@@ -445,7 +445,7 @@
       } catch (_) { /* The error is displayed above. */ }
     });
     // vvv THOG state the active axes beside the selected Recipe
-    const width_note=add(detail,"p","Width only: inherited DEPTH fields are inactive. Enable --select-depth in Geometry to combine both axes.","runner-gpu-note");
+    const width_note=add(detail,"p",'WIDTH has been selected. To compress across both layers (depth) and width (token embeddings / residual stream) in one run, enable --select-depth in Geometry. Use "depth, width" in --geometry-preset to compare separate DEPTH and WIDTH runs.',"runner-gpu-note");
     width_note.id="runner_width_selection_note";
     // ^^^ THOG
     const eligible=(network?.hosts||[]).filter(host=>(host.local||host.execution_enabled) &&
@@ -723,8 +723,14 @@
       events.target="_blank";events.rel="noopener";
       // ^^^ THOG
     }
-    if(["progress"].includes(tab)) add(detail,"p",
-      "Possible states are: ready, queued, dispatching, running, blocked, stopping, flushing, unknown, completed, failed, cancelled.","runner-state-legend");
+    if(tab==="progress") {
+      const legend=add(detail,"p","Possible states are: ","runner-state-legend");
+      const states=["ready","queued","dispatching","running","blocked","stopping","flushing","unknown","completed","failed","cancelled"];
+      states.forEach((state,index)=>{
+        add(legend,"span",state,index<4 ? "runner-legend-green" : index>=6 ? "runner-legend-red" : "");
+        legend.appendChild(document.createTextNode(index===states.length-1 ? "." : ", "));
+      });
+    }
     if(tab==="progress") {
       const controls=add(detail,"div",undefined,"runner-actions");
       button(controls,"Stop Grid",async()=>{if(!confirm(`Stop ${grid.grid_tag} and its running attempts?`))return;

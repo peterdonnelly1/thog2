@@ -22,7 +22,7 @@ for (const tag of ["G-00001","G-00002"]) {
   const shades = runs.filter(run=>run.runner_grid_tag===tag).map(run=>colour(run.dashboard_run_id));
   assert.equal(new Set(shades).size,3);
   assert.equal(new Set(shades.map(value=>value.match(/^hsl\((\d+)/)[1])).size,1);
-  assert.deepEqual(shades.map(value=>Number(value.match(/([\d.]+)%\)$/)[1])),[72,54,36]);
+  assert.deepEqual(shades.map(value=>Number(value.match(/([\d.]+)%\)$/)[1])),[79,72,65]);
 }
 assert.notEqual(colour("r00").match(/^hsl\((\d+)/)[1],colour("r10").match(/^hsl\((\d+)/)[1]);
 

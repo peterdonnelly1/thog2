@@ -955,7 +955,7 @@ class TrainingConfig:
                 raise ValueError("C Compact Run v1 supports only pure DEPTH geometry")
             if self.basis_family != BASIS_FAMILY_CHEBYSHEV or self.basis_version != BASIS_VERSION:
                 raise ValueError(
-                    "C Compact Run v1 requires the current QR-stabilised Chebyshev compressor"
+                    "C Compact Run v1 requires the current root-sampled Chebyshev compressor"
                 )
             if self.depth_compress_layer_norm_and_bias:
                 raise ValueError("C Compact Run v1 keeps LayerNorm and bias outside compression")

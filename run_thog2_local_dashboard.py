@@ -1494,6 +1494,9 @@ def _handler_for_with_runner(catalog):
                 if not 1 <= length <= 4096:
                     raise ValueError("Invalid deletion settings request size")
                 payload = json.loads(self.rfile.read(length))
+                if payload.get("action") == "resume_local_copy":
+                    self._send_json(catalog.resume_local_copy(payload.get("host_id"), payload.get("source_chart_path")))
+                    return
                 if payload.get("action") != "settings":
                     raise ValueError("Unknown deletion action")
                 self._send_json(catalog.set_deletion_timeout_days(payload.get("timeout_days")))                                                                # <<< THOG persist the global timeout used only by future deletion requests

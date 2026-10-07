@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import torch
 from torch import Tensor
+from .bases import build_registered_basis
 
 
 def resolve_history_count(value: str | int, *, nominal: int, layers: int) -> dict:
@@ -21,20 +22,10 @@ def history_basis(layers: int, count: int, *, dtype: torch.dtype, device: torch.
     if not 1 <= count <= layers:
         raise ValueError("history basis requires 1 <= count <= layers")
     if count == layers:
-        # A lossless sample chart avoids an ill-conditioned high-order Vandermonde.
+        # Full-capacity histories store each layer sample directly.
         return torch.eye(layers, dtype=dtype, device=device)
-    x = torch.linspace(-1, 1, layers, dtype=torch.float64, device="cpu")
-    columns = [torch.ones_like(x)]
-    if count > 1:
-        columns.append(x)
-    for _ in range(2, count):
-        columns.append(2 * x * columns[-1] - columns[-2])
-    raw = torch.stack(columns, dim=1)
-    q, r = torch.linalg.qr(raw, mode="reduced")
-    if torch.linalg.matrix_rank(raw) != count:
-        raise ValueError("rank-deficient thogopt history basis")
-    signs = torch.where(r.diag() < 0, -1., 1.)
-    return (q * signs).to(device=device, dtype=dtype)
+    return build_registered_basis(layers, count, basis_family="chebyshev",
+                                  runtime_dtype=dtype, device=device)
 
 
 def fit_nonnegative(q: Tensor, target: Tensor, *, max_sweeps: int = 2048) -> tuple[Tensor, dict]:

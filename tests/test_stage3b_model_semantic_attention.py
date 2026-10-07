@@ -21,7 +21,7 @@ from sheet.semantic_materializer import (
 )
 
 
-FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "stage0_legacy_sheet_col_fixture.json"
+FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "stage0_root_sheet_col_fixture.json"
 
 
 def legacy_attention_reference(model: SheetGPT, inputs: Tensor, layer_index: int) -> Tensor:

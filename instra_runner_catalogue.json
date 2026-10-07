@@ -19,6 +19,7 @@
     "default": null,
     "help": "additional artifact-name suffix",
     "kind": "fixed",
+    "options_help": "a text value as described above",
     "type": "string"
   },
   "--attention-backend": {
@@ -37,9 +38,16 @@
   },
   "--attention-geometry": {
     "category": "Geometry",
+    "choices": [
+      "legacy_sheet_col",
+      "depth",
+      "head_aware_block",
+      "conventional"
+    ],
     "default": null,
     "help": "legacy attention geometry selector",
     "kind": "dimension",
+    "options_help": "legacy_sheet_col, depth, head_aware_block, conventional",
     "short": "-a",
     "type": "string"
   },
@@ -52,16 +60,18 @@
       "lapped_cosine"
     ],
     "default": null,
-    "help": "chebyshev | dct | haar | lapped_cosine",
+    "help": "chebyshev | dct | haar | lapped_cosine Chebyshev uses endpoint-clustered root nodes and direct normalization. It is mathematically equivalent to DCT-II up to ordering and signs; these are no longer distinct basis choices. Training quality requires experiments.",
     "kind": "dimension",
+    "options_help": "chebyshev, dct, haar, lapped_cosine",
     "short": "-B",
     "type": "string"
   },
   "--basis-version": {
     "category": "Geometry",
     "default": "auto",
-    "help": "auto or exact registered version",
+    "help": "auto or exact registered version Chebyshev uses endpoint-clustered root nodes and direct normalization. It is mathematically equivalent to DCT-II up to ordering and signs; these are no longer distinct basis choices. Training quality requires experiments.",
     "kind": "dimension",
+    "options_help": "auto; chebyshev: chebyshev_first_kind_roots_v1; dct: dct_ii_orthonormal_v1; haar: haar_balanced_binary_orthonormal_v1; lapped_cosine: lapped_cosine_dc_preserving_orthonormal_v1; lapped_cosine_dc_preserving_orthonormal_v1_wN_o500 (even window N >= 2); the version must match the selected compressor",
     "short": "-v",
     "type": "string"
   },
@@ -180,6 +190,7 @@
     "default": "checkpoints",
     "help": "checkpoint root",
     "kind": "fixed",
+    "options_help": "a filesystem path accessible on the execution host",
     "short": "-o",
     "type": "string"
   },
@@ -207,6 +218,7 @@
     "default": "data/openwebtext",
     "help": "directory containing train.bin and val.bin",
     "kind": "fixed",
+    "options_help": "a filesystem path accessible on the execution host",
     "short": "-t",
     "type": "string"
   },
@@ -222,6 +234,7 @@
     "default": "openwebtext",
     "help": "dataset identity",
     "kind": "fixed",
+    "options_help": "a prepared dataset name under the data directory (for example openwebtext)",
     "short": "-d",
     "type": "string"
   },
@@ -249,14 +262,16 @@
     "default": "cuda",
     "help": "PyTorch device string",
     "kind": "fixed",
+    "options_help": "cpu, cuda, or a device such as cuda:0 (available hardware required)",
     "type": "string"
   },
   "--direct-factorised-hyperblock-mlp": {
+    "boolean_optional": true,
     "category": "Geometry",
     "default": null,
     "help": "direct HYPERBLOCK UP/DOWN execution",
     "kind": "dimension",
-    "type": "string"
+    "type": "flag"
   },
   "--dropout": {
     "category": "GPT-2 Hyperparameters",
@@ -307,6 +322,7 @@
     "default": null,
     "help": "low-level experiment-prefix override",
     "kind": "fixed",
+    "options_help": "a text value as described above",
     "type": "string"
   },
   "--explain-geometry": {
@@ -319,14 +335,15 @@
   "--fork": {
     "category": "Resume and Fork",
     "default": null,
-    "help": "fork an existing run/checkpoint into a new training lineage",
+    "help": "fork from a checkpoint selector",
     "kind": "fixed",
+    "options_help": "a checkpoint path or the checkpoint selector described above",
     "type": "string"
   },
   "--fork-learning-rate": {
     "category": "Resume and Fork",
     "default": null,
-    "help": "initial learning rate of a fork",
+    "help": "fork maximum learning rate",
     "kind": "fixed",
     "type": "float"
   },
@@ -336,21 +353,21 @@
       "restart_cosine"
     ],
     "default": null,
-    "help": "fork learning-rate schedule: restart_cosine",
+    "help": "restart_cosine",
     "kind": "fixed",
     "type": "string"
   },
   "--fork-min-lr": {
     "category": "Resume and Fork",
     "default": null,
-    "help": "minimum learning rate of a fork",
+    "help": "fork minimum learning rate",
     "kind": "fixed",
     "type": "float"
   },
   "--fork-rewarm-iters": {
     "category": "Resume and Fork",
     "default": null,
-    "help": "warmup steps for a fork",
+    "help": "fork warmup updates",
     "kind": "fixed",
     "type": "int"
   },
@@ -365,10 +382,11 @@
       "mlp_block",
       "full_block",
       "width-type-I",
-      "width"
+      "width",
+      "conventional"
     ],
     "default": null,
-    "help": "dense | legacy_sheet_col | depth | jpeg_like_v1 | head_aware_block | mlp_block | full_block | width-type-I | width (alias)",
+    "help": "dense | legacy_sheet_col | depth | jpeg_like_v1 | head_aware_block | mlp_block | full_block",
     "kind": "dimension",
     "short": "-p",
     "type": "string"
@@ -393,6 +411,7 @@
     "default": null,
     "help": "machine label",
     "kind": "fixed",
+    "options_help": "a text value as described above",
     "type": "string"
   },
   "--hyperblock": {
@@ -433,16 +452,24 @@
   },
   "--hyperblock-compressor": {
     "category": "Geometry",
+    "choices": [
+      "chebyshev",
+      "dct",
+      "haar",
+      "lapped_cosine"
+    ],
     "default": null,
-    "help": "registered HYPERBLOCK compressor",
+    "help": "registered HYPERBLOCK compressor Chebyshev uses endpoint-clustered root nodes and direct normalization. It is mathematically equivalent to DCT-II up to ordering and signs; these are no longer distinct basis choices. Training quality requires experiments.",
     "kind": "dimension",
+    "options_help": "chebyshev, dct, haar, lapped_cosine",
     "type": "string"
   },
   "--hyperblock-compressor-version": {
     "category": "Geometry",
     "default": "auto",
-    "help": "auto or an exact registered version",
+    "help": "auto or an exact registered version Chebyshev uses endpoint-clustered root nodes and direct normalization. It is mathematically equivalent to DCT-II up to ordering and signs; these are no longer distinct basis choices. Training quality requires experiments.",
     "kind": "dimension",
+    "options_help": "auto; chebyshev: chebyshev_first_kind_roots_v1; dct: dct_ii_orthonormal_v1; haar: haar_balanced_binary_orthonormal_v1; lapped_cosine: lapped_cosine_dc_preserving_orthonormal_v1; lapped_cosine_dc_preserving_orthonormal_v1_wN_o500 (even window N >= 2); the version must match the selected compressor",
     "type": "string"
   },
   "--hyperblock-d-model-order": {
@@ -499,6 +526,7 @@
     "default": null,
     "help": "initialise THOG from a saved dense snapshot",
     "kind": "fixed",
+    "options_help": "a filesystem path accessible on the execution host",
     "type": "string"
   },
   "--instrumentation__delta_loss_v_layer_heatmap": {
@@ -508,7 +536,7 @@
       "linear"
     ],
     "default": null,
-    "help": "absolute-layer observational Δloss heatmap; absent means disabled",
+    "help": "absolute-layer observational \u0394loss heatmap; absent means disabled",
     "kind": "dimension",
     "type": "string"
   },
@@ -543,6 +571,7 @@
     "default": null,
     "help": "six THOG curves or DENSE cross-marker charts; default local",
     "kind": "dimension",
+    "options_help": "wandb, local, none",
     "type": "string"
   },
   "--instrumentation__optimizer_histories__full_matrix_every_n_steps": {
@@ -552,11 +581,90 @@
     "kind": "dimension",
     "type": "int"
   },
+  "--instrumentation__width_activation_curves__end_step": {
+    "category": "Width Activation Curves",
+    "choices": [],
+    "default": -1,
+    "help": "Bounded residual-width capture: end step",
+    "kind": "fixed",
+    "options_help": "-1 (unbounded) or nonnegative whole numbers",
+    "type": "int"
+  },
+  "--instrumentation__width_activation_curves__feature_evaluation_points": {
+    "category": "Width Activation Curves",
+    "choices": [],
+    "default": 256,
+    "help": "Bounded residual-width capture: feature evaluation points",
+    "kind": "fixed",
+    "type": "int"
+  },
+  "--instrumentation__width_activation_curves__history_length": {
+    "category": "Width Activation Curves",
+    "choices": [],
+    "default": 20,
+    "help": "Bounded residual-width capture: history length",
+    "kind": "fixed",
+    "type": "int"
+  },
+  "--instrumentation__width_activation_curves__log_every_n_steps": {
+    "category": "Width Activation Curves",
+    "choices": [],
+    "default": 100,
+    "help": "Bounded residual-width capture: log every n steps",
+    "kind": "fixed",
+    "type": "int"
+  },
+  "--instrumentation__width_activation_curves__mode": {
+    "category": "Width Activation Curves",
+    "choices": [
+      "off",
+      "basic",
+      "probes"
+    ],
+    "default": "off",
+    "help": "Bounded residual-width capture: mode",
+    "kind": "fixed",
+    "type": "str"
+  },
+  "--instrumentation__width_activation_curves__probe_every_n_steps": {
+    "category": "Width Activation Curves",
+    "choices": [],
+    "default": 1000,
+    "help": "Bounded residual-width capture: probe every n steps",
+    "kind": "fixed",
+    "type": "int"
+  },
+  "--instrumentation__width_activation_curves__probe_orders": {
+    "category": "Width Activation Curves",
+    "choices": [],
+    "default": "auto",
+    "help": "Bounded residual-width capture: probe orders",
+    "kind": "fixed",
+    "options_help": "auto or distinct comma-separated integers k satisfying 1 <= k < r (WIDTH.order)",
+    "type": "str"
+  },
+  "--instrumentation__width_activation_curves__sample_tokens_per_layer": {
+    "category": "Width Activation Curves",
+    "choices": [],
+    "default": 8,
+    "help": "Bounded residual-width capture: sample tokens per layer",
+    "kind": "fixed",
+    "type": "int"
+  },
+  "--instrumentation__width_activation_curves__start_step": {
+    "category": "Width Activation Curves",
+    "choices": [],
+    "default": 0,
+    "help": "Bounded residual-width capture: start step",
+    "kind": "fixed",
+    "type": "int"
+  },
   "--lapped-cosine-overlap-fraction": {
     "category": "Geometry",
     "default": null,
     "help": "currently 0.5 only",
     "kind": "dimension",
+    "options_help": "0.5",
     "short": "-i",
     "type": "float"
   },
@@ -565,6 +673,7 @@
     "default": null,
     "help": "even physical locality window",
     "kind": "dimension",
+    "options_help": "even integers >= 2",
     "short": "-W",
     "type": "int"
   },
@@ -612,6 +721,7 @@
     "default": "logs",
     "help": "log root",
     "kind": "fixed",
+    "options_help": "a filesystem path accessible on the execution host",
     "short": "-j",
     "type": "string"
   },
@@ -620,6 +730,7 @@
     "default": null,
     "help": "explicit log timestamp",
     "kind": "fixed",
+    "options_help": "a text value as described above",
     "type": "string"
   },
   "--materialisation-profiling": {
@@ -665,17 +776,32 @@
   },
   "--mlp-geometry": {
     "category": "Geometry",
+    "choices": [
+      "legacy_sheet_col",
+      "depth",
+      "jpeg_like_v1",
+      "mlp_block",
+      "conventional"
+    ],
     "default": null,
     "help": "legacy MLP geometry selector",
     "kind": "dimension",
+    "options_help": "legacy_sheet_col, depth, jpeg_like_v1, mlp_block, conventional",
     "short": "-m",
     "type": "string"
   },
   "--mlp-hidden-compressor": {
     "category": "Geometry",
+    "choices": [
+      "chebyshev",
+      "dct",
+      "haar",
+      "lapped_cosine"
+    ],
     "default": null,
-    "help": "registered local MLP_HIDDEN compressor",
+    "help": "registered local MLP_HIDDEN compressor Chebyshev uses endpoint-clustered root nodes and direct normalization. It is mathematically equivalent to DCT-II up to ordering and signs; these are no longer distinct basis choices. Training quality requires experiments.",
     "kind": "dimension",
+    "options_help": "chebyshev, dct, haar, lapped_cosine",
     "type": "string"
   },
   "--mlp-hidden-group-size": {
@@ -895,13 +1021,14 @@
     "default": null,
     "help": "momentum for SGD, Nesterov and RMSprop",
     "kind": "dimension",
-    "type": "string"
+    "type": "float"
   },
   "--option": {
     "category": "Geometry",
     "default": [],
     "help": "assign a systematic geometry option; repeatable",
     "kind": "list",
+    "options_help": "one text value per line",
     "type": "list"
   },
   "--plastic-layer-count-hold-updates": {
@@ -909,7 +1036,8 @@
     "default": null,
     "help": "minimum updates to hold a committed layer count",
     "kind": "dimension",
-    "type": "string"
+    "type": "int",
+    "ui_hidden": true
   },
   "--plastic__coarse_phase": {
     "category": "Coarse",
@@ -1245,16 +1373,26 @@
   },
   "--premat_processing_logging": {
     "category": "NSIGHT",
+    "choices": [
+      "enabled",
+      "disabled"
+    ],
     "default": null,
     "help": "run bounded Nsight Processing capture",
     "kind": "fixed",
+    "options_help": "enabled, disabled",
     "type": "string"
   },
   "--premat_processing_profiler": {
     "category": "NSIGHT",
+    "choices": [
+      "nsys",
+      "ncu"
+    ],
     "default": null,
     "help": "select temporal NSYS or structural NCU capture",
     "kind": "automatic",
+    "options_help": "nsys, ncu",
     "type": "string"
   },
   "--premat_retain_detailed_premat_history": {
@@ -1282,6 +1420,7 @@
     "default": null,
     "help": "optional comma-separated QKV/O/UP/DOWN selector combination",
     "kind": "list",
+    "options_help": "one text value per line",
     "type": "list"
   },
   "--premat_timing": {
@@ -1318,7 +1457,7 @@
     "default": null,
     "help": "print geometry and complete help",
     "kind": "fixed",
-    "type": "string"
+    "type": "flag"
   },
   "--print-resolved-json": {
     "category": "Run Control Parameters",
@@ -1354,7 +1493,7 @@
     "default": null,
     "help": "explicit fork only: reset histories and bias-correction counters",
     "kind": "fixed",
-    "type": "string"
+    "type": "flag"
   },
   "--residual-init-depth-source": {
     "category": "Geometry",
@@ -1394,21 +1533,24 @@
     "default": "results",
     "help": "result root",
     "kind": "fixed",
+    "options_help": "a filesystem path accessible on the execution host",
     "short": "-R",
     "type": "string"
   },
   "--resume": {
     "category": "Resume and Fork",
     "default": null,
-    "help": "resume from an existing run/checkpoint by selector",
+    "help": "resume from a checkpoint selector",
     "kind": "fixed",
+    "options_help": "a checkpoint path or the checkpoint selector described above",
     "type": "string"
   },
   "--resume-from": {
     "category": "Resume and Fork",
     "default": null,
-    "help": "path to a checkpoint for resume or fork",
+    "help": "explicit selector for -q resume or -q fork",
     "kind": "fixed",
+    "options_help": "a filesystem path accessible on the execution host",
     "type": "string"
   },
   "--run-mode": {
@@ -1429,6 +1571,7 @@
     "default": "AKAROA",
     "help": "human run-name prefix",
     "kind": "fixed",
+    "options_help": "a text value as described above",
     "short": "-g",
     "type": "string"
   },
@@ -1437,6 +1580,7 @@
     "default": null,
     "help": "explicit run-start label",
     "kind": "fixed",
+    "options_help": "a text value as described above",
     "type": "string"
   },
   "--save-dense-initialisation-snapshot": {
@@ -1465,13 +1609,23 @@
     "default": [],
     "help": "select a registered element geometry; repeatable",
     "kind": "list",
+    "options_help": "one text value per line",
     "type": "list"
+  },
+  "--select-width": {
+    "category": "Geometry",
+    "choices": [],
+    "default": false,
+    "help": "Enabled automatically in Runner when the preset includes width or width-type-I; pair with WIDTH.order.",
+    "kind": "fixed",
+    "type": "flag"
   },
   "--thogopt__momentum_history_coefficients": {
     "category": "Run Control Parameters",
     "default": null,
     "help": "raw-gradient momentum history; auto=min(P,L)",
     "kind": "dimension",
+    "options_help": "auto or an integer from 1 through L (--n-layer)",
     "type": "string"
   },
   "--thogopt__scaling_history_coefficients": {
@@ -1479,6 +1633,7 @@
     "default": "auto",
     "help": "raw squared-gradient approximation budget; auto=min(2P-1,L), independent of momentum",
     "kind": "dimension",
+    "options_help": "auto or an integer from 1 through L (--n-layer)",
     "type": "string"
   },
   "--torch-compile": {
@@ -1506,6 +1661,7 @@
     "default": null,
     "help": "W&B entity",
     "kind": "fixed",
+    "options_help": "a text value as described above",
     "type": "string"
   },
   "--wandb-mode": {
@@ -1525,6 +1681,7 @@
     "default": "thog",
     "help": "W&B project",
     "kind": "fixed",
+    "options_help": "a text value as described above",
     "type": "string"
   },
   "--wandb-root": {
@@ -1532,6 +1689,7 @@
     "default": "wandb",
     "help": "local W&B root",
     "kind": "fixed",
+    "options_help": "a filesystem path accessible on the execution host",
     "type": "string"
   },
   "--warmup-iters": {
@@ -1549,135 +1707,57 @@
     "kind": "dimension",
     "type": "float"
   },
+  "DEPTH.compressor": {
+    "category": "Geometry",
+    "choices": [],
+    "default": "chebyshev",
+    "help": "Independent fixed depth basis, used with select-depth. Chebyshev uses endpoint-clustered root nodes and direct normalization. It is mathematically equivalent to DCT-II up to ordering and signs; these are no longer distinct basis choices. Training quality requires experiments.",
+    "kind": "fixed",
+    "options_help": "chebyshev, dct, haar, lapped_cosine; also family@version using the corresponding registered version",
+    "type": "str"
+  },
+  "DEPTH.compressor_version": {
+    "category": "Geometry",
+    "choices": [],
+    "default": "auto",
+    "help": "Exact independent depth basis version. Chebyshev uses endpoint-clustered root nodes and direct normalization. It is mathematically equivalent to DCT-II up to ordering and signs; these are no longer distinct basis choices. Training quality requires experiments.",
+    "kind": "fixed",
+    "options_help": "auto; chebyshev: chebyshev_first_kind_roots_v1; dct: dct_ii_orthonormal_v1; haar: haar_balanced_binary_orthonormal_v1; lapped_cosine: lapped_cosine_dc_preserving_orthonormal_v1; lapped_cosine_dc_preserving_orthonormal_v1_wN_o500 (even window N >= 2); the version must match the selected compressor",
+    "type": "str"
+  },
   "DEPTH.order": {
     "category": "Geometry",
     "default": 16,
     "help": "DEPTH coefficient order selected through --option DEPTH.order=N",
     "kind": "dimension",
+    "options_help": "integers from 1 through L (--n-layer)",
     "type": "int"
-  },
-  "--select-width": {
-    "category": "Geometry",
-    "type": "flag",
-    "default": false,
-    "choices": [],
-    "kind": "fixed",
-    "help": "Enabled automatically in Runner when the preset includes width or width-type-I; pair with WIDTH.order."
-  },
-  "WIDTH.order": {
-    "category": "Geometry",
-    "type": "int",
-    "default": null,
-    "choices": [],
-    "kind": "dimension",
-    "help": "Retained residual coefficients r; explicit 2 <= r <= D. Attention and MLP remain reference-wide."
   },
   "WIDTH.compressor": {
     "category": "Geometry",
-    "type": "str",
-    "default": "chebyshev",
     "choices": [],
+    "default": "chebyshev",
+    "help": "Independent width basis from the shared registry; family@version is accepted. Chebyshev uses endpoint-clustered root nodes and direct normalization. It is mathematically equivalent to DCT-II up to ordering and signs; these are no longer distinct basis choices. Training quality requires experiments.",
     "kind": "fixed",
-    "help": "Independent width basis from the shared registry; family@version is accepted."
+    "options_help": "chebyshev, dct, haar, lapped_cosine; also family@version using the corresponding registered version",
+    "type": "str"
   },
   "WIDTH.compressor_version": {
     "category": "Geometry",
-    "type": "str",
-    "default": "auto",
     "choices": [],
+    "default": "auto",
+    "help": "Resolved exact width basis version; saved version controls compatible resume. Chebyshev uses endpoint-clustered root nodes and direct normalization. It is mathematically equivalent to DCT-II up to ordering and signs; these are no longer distinct basis choices. Training quality requires experiments.",
     "kind": "fixed",
-    "help": "Resolved exact width basis version; saved version controls compatible resume."
+    "options_help": "auto; chebyshev: chebyshev_first_kind_roots_v1; dct: dct_ii_orthonormal_v1; haar: haar_balanced_binary_orthonormal_v1; lapped_cosine: lapped_cosine_dc_preserving_orthonormal_v1; lapped_cosine_dc_preserving_orthonormal_v1_wN_o500 (even window N >= 2); the version must match the selected compressor",
+    "type": "str"
   },
-  "DEPTH.compressor": {
+  "WIDTH.order": {
     "category": "Geometry",
-    "type": "str",
-    "default": "chebyshev",
     "choices": [],
-    "kind": "fixed",
-    "help": "Independent fixed depth basis, used with select-depth."
-  },
-  "DEPTH.compressor_version": {
-    "category": "Geometry",
-    "type": "str",
-    "default": "auto",
-    "choices": [],
-    "kind": "fixed",
-    "help": "Exact independent depth basis version."
-  },
-  "--instrumentation__width_activation_curves__mode": {
-    "category": "Width Activation Curves",
-    "type": "str",
-    "default": "off",
-    "choices": [
-      "off",
-      "basic",
-      "probes"
-    ],
-    "kind": "fixed",
-    "help": "Bounded residual-width capture: mode"
-  },
-  "--instrumentation__width_activation_curves__log_every_n_steps": {
-    "category": "Width Activation Curves",
-    "type": "int",
-    "default": 100,
-    "choices": [],
-    "kind": "fixed",
-    "help": "Bounded residual-width capture: log every n steps"
-  },
-  "--instrumentation__width_activation_curves__probe_every_n_steps": {
-    "category": "Width Activation Curves",
-    "type": "int",
-    "default": 1000,
-    "choices": [],
-    "kind": "fixed",
-    "help": "Bounded residual-width capture: probe every n steps"
-  },
-  "--instrumentation__width_activation_curves__history_length": {
-    "category": "Width Activation Curves",
-    "type": "int",
-    "default": 20,
-    "choices": [],
-    "kind": "fixed",
-    "help": "Bounded residual-width capture: history length"
-  },
-  "--instrumentation__width_activation_curves__sample_tokens_per_layer": {
-    "category": "Width Activation Curves",
-    "type": "int",
-    "default": 8,
-    "choices": [],
-    "kind": "fixed",
-    "help": "Bounded residual-width capture: sample tokens per layer"
-  },
-  "--instrumentation__width_activation_curves__feature_evaluation_points": {
-    "category": "Width Activation Curves",
-    "type": "int",
-    "default": 256,
-    "choices": [],
-    "kind": "fixed",
-    "help": "Bounded residual-width capture: feature evaluation points"
-  },
-  "--instrumentation__width_activation_curves__probe_orders": {
-    "category": "Width Activation Curves",
-    "type": "str",
-    "default": "auto",
-    "choices": [],
-    "kind": "fixed",
-    "help": "Bounded residual-width capture: probe orders"
-  },
-  "--instrumentation__width_activation_curves__start_step": {
-    "category": "Width Activation Curves",
-    "type": "int",
-    "default": 0,
-    "choices": [],
-    "kind": "fixed",
-    "help": "Bounded residual-width capture: start step"
-  },
-  "--instrumentation__width_activation_curves__end_step": {
-    "category": "Width Activation Curves",
-    "type": "int",
-    "default": -1,
-    "choices": [],
-    "kind": "fixed",
-    "help": "Bounded residual-width capture: end step"
+    "default": null,
+    "help": "Retained residual coefficients r; explicit 2 <= r <= D. Attention and MLP remain reference-wide.",
+    "kind": "dimension",
+    "options_help": "integers from 2 through D (--n-embd), including 512 and 1024 when D=1024",
+    "type": "int"
   }
 }

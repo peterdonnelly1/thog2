@@ -94,14 +94,23 @@ def test_width_preset_ignores_inherited_depth_order_in_preview_and_exports(prese
     assert not any(value.startswith('DEPTH.') for value in raw_command)
 
 
-def test_chebyshev_rank_failure_offers_a_verified_order_and_dct_alternative():
+@pytest.mark.parametrize('order', [512, 1024])
+def test_chebyshev_high_orders_are_accepted_and_match_dct(order):
+    import torch
     from sheet.width import build_width_basis
-    with pytest.raises(ValueError) as rejected:
-        build_width_basis(1024,512,'chebyshev')
-    assert 'equally spaced Chebyshev' in str(rejected.value)
-    assert 'Try WIDTH.order=128 at D=1024' in str(rejected.value)
-    assert 'WIDTH.order=512 with WIDTH.compressor=dct' in str(rejected.value)
-    assert build_width_basis(1024,128,'chebyshev')[1]['raw_numerical_rank']==128
+    analysis, metadata = build_width_basis(1024,order,'chebyshev')
+    reference, _ = build_width_basis(1024,order,'dct')
+    signs = torch.where(torch.arange(order) % 2 == 0, 1., -1.).to(torch.float64)
+    torch.testing.assert_close(analysis,reference * signs[:,None],atol=1e-11,rtol=0)
+    assert metadata['raw_numerical_rank']==order
+
+
+@pytest.mark.parametrize('enabled',[True,False])
+def test_catalogue_boolean_optional_compressor_control_reaches_public_parser(enabled):
+    recipe={'label':'Boolean option','parameters':{'--hyperblock':True,'--direct-factorised-hyperblock-mlp':enabled}}
+    run=expand(recipe)[0]
+    arguments=build_parser().parse_args(command_for({**run,'grid_tag':'G-TEST'}, {})[3:])
+    assert arguments.direct_factorised_hyperblock_mlp is enabled
 
 
 def test_captured_1024_width_recipe_resolves_both_requested_dct_orders_without_depth():

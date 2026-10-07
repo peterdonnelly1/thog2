@@ -352,10 +352,21 @@ h1 { margin: 0; font-size: 17px; line-height: 1.25; font-weight: 680; }
 
 .settings-overlay { position: fixed; z-index: 110; inset: 0; display: flex; align-items: center; justify-content: center; padding: 25px; background: rgba(25,27,31,.38); }
 .settings-dialog { width: min(520px, 100%); overflow: hidden; border: 1px solid #cfd3d8; border-radius: 8px; background: #fff; box-shadow: 0 18px 60px rgba(0,0,0,.25); }
-.settings-overlay:has(.global-settings-window) { padding:0; background:#fff; }
-.global-settings-window { width:100vw; height:100vh; border:0; border-radius:0; box-shadow:none; display:grid; grid-template-rows:auto minmax(0,1fr) auto; }
-.global-settings-window .settings-content { overflow:auto; max-width:78rem; width:100%; margin:0 auto; padding:2rem; box-sizing:border-box; display:grid; align-content:start; gap:1.5rem; }
-.global-settings-section { padding:1.2rem 1.5rem; border:1px solid var(--border); border-radius:8px; }
+.global-settings-window { width:min(880px,100%); max-height:calc(100vh - 50px); display:grid; grid-template-rows:auto minmax(0,1fr) auto; }
+.global-settings-window .settings-content { overflow:auto; width:100%; padding:20px; box-sizing:border-box; display:grid; grid-template-columns:1fr 1fr; align-content:start; gap:16px; background:#f5f6f8; }
+.global-settings-section { min-width:0; align-self:start; padding:18px; border:1px solid var(--border); border-radius:8px; background:#fff; }
+.global-settings-wide, .global-settings-window .settings-content > :not(.global-settings-section) { grid-column:1 / -1; }
+.global-settings-section > summary { cursor:pointer; font-size:14px; font-weight:650; }
+.global-settings-section[open] > summary { margin-bottom:16px; }
+.excluded-copy-row { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.excluded-copy-row span { min-width:0; overflow-wrap:anywhere; }
+.excluded-copy-row button { flex-shrink:0; }
+.global-settings-section select { width:100%; height:36px; padding:0 9px; border:1px solid var(--border); border-radius:5px; background:#fff; font:inherit; }
+.settings-disclosure { margin-top:16px; border-top:1px solid #e3e6eb; padding-top:12px; }
+.settings-disclosure summary { cursor:pointer; font-weight:620; color:#475366; }
+.settings-disclosure[open] summary { margin-bottom:12px; }
+.settings-disclosure button { border:1px solid var(--border); border-radius:4px; padding:5px 9px; background:#fff; cursor:pointer; }
+@media(max-width:600px) { .global-settings-window .settings-content { grid-template-columns:1fr; padding:12px; } }
 .global-settings-section h3 { margin:0 0 1rem; }
 .global-settings-section > label { display:block; margin-bottom:.7rem; }
 .settings-dialog > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 17px 19px; border-bottom: 1px solid var(--border); }
@@ -395,6 +406,10 @@ h1 { margin: 0; font-size: 17px; line-height: 1.25; font-weight: 680; }
 .chart-settings-tabs button.selected::after { background: #009bb5; }
 .chart-settings-panels { min-height: 0; flex: 1 1 auto; overflow: auto; padding: 14px 15px 22px; }
 .chart-settings-panel { display: grid; gap: 13px; }
+.chart-axis-actions { display:flex; justify-content:flex-end; align-items:center; min-height:48px; padding:12px; border:1px solid #e0e3e7; border-radius:6px; background:#f0f2f5; }
+.chart-axis-actions button { height:30px; padding:0 12px; border:1px solid #cdd2d9; border-radius:4px; background:#fff; color:#475366; font:inherit; cursor:pointer; }
+.runner-state-legend .runner-legend-green { color:#16833b; }
+.runner-state-legend .runner-legend-red { color:#b3262e; }
 .chart-editor-field { display: grid; gap: 5px; color: #555d68; font-size: 9px; font-weight: 620; }
 .chart-editor-field input, .chart-editor-field select, .chart-axis-range input { width: 100%; height: 33px; padding: 0 8px; border: 1px solid #d8dce1; border-radius: 4px; background: #fff; color: #303640; font: inherit; font-size: 10px; font-weight: 500; }
 .chart-editor-field input[readonly] { background: #f7f8fa; color: #707985; }

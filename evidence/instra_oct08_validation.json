@@ -1,0 +1,451 @@
+{
+  "branch": "residuals_compression",
+  "baseline": "629bdd1b3c43e2e4bc91fd31b863facce58383b3",
+  "initial_complete_python": {
+    "passed": 1902,
+    "subtests_passed": 484,
+    "failed": 97,
+    "skipped": 27,
+    "seconds": 386.96
+  },
+  "failure_classification": {
+    "ordinary_cases_reproduced_on_baseline": [
+      "tests/test_console_and_descriptor_help.py::test_wrapper_registry_emits_descriptor_table_once",
+      "tests/test_console_model_summary.py::test_model_summary_aligns_optimizer_and_reports_cosine_decay",
+      "tests/test_console_progress_layout.py::ConsoleProgressLayoutTests::test_current_layer_count_is_appended_only_when_plastic_is_enabled",
+      "tests/test_console_progress_layout.py::ConsoleProgressLayoutTests::test_sampled_values_are_emitted_once_after_a_plastic_transition",
+      "tests/test_console_progress_layout.py::ConsoleProgressLayoutTests::test_semantic_qkv_bypass_is_suppressed_only_for_depth_reporting",
+      "tests/test_console_progress_layout.py::ConsoleProgressLayoutTests::test_validation_reuses_latest_step_mean_and_uses_two_level_yellow_emphasis",
+      "tests/test_console_progress_pretty_rows.py::test_step_one_console_row_keeps_elapsed_seconds",
+      "tests/test_console_progress_pretty_rows.py::test_training_console_row_uses_hh_mm_ss_after_step_one_and_colors_negative_delta_bright_green",
+      "tests/test_console_progress_pretty_rows.py::test_validation_console_row_uses_bold_explicit_rgb_yellow_for_validation_loss",
+      "tests/test_dense_weight_curves.py::test_dense_figure_uses_crosses_with_per_step_connectors",
+      "tests/test_dense_weight_curves.py::test_dense_scalar_coordinates_share_one_step_colour_and_legend_row",
+      "tests/test_dense_weight_curves.py::test_dense_snapshot_reuses_all_six_families_with_integer_layer_points",
+      "tests/test_depth_weight_curves_and_observational_probes.py::test_scalar_selection_is_fixed_per_run_and_run_specific",
+      "tests/test_depth_weight_curves_v2.py::test_all_attention_charts_share_one_head",
+      "tests/test_depth_weight_curves_v2.py::test_plotly_history_emphasises_newest_and_oldest",
+      "tests/test_direct_thog_mlp_application.py::test_training_wrappers_expose_default_on_direct_factorised_mlp_without_getopts_letter",
+      "tests/test_final_activation_checkpoint_weight_relay.py::test_cli_flag_is_default_disabled_and_literal_spelling_enables_it",
+      "tests/test_geometry_registry_phase1.py::GeometryRegistryPhase1Tests::test_registry_console_report_is_complete_and_explicit",
+      "tests/test_instra_demand_runtime.py::test_replaced_remote_wandb_file_reopens_the_new_inode",
+      "tests/test_instra_demand_runtime.py::test_twenty_four_warm_histories_resume_without_replaying_records",
+      "tests/test_instra_sep30_feedback.py::test_chart_routes_hide_disabled_plastic_and_preserve_enabled_or_legacy_data",
+      "tests/test_jpeg_like_v1_wrappers.py::JpegLikeV1WrapperTests::test_registry_comment_and_help_expose_new_contract",
+      "tests/test_jpeg_like_v1_wrappers.py::JpegLikeV1WrapperTests::test_scruffy_dry_run_propagates_geometry_compressor_group_and_y",
+      "tests/test_karitane_restart_launcher.py::KaritaneRestartLauncherTests::test_launcher_has_valid_shell_syntax_and_calls_dedicated_resume_module",
+      "tests/test_optimizer_wrapper.py::OptimizerWrapperTests::test_existing_run_scruffy_scripts_remain_present",
+      "tests/test_optimizer_wrapper.py::OptimizerWrapperTests::test_full_wrappers_retain_body_and_native_optimizer_help",
+      "tests/test_optimizer_wrapper.py::OptimizerWrapperTests::test_help_contains_old_and_new_controls",
+      "tests/test_optimizer_wrapper.py::OptimizerWrapperTests::test_long_optimizer_controls_and_explicit_lr_override",
+      "tests/test_optimizer_wrapper.py::OptimizerWrapperTests::test_short_optimizer_control_uses_optimizer_defaults",
+      "tests/test_picton_cli_wrapper_contract.py::test_picton_all_known_shell_wrappers_are_syntactically_valid",
+      "tests/test_picton_cli_wrapper_contract.py::test_picton_canonical_host_wrappers_share_the_same_getopts_letters_and_long_options",
+      "tests/test_picton_wrapper_defaults_and_nonfinite_policy.py::test_current_training_wrappers_default_to_fast_discard_eval_100_and_checkpoint_1000",
+      "tests/test_plastic_depth_interfaces.py::test_obsolete_hold_control_and_internal_sampling_seed_are_not_public_cli_options",
+      "tests/test_premat_processing.py::test_ncu_semantic_exports_select_dominant_main_and_premat",
+      "tests/test_premat_processing.py::test_processing_group_sits_after_val_and_throughput_has_no_curve_markers",
+      "tests/test_premat_processing.py::test_processing_normalizer_emits_graph_and_download_data",
+      "tests/test_premat_processing.py::test_processing_throughput_round_trips_through_local_store",
+      "tests/test_premat_processing.py::test_processing_throughput_workspace_multirun_contract",
+      "tests/test_premat_processing_resource_normalizer.py::test_normalizer_emits_exact_owners_stream_resource_csv_and_idle_intervals",
+      "tests/test_processing_ncu_2024_repair.py::test_ncu_2024_wide_export_normalizes_resources_and_semantics",
+      "tests/test_processing_ncu_semantic_suffix_integration.py::test_wide_ncu_suffix_semantics_join_main_and_premat",
+      "tests/test_resume_and_fork_cli_compatibility.py::ResumeAndForkCliCompatibilityTests::test_lifecycle_parser_accepts_all_preserved_master_long_controls",
+      "tests/test_resume_and_fork_ddp_integration.py::ResumeAndForkDdpIntegrationTests::test_two_rank_cpu_resume_preserves_logical_run",
+      "tests/test_semantic_qkv_adapter_bypass_option.py::test_bypass_semantic_qkv_adapter_false_selects_legacy_adapter_path",
+      "tests/test_sheet_stage3_compatibility.py::Stage3CompatibilityTests::test_s3_09_incompatible_checkpoint_rejection",
+      "tests/test_sheet_stage5_ddp.py::Stage5DdpTests::test_s5_08_ddp_construction_identity",
+      "tests/test_sheet_stage5_ddp.py::Stage5DdpTests::test_s5_09_ddp_update_matches_single_process_global_batch",
+      "tests/test_sheet_stage5_ddp.py::Stage5DdpTests::test_s5_10_ddp_state_remains_synchronized",
+      "tests/test_sheet_stage5_ddp.py::Stage5DdpTests::test_s5_11_ddp_resume_preserves_lifecycle_and_state",
+      "tests/test_sheet_stage5_ddp.py::Stage5DdpTests::test_s5_12_uneven_checkpoint_segment_boundary_under_ddp",
+      "tests/test_sheet_stage5_failures.py::Stage5FailurePropagationTests::test_s5_rank_local_nonfinite_state_fails_collectively",
+      "tests/test_sheet_stage5_failures.py::Stage5FailurePropagationTests::test_s5_structure_disagreement_fails_all_ranks_without_hang",
+      "tests/test_sheet_stage6_runner_scripts.py::RunnerScriptTests::test_s6_33_dense_runner_resolves_canonical_identity_and_shared_defaults",
+      "tests/test_sheet_stage6_runner_scripts.py::RunnerScriptTests::test_s6_34_depth_runner_ignores_non_depth_orders_by_default",
+      "tests/test_stage6_plastic_depth_progress.py::test_huge_score_z_uses_fixed_width_scientific_not_row_blowout",
+      "tests/test_stage6_plastic_depth_progress.py::test_missing_edge_probe_loss_and_score_z_use_dash_placeholders_and_green_only",
+      "tests/test_stage6_plastic_depth_progress.py::test_optimizer_progress_omits_depth_samples_when_absent",
+      "tests/test_stage6_plastic_depth_progress.py::test_optimizer_progress_omits_probe_losses_when_absent",
+      "tests/test_stage6_plastic_depth_progress.py::test_optimizer_progress_omits_score_z_when_absent",
+      "tests/test_stage6_plastic_depth_progress.py::test_plastic_probe_losses_score_z_sample_layer_and_samples_are_ordered",
+      "tests/test_stage8_mlp_channel_order_and_wrapper_loops.py::test_stage8_training_wrappers_loop_dense_once_and_compact_presets_across_depth_orders",
+      "tests/test_stage8_mlp_channel_order_and_wrapper_loops.py::test_stage8_training_wrappers_share_the_six_order_letters",
+      "tests/test_stage8_mlp_channel_order_and_wrapper_loops.py::test_stage8_training_wrappers_use_final_preset_as_single_architecture_selector",
+      "tests/test_stage8_training_instrumentation_selector.py::test_stage8_training_wrappers_expose_one_unambiguous_instrumentation_selector",
+      "tests/test_stage8_wrapper_shell_syntax.py::test_stage8_training_wrappers_auto_correct_dense_residual_source",
+      "tests/test_stage8_wrapper_shell_syntax.py::test_stage8_training_wrappers_expose_all_six_semantic_order_controls",
+      "tests/test_stage8_wrapper_shell_syntax.py::test_stage8_training_wrappers_make_logging_backend_and_schedule_controls_explicit",
+      "tests/test_stage8_wrappers_and_run_config.py::test_stage8_run_config_records_dct_full_block_identity_in_manifest_and_artifact_name",
+      "tests/test_stage8_wrappers_and_run_config.py::test_stage8_semantic_order_defaults_are_recorded_in_manifest_identity_and_training_config",
+      "tests/test_stage8_wrappers_and_run_config.py::test_stage8_semantic_order_overrides_are_recorded_in_manifest_artifact_identity_and_training_config",
+      "tests/test_thogopt_integration.py::test_public_cli_history_arguments_and_reset_scope",
+      "tests/test_thogopt_lifecycle.py::test_fresh_resume_reset_fork_and_capture",
+      "tests/test_train_owt_public_wrapper.py::PublicTrainOwtWrapperTests::test_fresh_dry_run_preserves_master_cli_and_aligns_startup_values",
+      "tests/test_vectorise_per_head_materialisation.py::test_training_wrappers_expose_default_on_vectorise_per_head_materialisation_without_getopts_letter",
+      "tests/test_wrapper_learning_rate_and_batch_grids.py::test_run_config_artifact_contains_two_digit_learning_rate_code",
+      "tests/test_wrapper_learning_rate_and_batch_grids.py::test_run_config_default_learning_rate_uses_lr_60_artifact_code",
+      "tests/test_wrapper_learning_rate_and_batch_grids.py::test_wrappers_expose_lr_and_min_lr_codes_and_nest_lr_and_batch_grid_axes"
+    ],
+    "subtest_parent_cases_reproduced_on_baseline": [
+      "tests/test_basis_family_plugin_registry.py::BasisFamilyPluginRegistryTests::test_07_primary_wrappers_have_no_family_specific_allow_list_or_tag_branch",
+      "tests/test_instra_sep01_enhancements.py::InstraEnhancementTests::test_new_and_legacy_cli_spellings_and_effective_environment",
+      "tests/test_layer_dropout_wrappers.py::LayerDropoutWrapperTests::test_long_forms_and_forwarding_are_present",
+      "tests/test_layer_dropout_wrappers.py::LayerDropoutWrapperTests::test_short_layer_dropout_controls_are_native_getopts"
+    ],
+    "subtest_failures_reproduced_on_baseline": 10,
+    "legacy_selenium_cases_blocked_by_unix_sockets": [
+      "tests/test_instra_firefox_acceptance.py::test_real_firefox_heatmap_and_weight_group_chart_overrides",
+      "tests/test_instra_firefox_acceptance.py::test_real_firefox_renders_a_completed_finite_weight_capture",
+      "tests/test_instra_firefox_acceptance.py::test_real_firefox_selected_thog_render_contract",
+      "tests/test_instra_firefox_heatmap_diagnostics.py::test_real_firefox_heatmap_pipeline_diagnostics",
+      "tests/test_instra_firefox_maximize_history.py::test_real_firefox_maximize_current_only_history_round_trip",
+      "tests/test_instra_firefox_weight_controls.py::test_real_firefox_explicit_weight_range_overrides_current_only_and_has_step_hover",
+      "tests/test_instra_firefox_weight_controls.py::test_real_firefox_rnd_changes_weight_coupling",
+      "tests/test_instra_firefox_weight_controls.py::test_real_firefox_weight_group_and_chart_overrides_are_clickable",
+      "tests/test_instra_firefox_weight_controls.py::test_real_firefox_weight_settings_previews_show_current_curves",
+      "tests/test_instra_firefox_workspace_range.py::test_real_firefox_workspace_intersection_and_step_windows"
+    ]
+  },
+  "final_broad_python": {
+    "passed": 1902,
+    "subtests_passed": 480,
+    "failed": 0,
+    "skipped": 27,
+    "deselected_verified_baseline_or_environment_cases": 91,
+    "seconds": 236.55
+  },
+  "targeted_checks": {
+    "initial_regressions": "243 passed; 58 subtests passed",
+    "final_basis_and_controls": "152 passed; 34 subtests passed",
+    "optimizer_and_root_regressions": "49 passed; 4 GPU skips",
+    "snapshot_and_curve_regressions": "27 passed; 18 subtests passed",
+    "final_monitoring_and_duration": "55 passed; 26 subtests passed"
+  },
+  "javascript_regression_suites": {
+    "passed": 43,
+    "failed": 0,
+    "files": [
+      "tests/dashboard_v058_smoke.js",
+      "tests/instra_activity_runtime_regression.cjs",
+      "tests/instra_aug30_enhancements_regression.js",
+      "tests/instra_dashboard_consistency_final_regression.js",
+      "tests/instra_dashboard_feature_regression.js",
+      "tests/instra_dashboard_performance_regression.js",
+      "tests/instra_further_enhancements_regression.js",
+      "tests/instra_grid_chart_regression.js",
+      "tests/instra_heatmap_performance_regression.js",
+      "tests/instra_host_grid_identity_regression.js",
+      "tests/instra_legacy_heatmap_repair_regression.js",
+      "tests/instra_metric_group_state_regression.js",
+      "tests/instra_network_host_controls_regression.js",
+      "tests/instra_oct01_history_downloads_regression.js",
+      "tests/instra_processing_pair_state_regression.js",
+      "tests/instra_processing_quiescence_regression.js",
+      "tests/instra_processing_update_timing_regression.js",
+      "tests/instra_processing_user_fixes_regression.js",
+      "tests/instra_regression_repair.js",
+      "tests/instra_run_sort_and_poll_regression.js",
+      "tests/instra_runner_current_grid_regression.js",
+      "tests/instra_runner_followup_regression.js",
+      "tests/instra_sep01_enhancements_regression.js",
+      "tests/instra_sep01_repair_regression.js",
+      "tests/instra_sep02_enhancements_regression.js",
+      "tests/instra_sep02_followup_regression.js",
+      "tests/instra_sep20_runtime_owner_regression.js",
+      "tests/instra_sep21_user_requests_regression.js",
+      "tests/instra_sep30_feedback_regression.js",
+      "tests/instra_sep30_ui_regression.js",
+      "tests/instra_system_visibility_regression.js",
+      "tests/instra_thogopt_regression.js",
+      "tests/instra_weight_coupling_regression.js",
+      "tests/instra_weight_inspector_regression.js",
+      "tests/instra_weight_persistence_log_regression.js",
+      "tests/instra_weight_precision_regression.js",
+      "tests/instra_weight_range_interaction_regression.js",
+      "tests/instra_weight_request_router_regression.js",
+      "tests/instra_weight_runtime_loader_regression.js",
+      "tests/instra_weight_stability_regression.js",
+      "tests/instra_weight_step_filter_regression.js",
+      "tests/instra_workspace_weight_overlay_regression.js",
+      "tests/processing_resource_attribution_dashboard_regression.js"
+    ]
+  },
+  "new_settings_and_table_browsers": [
+    {
+      "browser": "chromium",
+      "retention": {
+        "same": true,
+        "rendered": 0,
+        "skipped": 100
+      },
+      "columns": [
+        "menu",
+        "select",
+        "grid_visibility",
+        "visibility",
+        "steps",
+        "duration",
+        "loss",
+        "state",
+        "name",
+        "wandb",
+        "host",
+        "gpu",
+        "preset",
+        "optimizer",
+        "gb",
+        "layers",
+        "depth_order",
+        "d_model",
+        "width_order",
+        "premat",
+        "parms",
+        "equiv",
+        "warmup",
+        "context",
+        "heads",
+        "grad_accum",
+        "activation_checkpointing",
+        "learning_rate",
+        "min_learning_rate",
+        "probe_start",
+        "probe_end",
+        "curve_start",
+        "curve_end",
+        "capture_period",
+        "updated"
+      ],
+      "states": [
+        {
+          "state": "ready",
+          "color": "rgb(22, 131, 59)"
+        },
+        {
+          "state": "queued",
+          "color": "rgb(22, 131, 59)"
+        },
+        {
+          "state": "dispatching",
+          "color": "rgb(22, 131, 59)"
+        },
+        {
+          "state": "running",
+          "color": "rgb(22, 131, 59)"
+        },
+        {
+          "state": "blocked",
+          "color": "rgb(37, 40, 45)"
+        },
+        {
+          "state": "stopping",
+          "color": "rgb(37, 40, 45)"
+        },
+        {
+          "state": "flushing",
+          "color": "rgb(179, 38, 46)"
+        },
+        {
+          "state": "unknown",
+          "color": "rgb(179, 38, 46)"
+        },
+        {
+          "state": "completed",
+          "color": "rgb(179, 38, 46)"
+        },
+        {
+          "state": "failed",
+          "color": "rgb(179, 38, 46)"
+        },
+        {
+          "state": "cancelled",
+          "color": "rgb(179, 38, 46)"
+        }
+      ],
+      "page_errors": []
+    },
+    {
+      "browser": "firefox",
+      "retention": {
+        "same": true,
+        "rendered": 0,
+        "skipped": 100
+      },
+      "columns": [
+        "menu",
+        "select",
+        "grid_visibility",
+        "visibility",
+        "steps",
+        "duration",
+        "loss",
+        "state",
+        "name",
+        "wandb",
+        "host",
+        "gpu",
+        "preset",
+        "optimizer",
+        "gb",
+        "layers",
+        "depth_order",
+        "d_model",
+        "width_order",
+        "premat",
+        "parms",
+        "equiv",
+        "warmup",
+        "context",
+        "heads",
+        "grad_accum",
+        "activation_checkpointing",
+        "learning_rate",
+        "min_learning_rate",
+        "probe_start",
+        "probe_end",
+        "curve_start",
+        "curve_end",
+        "capture_period",
+        "updated"
+      ],
+      "states": [
+        {
+          "state": "ready",
+          "color": "rgb(22, 131, 59)"
+        },
+        {
+          "state": "queued",
+          "color": "rgb(22, 131, 59)"
+        },
+        {
+          "state": "dispatching",
+          "color": "rgb(22, 131, 59)"
+        },
+        {
+          "state": "running",
+          "color": "rgb(22, 131, 59)"
+        },
+        {
+          "state": "blocked",
+          "color": "rgb(37, 40, 45)"
+        },
+        {
+          "state": "stopping",
+          "color": "rgb(37, 40, 45)"
+        },
+        {
+          "state": "flushing",
+          "color": "rgb(179, 38, 46)"
+        },
+        {
+          "state": "unknown",
+          "color": "rgb(179, 38, 46)"
+        },
+        {
+          "state": "completed",
+          "color": "rgb(179, 38, 46)"
+        },
+        {
+          "state": "failed",
+          "color": "rgb(179, 38, 46)"
+        },
+        {
+          "state": "cancelled",
+          "color": "rgb(179, 38, 46)"
+        }
+      ],
+      "page_errors": []
+    }
+  ],
+  "earlier_controls_browsers": [
+    {
+      "browser": "chromium",
+      "items": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18
+      ],
+      "page_errors": []
+    },
+    {
+      "browser": "firefox",
+      "items": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18
+      ],
+      "page_errors": []
+    }
+  ],
+  "sustained_polling": {
+    "seconds": 180,
+    "health_requests": 172,
+    "draws": {
+      "processing_throughput_plot": 1,
+      "training_throughput_plot": 1,
+      "train/loss": 126,
+      "train/accuracy": 1
+    },
+    "resizes": 0,
+    "max_pause_ms": 864.6999999999534,
+    "previous": 185493.20000000007,
+    "pauses": [],
+    "long_tasks": [
+      {
+        "start": 449.5999999999767,
+        "duration": 974
+      },
+      {
+        "start": 96926.29999999993,
+        "duration": 597
+      }
+    ],
+    "curves": 12,
+    "initial_heap_mib": 14.29791259765625,
+    "retained_heap_mib": 16.01498794555664,
+    "peak_heap_mib": 78.6264762878418
+  },
+  "syntax_and_help_audit": {
+    "javascript_syntax": "passed",
+    "changed_shell_syntax": "passed",
+    "git_diff_whitespace": "passed",
+    "public_parser_enumerations_present_in_catalogue_help": "passed"
+  },
+  "limitations": [
+    "No GPU training benchmark in this CPU environment.",
+    "Three-minute fixture polling does not prove a days-long session on dreedle or scruffy.",
+    "Training quality requires experiments.",
+    "External GPU queue waits are excluded from duration estimates."
+  ]
+}

@@ -1,6 +1,6 @@
 # vvv THOG
 from .protocol import BasisDefinition, BasisKernel, DeviceLike, deterministic_reduced_qr_positive_diagonal, validate_floating_dtype, validate_positive_integer
-from .chebyshev import BASIS_ARTIFACT_TAG_CHEBYSHEV, BASIS_FAMILY_CHEBYSHEV, CHEBYSHEV_BASIS_VERSION, SINGLE_POINT_COORDINATE, ChebyshevQrBasisKernel, chebyshev_coordinates, chebyshev_raw_basis
+from .chebyshev import BASIS_ARTIFACT_TAG_CHEBYSHEV, BASIS_FAMILY_CHEBYSHEV, CHEBYSHEV_BASIS_VERSION, SINGLE_POINT_COORDINATE, ChebyshevRootBasisKernel, chebyshev_coordinates, chebyshev_normalization, chebyshev_raw_basis
 from .dct import BASIS_ARTIFACT_TAG_DCT, BASIS_FAMILY_DCT, DCT_BASIS_VERSION, DctIiOrthonormalBasisKernel, dct_ii_orthonormal_raw_basis, dct_sample_indices
 # vvv THOG export the lapped cosine plugin and its explicit controls
 from .lapped_cosine import (
@@ -46,7 +46,7 @@ __all__ = [
     "BasisKernel",
     "BasisRegistry",
     "BasisSpec",
-    "ChebyshevQrBasisKernel",
+    "ChebyshevRootBasisKernel",
     "DctIiOrthonormalBasisKernel",
     "LappedCosineOrthonormalBasisKernel",                                                                                                                # <<< THOG public lapped kernel
     "DeviceLike",
@@ -56,6 +56,7 @@ __all__ = [
     "basis_version_for_family",
     "build_registered_basis",
     "chebyshev_coordinates",
+    "chebyshev_normalization",
     "chebyshev_raw_basis",
     "dct_ii_orthonormal_raw_basis",
     "dct_sample_indices",

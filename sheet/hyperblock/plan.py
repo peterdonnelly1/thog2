@@ -7,6 +7,7 @@ from typing import Dict, Mapping, Tuple
 
 from sheet.bases import (
     CHEBYSHEV_BASIS_VERSION,
+    get_basis_kernel,
     normalize_basis_version,
     normalize_registered_basis_family,
 )
@@ -216,7 +217,7 @@ class ResolvedHyperblockPlan:
             "compressor_version": self.compressor_version,
             "materialization_version": self.materialization_version,
             "initialization_version": self.initialization_version,
-            "family_coordinate_policy": "branch_local_linear_minus_one_to_one_v1",
+            "family_coordinate_policy": get_basis_kernel(self.compressor_family).coordinate_policy,
             "support_policy": "fixed_full_valid_regions_without_duplicate_constant_modes_v1",
         }
 

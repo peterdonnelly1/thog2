@@ -663,7 +663,9 @@ def _depth_row_with_observational_coordinates(
 def _base_conventional_coordinates(self: DepthTrajectory, *, device: torch.device) -> torch.Tensor:
     if self.plastic_enabled and self.plastic_sampling is not None:
         return self.plastic_sampling.active_public_coordinates().detach().to(device=device, dtype=torch.float64)
-    return torch.linspace(1.0, 100.0, int(self.config.n_layer), device=device, dtype=torch.float64)
+    from .basis import normalized_coordinates
+    from .plastic_depth import internal_to_public_depth
+    return internal_to_public_depth(normalized_coordinates(int(self.config.n_layer), device=device, dtype=torch.float64))
 
 
 def _materialize_conventional_parameter_observational(

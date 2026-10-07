@@ -472,19 +472,19 @@ function install_heatmap_settings_panel() {
   const settings_content = document.querySelector(".settings-content");
   if (!settings_content || by_id("heatmap_settings_section")) return;
 
-  const section = document.createElement("section");
+  const section = document.createElement("details");
   section.id = "heatmap_settings_section";
-  section.className = "heatmap-settings-section";
-  const heading = document.createElement("h3");
-  heading.textContent = "Heatmap - Loss vs Counterfactual Layer Count";
+  section.className = "heatmap-settings-section global-settings-section global-settings-wide";
+  const heading = document.createElement("summary");
+  heading.textContent = "Heatmap viewer";
   const grid = document.createElement("div");
   grid.className = "heatmap-settings-grid";
 
-  make_heatmap_settings_row(grid, "instrumentation__delta_loss_v_layer_heatmap", "heatmap_setting_mode", {readonly: true});
-  make_heatmap_settings_row(grid, "instrumentation__delta_loss_v_layer_heatmap__destination", "heatmap_setting_destination", {readonly: true});
+  make_heatmap_settings_row(grid, "Capture mode (selected run)", "heatmap_setting_mode", {readonly: true});
+  make_heatmap_settings_row(grid, "Capture destination (selected run)", "heatmap_setting_destination", {readonly: true});
   const abs_limit = make_heatmap_settings_row(
     grid,
-    "instrumentation__delta_loss_v_layer_heatmap_abs_limit",
+    "Symmetric colour limit",
     "heatmap_setting_abs_limit",
     {type: "number", min: 0.000000001, step: 0.01},
   );

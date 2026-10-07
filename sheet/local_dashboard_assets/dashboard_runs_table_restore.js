@@ -109,7 +109,7 @@ window.addEventListener("load", () => {
       gpu: {label: "GPU", title: "physical GPU selected for this run", numeric: true, value: gpu_value},
       preset: {
         label: "p", title: "preset", numeric: false,
-        value: run => run?.preset || configured_value(run, "geometry_preset", "model_type"),
+        value: run => String(run?.preset || configured_value(run, "geometry_preset", "model_type") || "—").replaceAll("width-type-I","width"),
       },
       optimizer: {label: "OPT", title: "optimizer (momentum suffix when used)", numeric: false, value: optimizer_text},
       gb: {
@@ -123,6 +123,8 @@ window.addEventListener("load", () => {
           ? "—"
           : configured_value(run, "o_depth"),
       },
+      width_order: {label: "r", title: "WIDTH.order: retained residual-stream width (not applicable when WIDTH is disabled)", numeric: true,
+        value: run => configured_value(run,"width_enabled") === false ? null : configured_value(run,"width_order","WIDTH.order")},
       premat: {label: "premat", title: "prematerialised matrix numbers (1=QKV, 2=O, 3=UP, 4=DOWN)", numeric: false, value: premat_matrix_text},
       parms: {label: "PARMS", title: "persistent model parameters (millions, rounded)", numeric: true, value: run => million_parameters(run, false)},
       equiv: {
@@ -173,15 +175,15 @@ window.addEventListener("load", () => {
 
     const order = Object.freeze([
       "menu", "select", "grid_visibility", "visibility", "steps", "duration", "loss", "state", "name", "wandb", "host", "gpu",
-      "preset", "optimizer", "gb", "layers", "depth_order", "premat", "parms", "equiv", "warmup",
-      "context", "d_model", "heads", "grad_accum", "activation_checkpointing", "learning_rate",
+      "preset", "optimizer", "gb", "layers", "depth_order", "d_model", "width_order", "premat", "parms", "equiv", "warmup",
+      "context", "heads", "grad_accum", "activation_checkpointing", "learning_rate",
       "min_learning_rate", "probe_start", "probe_end", "curve_start", "curve_end", "capture_period",
       "updated",
     ]);
     const widths = Object.freeze({
       select:34, grid_visibility:34, visibility:34, steps:62, duration:72, loss:55, state:88, wandb:0, host:84, gpu:42,
       preset:64, optimizer:70, gb:68, layers:42, depth_order:42, premat:76, parms:58, equiv:58, warmup:42,
-      context:64, d_model:64, heads:42, grad_accum:46, activation_checkpointing:42,
+      context:64, d_model:64, width_order:42, heads:42, grad_accum:46, activation_checkpointing:42,
       learning_rate:42, min_learning_rate:42, probe_start:50, probe_end:50,
       curve_start:50, curve_end:64, capture_period:50, updated:92, menu:36,
     });
@@ -251,7 +253,7 @@ window.addEventListener("load", () => {
         }
         const raw = definition.value(run);
         const shown = definition.key === "activation_checkpointing" ? raw : display_value(raw);
-        cell.textContent = shown;
+        if(cell.textContent!==shown)cell.textContent = shown;
         cell.title = key === "gpu" && run?.gpu_assignment
           ? `${run.gpu_assignment.status}: recorded GPU ${run.gpu_assignment.recorded_ordinal ?? run.gpu_assignment.ordinal ?? "unknown"}; ${run.gpu_assignment.model || "model unknown"} ${run.gpu_assignment.uuid || ""}`
           : `${definition.title}: ${shown}`;                                                                                                                 // <<< THOG expose verified GPU model and stable UUID
@@ -270,8 +272,10 @@ window.addEventListener("load", () => {
       );
       const ordered = order.map(key => elements.get(key)).filter(Boolean);
       const remainder = [...row.children].filter(element => !ordered.includes(element));
+      const desired=[...ordered,...remainder];
+      if(desired.every((element,index)=>row.children[index]===element))return;
       const fragment = document.createDocumentFragment();
-      [...ordered, ...remainder].forEach(element => fragment.appendChild(element));
+      desired.forEach(element => fragment.appendChild(element));
       row.appendChild(fragment);
     };
 
@@ -356,8 +360,9 @@ window.addEventListener("load", () => {
       tag_base_headers();
       ensure_generated_headers();
       reorder(header_row);
+      const runs_by_id=new Map((app.runs || []).map(run=>[String(run_identifier(run)),run]));
       for (const row of table.querySelectorAll("tbody tr[data-run-id]")) {
-        const run = (app.runs || []).find(candidate => String(run_identifier(candidate)) === String(row.dataset.runId));
+        const run = runs_by_id.get(String(row.dataset.runId));
         if (!run) continue;
         tag_base_row(row);
         ensure_generated_cells(row, run);
@@ -403,6 +408,9 @@ window.addEventListener("load", () => {
       .runs-table .instra-dense-preset { font-weight:750 !important; }
       .runs-table [data-instra-column-key="layers"],
       .runs-table [data-instra-column-key="depth_order"] { color:#7a1f3d !important; font-weight:700; }
+      .runs-table [data-instra-column-key="d_model"],
+      .runs-table [data-instra-column-key="width_order"] { color:#1f4a7a !important; font-weight:700; }
+      .runs-table [data-instra-column-key="width_order"] { text-transform:none !important; }
       .runs-table [data-instra-column-key="premat"] {
         white-space:pre !important; font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
         font-variant-numeric:tabular-nums; text-align:left !important; text-transform:none !important;

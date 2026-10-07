@@ -50,7 +50,10 @@ def test_projected_normalization_output_and_all_gradients(family, dtype, toleran
     folded_gradients = torch.autograd.grad((output * multiplier).sum(), arguments, retain_graph=True)
     explicit_gradients = torch.autograd.grad((explicit * multiplier).sum(), arguments)
     for folded, reference in zip(folded_gradients, explicit_gradients):
-        assert (folded - reference).abs().max() <= tolerance
+        # Near-constant float32 LayerNorm can amplify gradients into the hundreds;
+        # permit two relative ulps while retaining the original absolute tolerance.
+        torch.testing.assert_close(folded, reference, atol=tolerance,
+                                   rtol=2 * torch.finfo(dtype).eps if dtype == torch.float32 else 0)
 
 
 @pytest.mark.parametrize('family', ['chebyshev', 'dct', 'haar', 'lapped_cosine'])
@@ -170,9 +173,10 @@ def test_no_stale_gain_and_minimum_precision():
     assert model.width_basis.analysis.dtype == torch.float32
 
 
-def test_rank_deficient_chebyshev_rejected():
-    with pytest.raises(ValueError, match='unresolved width basis.*rank='):
-        build_width_basis(128, 100, 'chebyshev')
+def test_high_order_chebyshev_is_full_rank():
+    analysis, metadata = build_width_basis(128, 100, 'chebyshev')
+    assert metadata['raw_numerical_rank'] == 100
+    torch.testing.assert_close(analysis @ analysis.T, torch.eye(100,dtype=analysis.dtype), atol=1e-11, rtol=0)
 
 
 def test_registered_general_basis_and_nonorthonormal_rejection(monkeypatch):

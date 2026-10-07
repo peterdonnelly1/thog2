@@ -293,5 +293,21 @@
     window.instra_demand_runtime={chart_visible,pending_plots,family_signatures,schedule_flush,sampled_trace};
     schedule_flush();
   },400));
+  // vvv THOG guard the complete table pipeline after all table owners have installed their wrappers
+  window.addEventListener("load",()=>setTimeout(()=>{
+    const previous=render_runs,signature=window.instra_sep21_repair_test_hooks?.runs_signature;
+    if(!signature)return;
+    let retained=null;
+    const statistics={rendered:0,skipped:0};
+    render_runs=function(...args) {
+      const key=signature();
+      if(retained===key && by_id("runs_body")?.childElementCount) { statistics.skipped++;return; }
+      const result=previous.apply(this,args);
+      retained=signature();statistics.rendered++;
+      return result;
+    };
+    window.instra_demand_runtime.table_render_statistics=statistics;
+  },2200));
+  // ^^^ THOG
 })();
 // ^^^ THOG

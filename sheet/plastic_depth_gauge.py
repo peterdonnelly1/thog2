@@ -47,11 +47,11 @@ def stabilized_chebyshev_affine_change_of_chart(
     old_from_new_scale: float,
     old_from_new_shift: float,
 ) -> Tensor:
-    """Map fixed QR-stabilised coefficients from a new affine chart to an old field.
+    """Map analytically normalized coefficients from a new affine chart to an old field.
 
     The returned matrix M satisfies c_new = M @ c_old when
     z_old = old_from_new_scale * z_new + old_from_new_shift and both charts use
-    the same fixed QR-stabilised coefficient coordinate system.
+    the same analytically normalized coefficient coordinate system.
     """
 
     _validate_square_float64_matrix("inverse_r", inverse_r)
@@ -104,7 +104,7 @@ def stabilized_chebyshev_affine_change_of_chart(
         )
 
     # c_standard = inverse_r @ c_stabilised.  Convert the exact standard-basis
-    # composition back into the fixed QR-stabilised coefficient coordinates.
+    # composition back into the analytically normalized coefficient coordinates.
     matrix = torch.linalg.solve(
         inverse_r,
         standard_transform @ inverse_r,

@@ -16,9 +16,7 @@ from .basis import (
     BasisCache,
     BasisOwner,
     chebyshev_first_kind_basis,
-    deterministic_reduced_qr,
     differentiable_chebyshev_first_kind_basis,
-    normalized_coordinates,
 )
 # vvv THOG PLASTIC DEPTH maps learned public sample positions into the continuous Chebyshev field
 from .plastic_depth import (
@@ -256,7 +254,7 @@ class DepthTrajectory(nn.Module):
             version=basis_version,
             basis_family=basis_family,
         )
-        # vvv THOG PLASTIC DEPTH retains the established QR coefficient coordinates while sampling them at learned real-valued positions
+        # vvv THOG PLASTIC DEPTH retains the analytically normalized root-basis coefficient coordinates while sampling them at learned real-valued positions
         self.plastic_enabled = bool(plastic_enabled)
         self.plastic_sampling: Optional[PlasticDepthSamplingLattice]
         if self.plastic_enabled:
@@ -278,19 +276,10 @@ class DepthTrajectory(nn.Module):
                 config.depth_order,
                 active_layers + (1 if plastic_learn_layer_count else 0),
             )
-            reference_coordinates = normalized_coordinates(
-                reference_sample_count,
-                dtype=torch.float64,
-                device="cpu",
-            )
-            reference_raw = chebyshev_first_kind_basis(
-                reference_coordinates,
-                config.depth_order,
-            )
-            _, reference_r = deterministic_reduced_qr(reference_raw)
+            from .bases import chebyshev_normalization
             self.register_buffer(
                 "plastic_depth_inverse_r",
-                torch.linalg.inv(reference_r),
+                torch.diag(chebyshev_normalization(reference_sample_count, config.depth_order)),
                 persistent=False,
             )
             self.register_buffer(
@@ -439,7 +428,7 @@ class DepthTrajectory(nn.Module):
         return runtime_basis
     # ^^^ THOG
 
-    # vvv THOG PLASTIC DEPTH evaluates one learned lattice rank in the original QR-stabilised coefficient coordinates
+    # vvv THOG PLASTIC DEPTH evaluates one learned lattice rank in the analytically normalized coefficient coordinates
     def _depth_row(self, layer_index: int, reference: Tensor) -> Tensor:
         # depth_row = self.depth_basis[layer_index].to(
         # depth_row = self.depth_basis[layer_index].to(coefficient)

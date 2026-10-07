@@ -25,7 +25,7 @@ import sys
 
 aliases = {
     'cheby': 'chebyshev',
-    'chebyshev_first_kind_qr': 'chebyshev',
+    'chebyshev_first_kind_roots': 'chebyshev',
     'dct_ii': 'dct',
     'dct_ii_orthonormal': 'dct',
     'balanced_haar': 'haar',

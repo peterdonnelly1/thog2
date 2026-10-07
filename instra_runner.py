@@ -384,7 +384,8 @@ class RunnerService:
                             "execution_environment": {**environment_for(trial), "CUDA_VISIBLE_DEVICES": str(gpu["ordinal"])}})
         history = _read()["grids"]
         # vvv THOG retain the same exemplar estimate per run for the Progress finish-time column
-        duration = estimate(planned, history, len(pool))
+        # The dispatcher runs one attempt per GPU; the retained max_parallel Recipe field is not a dispatch limit.
+        duration = estimate(planned, history, len(pool), dynamic=not tight)
         for run, seconds in zip(planned, duration.get("run_seconds", [])):
             run["estimated_duration_seconds"] = seconds
         # ^^^ THOG

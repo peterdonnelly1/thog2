@@ -135,7 +135,7 @@ def _write_evidence(output_path: Path, evidence: Dict[str, object]) -> None:
 def run_calibration(output_path: Path) -> Dict[str, object]:
     results: List[Dict[str, object]] = []
     evidence: Dict[str, object] = {
-        "basis_version": "chebyshev_first_kind_qr_v1",
+        "basis_version": "chebyshev_first_kind_roots_v1",
         "python": sys.version.replace("\n", " "),
         "platform": platform.platform(),
         "commit": os.environ.get("GITHUB_SHA"),

@@ -59,11 +59,11 @@ def install(dashboard):
         connection = self.reader._connection()
         try:
             present = connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='width_snapshots'").fetchone()
-            row = connection.execute('SELECT COUNT(*) AS count, MAX(optimizer_update) AS step FROM width_snapshots').fetchone() if present else None
+            row = self.reader._record_summary(connection, "width_snapshots") if present else None
         finally:
             connection.close()
         return {**value, 'width_snapshot_count': 0 if row is None else row['count'],
-                'width_maximum_update': None if row is None else row['step']}
+                'width_maximum_update': None if row is None else row['maximum_update']}
     dashboard.RunDashboardState.status = status
     previous_handler_for = dashboard._handler_for
     def handler_for(catalog):
