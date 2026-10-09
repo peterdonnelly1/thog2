@@ -504,7 +504,8 @@ def processing_capture_scope(
     import torch
     if not torch.cuda.is_available() or torch.device(device).type != "cuda":
         raise RuntimeError("PREMAT processing capture requires CUDA")
-    torch.cuda.synchronize(device)
+    if not already_drained:  # <<< THOG whole-update capture reuses the trainer endpoint drains
+        torch.cuda.synchronize(device)
     metadata_path = os.environ.get(_PROCESSING_CAPTURE_METADATA_ENV, "").strip()
     metadata = None
     if metadata_path:
@@ -542,16 +543,18 @@ def processing_capture_scope(
         _capture_done = True
         _capture_thread = None
         if metadata is not None:
-            destination = Path(metadata_path)
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            destination.write_text(json.dumps(metadata, indent=2, sort_keys=True))
-            if runtime is not None and getattr(runtime, "cpu_configuration", None) is not None:
-                try:
+            try:
+                destination = Path(metadata_path)
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_text(json.dumps(metadata, indent=2, sort_keys=True))
+                if runtime is not None and getattr(runtime, "cpu_configuration", None) is not None:
                     report = runtime.report()
                     report["capture"] = metadata
                     (destination.parent / "cpu_capture.json").write_text(json.dumps(report, sort_keys=True, allow_nan=False))
-                except Exception as error:
-                    print(f"THOG2 WARNING: CPU capture evidence export failed: {error}", flush=True)
+            except Exception as error:
+                if not cpu_capture:
+                    raise
+                print(f"THOG2 WARNING: CPU capture evidence export failed; continuing training: {error}", flush=True)
 
 
 def _table_names(connection: sqlite3.Connection) -> set[str]:

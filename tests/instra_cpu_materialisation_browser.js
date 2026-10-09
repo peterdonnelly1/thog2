@@ -30,7 +30,7 @@ snapshot.events.push({event:"pass_end",sequence:sequence++});
   const browser=await type.launch({headless:true,...(type===firefox?{env:{...process.env,MOZ_DISABLE_CONTENT_SANDBOX:"1"}}:{})});
   try{
    const page=await browser.newPage({viewport:{width:1600,height:1000},acceptDownloads:true}),errors=[];
-   page.setDefaultTimeout(25000);page.on("pageerror",e=>errors.push(e.message));
+   page.setDefaultTimeout(25000);page.on("pageerror",e=>{errors.push(e.message);console.error("CPU BROWSER PAGE ERROR",e.stack);});
    await page.route(/\/api\/processing\?/,route=>route.fulfill({json:{available:true,trace_available:true,revision:"cpu-v5",data}}));
    await page.route(/\/api\/local-file\?.*processing.*csv/,route=>route.fulfill({status:200,headers:{"Content-Type":"text/csv","Content-Disposition":"attachment"},body:"snapshot_id,cpu_task_id\nsnapshot,task\n"}));
    await page.goto(address+"/runs/fixture_00");

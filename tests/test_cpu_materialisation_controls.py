@@ -144,3 +144,44 @@ def test_active_instra_launcher_passes_cpu_capture_into_normalizer(monkeypatch,t
     else:assert "cpu_report" not in normalizations[0]
     assert (directory/"processing"/"artifact_trace.nsys-rep").read_text()=="fixture"
 # ^^^ THOG
+
+# vvv THOG CPU whole-update scope adds no drains and evidence failures cannot alter training
+@pytest.mark.parametrize("full_update,already_drained,expected_drains",((False,False,2),(True,True,0)))
+def test_cpu_capture_scope_reuses_full_update_drains(monkeypatch,tmp_path,full_update,already_drained,expected_drains):
+    import torch
+    import sheet.premat_processing as processing
+    for name,value in (("_capture_active",False),("_capture_done",False),("_capture_stack_depth",0),("_capture_thread",None)):
+        monkeypatch.setattr(processing,name,value)
+    metadata=tmp_path/"capture.json"
+    monkeypatch.setenv(processing._PROCESSING_CAPTURE_METADATA_ENV,str(metadata))
+    monkeypatch.setattr(torch.cuda,"is_available",lambda:True)
+    drains=[];labels=[]
+    monkeypatch.setattr(torch.cuda,"synchronize",lambda device:drains.append(str(device)))
+    monkeypatch.setattr(processing,"_nvtx_push",labels.append)
+    monkeypatch.setattr(processing,"_nvtx_pop",lambda:labels.append("pop"))
+    runtime=SimpleNamespace(cpu_configuration={},report=lambda:{"schema_version":5})
+    with processing.processing_capture_scope(enabled=True,completed_updates=0,max_updates=3,log_interval=1,capture_update=1,micro_step=0,device="cuda",runtime=runtime,full_update=full_update,already_drained=already_drained):
+        assert processing._capture_active
+        # Nested original-forward capture is included once in the same outer range.
+        with processing.processing_capture_scope(enabled=True,completed_updates=0,max_updates=3,log_interval=1,capture_update=1,micro_step=0,device="cuda",runtime=runtime):pass
+    assert len(drains)==expected_drains and labels==[processing.PROCESSING_CAPTURE_RANGE,"pop"]
+    assert json.loads(metadata.read_text())["full_update"]==full_update
+    assert (tmp_path/"cpu_capture.json").exists() and not processing._capture_active
+
+
+def test_cpu_capture_metadata_write_failure_preserves_completed_update(monkeypatch,tmp_path,capsys):
+    import torch
+    import sheet.premat_processing as processing
+    for name,value in (("_capture_active",False),("_capture_done",False),("_capture_stack_depth",0),("_capture_thread",None)):
+        monkeypatch.setattr(processing,name,value)
+    blocked=tmp_path/"file";blocked.write_text("cannot be a directory")
+    monkeypatch.setenv(processing._PROCESSING_CAPTURE_METADATA_ENV,str(blocked/"capture.json"))
+    monkeypatch.setattr(torch.cuda,"is_available",lambda:True)
+    monkeypatch.setattr(processing,"_nvtx_push",lambda label:None)
+    monkeypatch.setattr(processing,"_nvtx_pop",lambda:None)
+    drains=[];monkeypatch.setattr(torch.cuda,"synchronize",lambda device:drains.append(device))
+    with processing.processing_capture_scope(enabled=True,completed_updates=0,max_updates=3,log_interval=1,capture_update=1,micro_step=0,device="cuda",full_update=True,already_drained=True):
+        completed=1
+    assert completed==1 and not processing._capture_active and not drains
+    assert "continuing training" in capsys.readouterr().out
+# ^^^ THOG
