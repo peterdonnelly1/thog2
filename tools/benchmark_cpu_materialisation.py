@@ -23,6 +23,7 @@ def parser():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument("--smoke",action="store_true",help="three tiny updates/provider, A=2, checkpoint segment=2")
     p.add_argument("--device",default="cuda")
+    p.add_argument("--backend",choices=("matmul","einsum"),default="matmul",help="effective DEPTH materialiser, installed identically for all providers")
     p.add_argument("--dtype",choices=("float32","float16","bfloat16"),default="float32")
     p.add_argument("--layers",type=int,default=4)
     p.add_argument("--width",type=int,default=32)
@@ -138,6 +139,9 @@ def main():
     for name in ("updates","repeats","layers","width","heads","batch","context","accumulation"):
         if getattr(options,name)<1:raise SystemExit(name+" must be positive")
     torch.backends.cuda.matmul.allow_tf32=False
+    os.environ["THOG2_DEPTH_MATERIALISATION_MATMUL"]="true" if options.backend=="matmul" else "false"
+    from sheet.depth_materialisation_runtime import install_depth_materialisation_runtime
+    install_depth_materialisation_runtime()
     payload={"schema_version":1,"purpose":"matched unprofiled smoke" if options.smoke else "matched unprofiled preliminary field experiment","host":options.label,"platform":platform.platform(),"python":sys.version,"torch":str(torch.__version__),"cuda":torch.version.cuda,"gpu":torch.cuda.get_device_name(),"configuration":{key:str(value) if isinstance(value,Path) else value for key,value in vars(options).items()},"runs":[],"parity":[],"qualification":"No speedup or memory improvement is assumed. CPU deadlines use ordinary immediate GPU fallback."}
     modes=("off","gpu","cpu_and_gpu")
     atol,rtol=(3e-5,3e-4) if options.dtype=="float32" else (4e-4,0.02) if options.dtype=="float16" else (3e-3,0.06)

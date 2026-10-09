@@ -53,12 +53,13 @@ Then use your representative dimensions, for example:
       --dtype bfloat16 --updates 30 --warmup 5 --repeats 3 \
       --threads 0 --label scruffy --output evidence/scruffy_cpu_representative.json
 
-Use dimensions that fit that computer. Run the same command on dreedle with its label/output path. The benchmark rotates provider order, uses the same endpoint GPU drains for all providers and never waits for CPU preparation merely to improve a hit rate. JSON includes per-repeat losses, parity tolerances/differences, time, tokens/s, GPU allocated/reserved peaks, CPU RSS/PSS, worker health, storage states and control costs.
+Use dimensions that fit that computer. Run the same command on dreedle with its label/output path. The benchmark rotates provider order, uses the same endpoint GPU drains for all providers and never waits for CPU preparation merely to improve a hit rate. The field harness explicitly installs the chosen DEPTH backend for all providers and disables TF32 for FP32 qualification. JSON includes per-repeat losses, parity tolerances/differences, time, tokens/s, GPU allocated/reserved peaks, CPU RSS/PSS, worker health, storage states and control costs.
 
 At a fixed staging cap, change one dimension at a time:
 
 | Experiment | Changes |
 | --- | --- |
+| Arithmetic | --backend matmul, einsum (same effective backend for every provider) |
 | CPU scope | --layer-batch single_layer, 4, 8, all_layers |
 | Preparation | --preparation eager, scheduled, demand_driven |
 | Upload timing | --transfer as_the_code_flies, previous_gemm_leading_edge, as_soon_as_ready, demand_driven |

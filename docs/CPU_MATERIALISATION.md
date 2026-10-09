@@ -34,7 +34,7 @@ The pageable CPU cache and shared source bank have calculated finite bounds. Pin
 
 ## Numerical and checkpoint contract
 
-The effective backend and CUDA autocast state determine the policy. The default DEPTH matmul path reconstructs in FP32 even during FP16/BF16 training. The einsum path converts both operands to the effective autocast dtype before CPU accumulation and output conversion. Casting an FP32 reconstruction afterwards is not substituted for this contract.
+The effective backend and CUDA autocast state determine the policy. The effective DEPTH matmul path reconstructs in FP32 even during FP16/BF16 training. The einsum path converts both operands to the effective autocast dtype before CPU accumulation and output conversion. Casting an FP32 reconstruction afterwards is not substituted for this contract.
 
 CPU capability is standalone DEPTH on one CUDA device in one training process, with FP32 coefficient storage and FP32/FP16/BF16 training. Unsupported geometry, sparse layer dropout, PLASTIC, HYPERBLOCK, compilation and unqualified precision policies fail clearly. FP32 einsum requires CUDA matmul TF32 disabled. Leading-edge timing and the matrix selector retain fused-attention restrictions.
 

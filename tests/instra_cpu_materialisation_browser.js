@@ -55,6 +55,16 @@ snapshot.events.push({event:"pass_end",sequence:sequence++});
     const link=page.locator('.processing-downloads a[download="'+data.metadata.files[key]+'"]:visible');await link.waitFor({state:"visible"});assert.ok(await link.isVisible(),key);
     const download=page.waitForEvent("download");await link.click();assert.ok((await download).url().includes("cpu_fixture"));
    }
+   await page.locator('#processing_cpu_summary_card .maximize-button').click();
+   assert.ok(await page.locator("#processing_cpu_summary_card").evaluate(n=>n.classList.contains("maximized")));
+   await page.locator('#processing_cpu_summary_card .maximize-button').click();
+   await page.waitForFunction(()=>!by_id("processing_cpu_summary_card").classList.contains("maximized"));
+   const resize=page.locator("#processing_cpu_summary_card .panel-resizer-corner");
+   await resize.scrollIntoViewIfNeeded();
+   const box=await resize.boundingBox();
+   assert.ok(box);
+   await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.down();await page.mouse.move(box.x+box.width/2-35,box.y+box.height/2+30,{steps:6});await page.mouse.up();
+   assert.ok(await page.evaluate(()=>JSON.parse(localStorage.getItem("thog2_local_panel_sizes")||"{}").processing_cpu_summary?.height>0));
    const recap=await page.evaluate(s=>{
     premat_start_snapshot(s);premat_finish_playback();premat_show_panel("inspector");
     const model=premat_build_model(s),rows=premat_inspector_rows(s,model);
