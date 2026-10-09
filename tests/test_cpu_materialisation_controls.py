@@ -117,3 +117,30 @@ def test_conflicting_cpu_capture_selectors_fail_before_launch(monkeypatch,tmp_pa
     with pytest.raises(ValueError,match="selectors must agree"):processing.maybe_reexec_under_nsys(argv,entrypoint=Path("run_thog2_owt.py"))
     assert not launches
 # ^^^ THOG
+
+# vvv THOG active profiler launcher must preserve CPU evidence through post-run normalization
+@pytest.mark.parametrize("cpu_report_present",(False,True))
+def test_active_instra_launcher_passes_cpu_capture_into_normalizer(monkeypatch,tmp_path,cpu_report_present):
+    import sheet.premat_processing as processing
+    monkeypatch.setenv(processing._PROCESSING_CHILD_ENV,"0")
+    monkeypatch.setattr(processing.tempfile,"mkdtemp",lambda **kwargs:str(tmp_path))
+    monkeypatch.setattr(processing,"_find_nsys",lambda:"mock-nsys")
+    directory=tmp_path/"run"
+    (tmp_path/"handoff.json").write_text(json.dumps({"run_directory":str(directory)}))
+    (tmp_path/"processing_trace.nsys-rep").write_text("fixture")
+    report={"schema_version":5,"cpu_lifecycle":[{"event":"matrix_use","matrix_use_id":"fixture"}]}
+    if cpu_report_present:(tmp_path/"cpu_capture.json").write_text(json.dumps(report))
+    def launch(command,**kwargs):
+        if "export" in command:(tmp_path/"processing_trace.sqlite").write_text("normalized by fixture")
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr(processing.subprocess,"run",launch)
+    normalizations=[]
+    def normalize(*args,**kwargs):
+        normalizations.append(kwargs)
+        return {"metadata":{"files":{"raw_trace":"artifact_trace.nsys-rep","bundle":"artifact_bundle.zip"}}}
+    monkeypatch.setattr(processing,"normalize_nsys_sqlite",normalize)
+    assert processing.maybe_reexec_under_nsys(["--premat_processing_logging","enabled","--premat_materialisation_device","cpu_and_gpu"],entrypoint=Path("run_thog2_owt.py"))==0
+    if cpu_report_present:assert normalizations[0]["cpu_report"]==report
+    else:assert "cpu_report" not in normalizations[0]
+    assert (directory/"processing"/"artifact_trace.nsys-rep").read_text()=="fixture"
+# ^^^ THOG

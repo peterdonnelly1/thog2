@@ -28,7 +28,7 @@ Record the commit and environment for each host.
 
        python tools/benchmark_cpu_materialisation.py --smoke --threads 1 --label scruffy --output evidence/scruffy_cpu_smoke.json
 
-   Repeat on dreedle, changing the label and output filename. The final line must say PASS. Losses, coefficient/model gradients and updated parameters must match ordinary DEPTH within recorded dtype tolerances. GPU staging must stay at or below its cap; CPU workers must report no CUDA initialization. Tiny fast runs can legitimately record all CPU misses.
+   Repeat on dreedle, changing the label and output filename. The final line must say PASS. Losses, coefficient/model gradients, updated parameters and optimizer states must match ordinary DEPTH within recorded dtype tolerances. GPU staging must stay at or below its cap; CPU workers must report no CUDA initialization. Tiny fast runs can legitimately record all CPU misses.
 
 4. Smoke-test fallback and replay explicitly:
 

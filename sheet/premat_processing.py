@@ -1293,6 +1293,24 @@ def normalize_nsys_sqlite(
     return processing_data
 
 
+
+# vvv THOG share public CPU full-update selectors across the original and active Instra launchers
+def resolve_processing_capture(arguments, capture_update, profiler):
+    rewritten_arguments = rewrite_processing_cli_for_core(arguments)
+    from .full_step_timing_cli_patch import _raw_explicit_state
+    full_enabled, full_explicit = _raw_explicit_state(arguments)
+    cpu_full_capture = profiler == "nsys" and _argv_value(arguments, "--premat_materialisation_device", "gpu") == "cpu_and_gpu" and full_enabled == "enable"
+    if cpu_full_capture:
+        processing_explicit = _argv_value(arguments, "--premat_processing_logging_capture_update")
+        if full_explicit is not None and processing_explicit is not None and full_explicit != int(processing_explicit):
+            raise ValueError("CPU whole-update and Processing capture update selectors must agree")
+        capture_update = int(full_explicit or processing_explicit or _argv_value(arguments, "--max-iters", "100"))
+        if capture_update < 1:
+            raise ValueError("CPU whole-update capture selector must be positive")
+        rewritten_arguments = rewrite_processing_cli_for_core([*arguments, "--premat_processing_logging_capture_update", str(capture_update), "--premat_instra__full_step_timing_capture_and_chart_capture", "step", str(capture_update)])
+    return capture_update, rewritten_arguments, cpu_full_capture
+# ^^^ THOG
+
 def maybe_reexec_under_nsys(arguments: Sequence[str], *, entrypoint: Path) -> Optional[int]:
     if os.environ.get(_PROCESSING_CHILD_ENV) == "1":
         return None
@@ -1310,18 +1328,7 @@ def maybe_reexec_under_nsys(arguments: Sequence[str], *, entrypoint: Path) -> Op
     environment[_PROCESSING_CHILD_ENV] = "1"
     environment[_PROCESSING_HANDOFF_ENV] = str(handoff_path)
     environment[_PROCESSING_CAPTURE_METADATA_ENV] = str(capture_metadata_path)
-    # CPU adds whole-update scope only when the established public full-step control is enabled.
-    from .full_step_timing_cli_patch import _raw_explicit_state
-    full_enabled, full_explicit = _raw_explicit_state(arguments)
-    cpu_full_capture = profiler == "nsys" and _argv_value(arguments, "--premat_materialisation_device", "gpu") == "cpu_and_gpu" and full_enabled == "enable"
-    if cpu_full_capture:
-        processing_explicit = _argv_value(arguments, "--premat_processing_logging_capture_update")
-        if full_explicit is not None and processing_explicit is not None and full_explicit != int(processing_explicit):
-            raise ValueError("CPU whole-update and Processing capture update selectors must agree")
-        capture_update = int(full_explicit or processing_explicit or _argv_value(arguments, "--max-iters", "100"))
-        if capture_update < 1:
-            raise ValueError("CPU whole-update capture selector must be positive")
-        rewritten_arguments = rewrite_processing_cli_for_core([*arguments, "--premat_processing_logging_capture_update", str(capture_update), "--premat_instra__full_step_timing_capture_and_chart_capture", "step", str(capture_update)])
+    capture_update, rewritten_arguments, cpu_full_capture = resolve_processing_capture(arguments, capture_update, profiler)
 
     if profiler == "nsys":
         nsys = _find_nsys()
