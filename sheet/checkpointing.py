@@ -56,6 +56,18 @@ def _validate_layer_indices(layer_indices: Sequence[int], n_layer: int) -> Tuple
 # ^^^ THOG
 
 
+
+# vvv THOG checkpoint contexts add no options or objects to ordinary GPU/off execution
+def _cpu_checkpoint_options(logical_block, indices):
+    owner = getattr(logical_block, "__self__", None)
+    runtime = getattr(owner, "_premat_runtime", None)
+    if runtime is None or not hasattr(runtime, "checkpoint_context"):
+        return {}
+    microstep = runtime.micro_step
+    return {"context_fn": lambda: runtime.checkpoint_context(indices, microstep)}
+# ^^^ THOG
+
+
 def execute_logical_layers(
     hidden: Tensor,
     *,
@@ -116,6 +128,7 @@ def execute_logical_layers(
                 use_reentrant=False,
                 # ^^^ THOG
                 preserve_rng_state=True,
+                **_cpu_checkpoint_options(logical_block, tuple(range(start, end))),  # <<< THOG actual non-reentrant replay segment entry
             )
             checkpoint_segments += 1
 

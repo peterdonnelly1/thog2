@@ -883,6 +883,10 @@ class TrainerStepMixin:
         # ^^^ THOG
         try:
             for micro_step in range(accumulation_steps):
+                cpu_runtime = getattr(self.raw_model, "_premat_runtime", None)  # <<< THOG matrix uses retain optimizer and accumulation identities
+                if cpu_runtime is not None and hasattr(cpu_runtime, "cpu_configuration"):
+                    cpu_runtime.optimizer_step = int(self.state.completed_updates) + 1
+                    cpu_runtime.micro_step = micro_step
                 # batch = self.batch_source.get_batch("train", device=self.device)
                 batch = (
                     prepared_batches[micro_step]
@@ -1062,7 +1066,12 @@ class TrainerStepMixin:
         plastic_optimizer_started = time.perf_counter() if self.config.plastic__enabled else None
         # vvv THOG a failed thogopt candidate leaves all weights and histories unchanged
         try:
+            cpu_runtime = getattr(self.raw_model, "_premat_runtime", None)  # <<< THOG protect issued source D2H reads before actual coefficient mutation
+            if cpu_runtime is not None and hasattr(cpu_runtime, "before_optimizer_step"):
+                cpu_runtime.before_optimizer_step()
             self.scaler.step(self.optimizer)
+            if cpu_runtime is not None and hasattr(cpu_runtime, "after_optimizer_step"):
+                cpu_runtime.after_optimizer_step()
         except FloatingPointError:
             if not isinstance(self.optimizer, Thogopt):
                 raise

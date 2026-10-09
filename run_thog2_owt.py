@@ -461,7 +461,7 @@ def _print_model_parameters_and_optimisations(config: Any, trainer: Any) -> None
             f"cuda_allocator={os.environ.get('PYTORCH_CUDA_ALLOC_CONF', 'default')} "
             f"lookahead=l+{config.premat_target_layer} "
             f"matrix_target=relative_layer_{config.premat_target_layer} "
-            f"target_order={config.premat_weight_matrix_target_order}",
+            f"target_order={config.premat_weight_matrix_target_order}" + _core.cpu_startup_text(config),
         )
         # ^^^ THOG
         hyperblock = report.get("hyperblock")

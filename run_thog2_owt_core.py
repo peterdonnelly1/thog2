@@ -282,6 +282,10 @@ from sheet.width import WIDTH_PRESET, WIDTH_CAPTURE_DEFAULTS, WIDTH_CAPTURE_PREF
 from sheet.width_geometry import add_width_arguments, resolve_width_geometry, ExplicitLegacyBasisAction
 # ^^^ THOG
 
+# vvv THOG CPU controls use the same public parser in wrappers and lifecycle
+from sheet.premat_cpu_config import add_cpu_arguments, cpu_config_dict, validate_cpu_arguments, resolve_cpu_threads
+# ^^^ THOG
+
 def build_parser() -> argparse.ArgumentParser:
     parser = _ThogArgumentParser(description="Train or resume one canonical THOG2 OpenWebText run")
     # vvv THOG wrapper consumes these before core argparse, but --help must still advertise the exact public names
@@ -535,6 +539,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--print-artifact-name", action="store_true")
     parser.add_argument("--print-resolved-json", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
+    add_cpu_arguments(parser)  # <<< THOG all nine CPU controls are public and canonical
     return parser
 
 
@@ -808,6 +813,7 @@ def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) 
         premat=arguments.premat,
         premat_attention_mode=arguments.premat_attention_mode,
         premat_timing=arguments.premat_timing,
+        **cpu_config_dict(arguments),  # <<< THOG retain requested CPU configuration
         premat_target_layer=arguments.premat_target_layer,
         premat_target_matrix=arguments.premat_target_matrix,                                                                                               # <<< THOG carry selected PREMAT matrix into persistent run configuration
         premat_weight_matrix_target_order=arguments.premat_weight_matrix_target_order,
@@ -1058,7 +1064,7 @@ def print_model_parameters_and_options(config: OwtRunConfig, trainer: OwtTrainer
             f"cuda_allocator={os.environ.get('PYTORCH_CUDA_ALLOC_CONF', 'default')} "
             f"lookahead=l+{config.premat_target_layer} "
             f"matrix_target=relative_layer_{config.premat_target_layer} "
-            f"target_order={config.premat_weight_matrix_target_order}",
+            f"target_order={config.premat_weight_matrix_target_order}" + cpu_startup_text(config),
         )
         # ^^^ THOG
         # vvv THOG HYPERBLOCK field identity and coefficient budget are first-class console diagnostics
@@ -1074,8 +1080,21 @@ def print_model_parameters_and_options(config: OwtRunConfig, trainer: OwtTrainer
 # ^^^ THOG
 
 
+
+# vvv THOG append CPU resolution to the existing PREMAT startup row; legacy fixtures may omit new fields
+def cpu_startup_text(config):
+    controls = cpu_config_dict(config)
+    if controls["premat_materialisation_device"] == "gpu":
+        return ""
+    threads, budget = resolve_cpu_threads(controls["premat_cpu_workers"], controls["premat_cpu_threads_per_worker"])
+    text = " " + " ".join(f"{name}={value}" for name, value in controls.items())
+    return text + f" threads_per_worker_resolved={threads} affinity_budget={budget} gpu_premat_timing=inactive cpu_all_layer_count={config.n_layer}"
+# ^^^ THOG
+
+
 def main() -> int:
     arguments = build_parser().parse_args()
+    validate_cpu_arguments(arguments, sys.argv[1:])  # <<< THOG reject inactive/conflicting explicit CPU flags before allocation
     geometry_plan = geometry_plan_from_arguments(arguments)
     if arguments.explain_geometry:
         if geometry_plan is None:

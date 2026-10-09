@@ -72,9 +72,9 @@ def validate_cpu_configuration(config) -> None:
         return
     if values.get("premat", "disabled") != "enabled":
         raise ValueError("cpu_and_gpu requires premat enabled")
-    if values.get("model_type", "sheet") not in ("sheet", "thog2_sheet") or values.get("geometry_preset", "DEPTH") != "DEPTH":
+    if values.get("model_type", "sheet") not in ("sheet", "thog2_sheet") or str(values.get("geometry_preset") or "DEPTH").upper() != "DEPTH":
         raise ValueError("cpu_and_gpu requires standalone DEPTH geometry")
-    if values.get("plastic__enabled", False) or values.get("hyperblock__enabled", False) or values.get("layer_dropout", 0) or values.get("layer_dropout_probability", 0):
+    if values.get("plastic__enabled", False) or values.get("hyperblock__enabled", False) or values.get("hyperblock", False) or values.get("hyperblock_topology") not in (None, "", "none", "disabled") or (values.get("layer_dropout_active_per_stratum") is not None and values["layer_dropout_active_per_stratum"] < (values.get("layer_dropout_stratum_size") or values.get("n_layer", 1))):
         raise ValueError("cpu_and_gpu does not support PLASTIC, HYPERBLOCK or sparse layer dropout")
     if not str(values.get("device", "cuda")).startswith("cuda") or int(os.environ.get("WORLD_SIZE", "1")) != 1:
         raise ValueError("cpu_and_gpu requires a single CUDA device and single training process")

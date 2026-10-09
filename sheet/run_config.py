@@ -64,6 +64,9 @@ from .plastic_depth import (
 # ^^^ THOG
 # vvv THOG dynamic pre-materialisation public configuration validation
 from .premat import PREMAT_TELEMETRY_VERSION, validate_premat_configuration
+# vvv THOG shared CPU configuration and identity resolution
+from .premat_cpu_config import CPU_DEFAULTS, cpu_config_dict, cpu_identity, strip_inactive_cpu, validate_cpu_configuration, resolve_cpu_threads
+# ^^^ THOG
 # ^^^ THOG
 # vvv THOG PLASTIC COARSE/FINE lifecycle configuration and candidate resolution
 from .plastic_depth_coarse import (
@@ -240,6 +243,17 @@ class OwtRunConfig:
     premat: str = "disabled"
     premat_attention_mode: str = "fused"
     premat_timing: str = "as_the_code_flies"
+    # vvv THOG CPU provider settings remain dormant at GPU defaults
+    premat_materialisation_device: str = "gpu"
+    premat_cpu_preparation: str = "eager"
+    premat_cpu_layer_batch_size: str = "single_layer"
+    premat_cpu_workers: int = 1
+    premat_cpu_threads_per_worker: int = 0
+    premat_cpu_transfer_timing: str = "as_the_code_flies"
+    premat_cpu_transfer_lead_ms: float = 0.0
+    premat_cpu_staging_limit_mb: float = 0.0
+    premat_cpu_checkpoint_replay: str = "disabled"
+    # ^^^ THOG
     premat_target_layer: int = 1
     premat_target_matrix: object = None                                                                                                                    # <<< THOG persist optional fused-family PREMAT selector set in run identity
     premat_weight_matrix_target_order: str = "r_to_l"
@@ -612,6 +626,7 @@ class OwtRunConfig:
             raise ValueError("premat_enable_gpu_timing_diagnostic must be bool")
         if not isinstance(self.premat_enable_shadow_mode, bool):
             raise ValueError("premat_enable_shadow_mode must be bool")
+        validate_cpu_configuration(self)                 # <<< THOG reject unsupported CPU combinations before model allocation
         validate_premat_configuration(
             premat=self.premat,
             attention_mode=self.premat_attention_mode,
@@ -1124,7 +1139,13 @@ class OwtRunConfig:
             return f"G0_{basis_family}_G1_jpeg_like_MLP_UP_MLP_HIDDEN"
         return f"G0_{basis_family}_{normalize_component(preset)}"                                                                                          # <<< THOG legacy presets wither as resolved-ish compatibility labels
 
+    # vvv THOG preserve the GPU descriptor and add CPU-only experiment identity
     def compact_artifact_fragment(self) -> Optional[str]:
+        fragment = self._compact_artifact_fragment_base()
+        identity = cpu_identity(self)
+        return fragment + "_" + identity if fragment and identity else fragment
+
+    def _compact_artifact_fragment_base(self) -> Optional[str]:
         # vvv THOG width runs cannot collide with same-D depth or dense descriptors
         if self.width_enabled:
             depth = f"_DEPTH_{self.basis_family}_P{self.o_depth}" if self.width_depth_enabled else ""
@@ -1559,6 +1580,7 @@ class OwtRunConfig:
             premat=self.premat,
             premat_attention_mode=self.premat_attention_mode,
             premat_timing=self.premat_timing,
+            **(cpu_config_dict(self) if self.premat_materialisation_device == "cpu_and_gpu" else {}),                     # <<< THOG preserve CPU settings through trainer construction
             premat_target_layer=self.premat_target_layer,
             premat_target_matrix=self.premat_target_matrix,                                                                                                # <<< THOG propagate selected PREMAT matrix into TrainingConfig
             premat_weight_matrix_target_order=self.premat_weight_matrix_target_order,
@@ -1620,7 +1642,7 @@ class OwtRunConfig:
 
     # vvv THOG persistent disabled-run metadata excludes all dormant PLASTIC DEPTH controls
     def persistent_dict(self) -> Dict[str, Any]:
-        values = asdict(self)
+        values = strip_inactive_cpu(asdict(self))         # <<< THOG GPU persistent configuration remains byte stable
         if values.get("instrumentation__optimizer_histories__full_matrix_every_n_steps") == 0:
             values.pop("instrumentation__optimizer_histories__full_matrix_every_n_steps", None)
         # vvv THOG default-off additions do not alter existing optimizer run identities
@@ -1741,6 +1763,19 @@ class OwtRunConfig:
             "n_active_layers": self.n_active_layers,                                                                                                       # <<< THOG expose exact active depth per training update
             "layer_dropout_enabled": self.layer_dropout_enabled,                                                                                           # <<< THOG make degenerate path explicit in resolved config
         })
+        if self.premat_materialisation_device == "cpu_and_gpu":
+            threads, budget = resolve_cpu_threads(self.premat_cpu_workers, self.premat_cpu_threads_per_worker)
+            matmul = os.environ.get("THOG2_DEPTH_MATERIALISATION_MATMUL", "on").strip().lower() in ("1", "true", "yes", "on")
+            generated = "float32" if matmul else self.dtype
+            families = {1: 3, 2: 1, 3: 4, 4: 4}
+            selected = self.premat_target_matrix
+            if selected is None:
+                numbers = tuple(families)
+            else:
+                from .premat import normalize_premat_target_matrices
+                numbers = normalize_premat_target_matrices(selected)
+            automatic = 2 * sum(families[number] for number in numbers) * self.n_embd ** 2 * (4 if generated == "float32" else 2)
+            values.update({"premat_cpu_threads_per_worker_requested": self.premat_cpu_threads_per_worker, "premat_cpu_threads_per_worker_resolved": threads, "premat_cpu_workers_resolved": self.premat_cpu_workers, "premat_cpu_affinity_thread_budget": budget, "premat_cpu_staging_limit_bytes_resolved": int(self.premat_cpu_staging_limit_mb * 1024 ** 2) if self.premat_cpu_staging_limit_mb else automatic, "premat_generated_dtype_resolved": generated, "premat_gpu_timing_active": False, "premat_cpu_all_layer_count": self.n_layer, "premat_target_offset_active": self.premat_cpu_transfer_timing in ("as_the_code_flies", "previous_gemm_leading_edge"), "premat_schema_version": 5})
         return values
 
 

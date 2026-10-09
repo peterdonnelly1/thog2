@@ -32,6 +32,7 @@ from .plastic_depth_gauge import (
 from .geometry import SheetGeometryConfig
 from .semantic_materializer import ATTENTION_KEY_WEIGHT, ATTENTION_OUTPUT_WEIGHT, ATTENTION_QUERY_WEIGHT, ATTENTION_VALUE_WEIGHT, LEGACY_ATTENTION_INPUT_WEIGHT, MLP_CONTRACTION_WEIGHT, MLP_EXPANSION_WEIGHT
 from .trajectory import build_family_metadata
+from .depth_numerical_policy import CpuDepthBinding  # <<< THOG CPU bindings preserve native arithmetic and saved tensors
 
 
 DEPTH_MATRIX_FAMILIES = (
@@ -815,6 +816,7 @@ class DepthTrajectory(nn.Module):
         names: Tuple[str, ...],
         layer_index: int,
         generated: Tensor,
+        *, binding_context=None,                    # <<< THOG GPU callers retain the original binding path
     ) -> Tensor:
         if not names:
             raise ValueError("prematerialised DEPTH binding requires at least one family")
@@ -851,6 +853,8 @@ class DepthTrajectory(nn.Module):
                 f"prematerialised DEPTH bundle has shape {tuple(generated.shape)}; "
                 f"expected {expected_shape}"
             )
+        if binding_context is not None:
+            return CpuDepthBinding.apply(generated.detach(), binding_context, *pairs)  # <<< THOG retain the actual input-gradient storage lease
         return _PrematerializedDepthBundle.apply(generated.detach(), *pairs)
     # ^^^ THOG
 

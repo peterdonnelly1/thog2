@@ -1403,6 +1403,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     actual_argv = list(sys.argv[1:] if argv is None else argv)
     arguments = parser.parse_args(actual_argv)
+    core.validate_cpu_arguments(arguments, actual_argv)  # <<< THOG lifecycle shares early CPU capability validation
     explicit = explicit_destinations(parser, actual_argv)
     _configure_direct_factorised_hyperblock_mlp_environment(arguments)                                                                                      # <<< THOG apply lifecycle wrapper-only option before any context or model construction
     context = prepare_context(arguments, explicit)

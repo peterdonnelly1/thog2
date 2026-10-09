@@ -29,6 +29,10 @@ def effective_depth_policy(trajectory):
     working = torch.get_autocast_dtype("cuda") if mixed else coefficient.dtype
     if coefficient.dtype not in (torch.float32, torch.float16, torch.bfloat16) or working not in (torch.float32, torch.float16, torch.bfloat16):
         raise ValueError("unqualified DEPTH numerical policy")
+    if coefficient.dtype != torch.float32:
+        raise ValueError("cpu_and_gpu currently qualifies FP32 coefficient storage with FP32/FP16/BF16 training autocast")
+    if backend == "einsum" and working == torch.float32 and torch.backends.cuda.matmul.allow_tf32:
+        raise ValueError("unqualified TF32 DEPTH einsum policy; disable CUDA matmul TF32")
     return DepthNumericalPolicy(backend, dtype_name(coefficient.dtype), dtype_name(working), "float32", dtype_name(working))
 
 

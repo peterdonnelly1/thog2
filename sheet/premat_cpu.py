@@ -194,7 +194,7 @@ class CpuPreparationProvider:
         with self.lock:
             if family not in self.families or self.closed:
                 return
-            self.requested.update((family, item) for item in self.batch_layers(layer))
+            self.requested.update((selected, item) for selected in self.families for item in self.batch_layers(layer))
             self._submit_ready()
 
     def _submit_ready(self):
@@ -260,7 +260,7 @@ class CpuPreparationProvider:
             dtype_bytes = 4 if self.snapshot is None or self.snapshot.policy.output_dtype == "float32" else 2
             sizes = [sum(self.trajectory.coefficients[name].shape[0] * self.trajectory.coefficients[name].shape[1] for name in FAMILY_NAMES[family]) * dtype_bytes for family in self.families]
             largest = max(sizes, default=0)
-            return {"snapshot_id": None if self.snapshot is None else self.snapshot.snapshot_id, "cpu_cache_bytes": self.cache_bytes(), "cpu_cache_peak_bytes": self.cache_peak, "snapshot_bytes": self.snapshot_bytes(), "snapshot_peak_bytes": self.snapshot_peak, "cpu_cache_bound_bytes": self.n_layer * sum(sizes), "cpu_pending_output_bound_bytes": self.queue_limit * largest, "snapshot_storage_bound_bytes": (self.worker_count + 1) * self.snapshot_peak, "cpu_worker_workspace_bound_bytes": self.worker_count * (self.snapshot_peak + 3 * largest), "workers_requested": self.worker_count, "workers_resolved": len(self.workers), "threads_per_worker_resolved": self.threads, "affinity_thread_budget": self.thread_budget, "worker_health": list(self.worker_health.values()), "dead_worker_count": sum(process.exitcode not in (None, 0) for process in self.workers), "task_failure_count": len(self.failures)}
+            return {"snapshot_id": None if self.snapshot is None else self.snapshot.snapshot_id, "cpu_cache_bytes": self.cache_bytes(), "cpu_cache_peak_bytes": self.cache_peak, "snapshot_bytes": self.snapshot_bytes(), "snapshot_peak_bytes": self.snapshot_peak, "cpu_cache_bound_bytes": self.n_layer * sum(sizes), "cpu_pending_output_bound_bytes": self.queue_limit * largest, "snapshot_storage_bound_bytes": (self.worker_count + 1) * self.snapshot_peak, "cpu_worker_workspace_bound_bytes": self.worker_count * (2 * self.snapshot_peak + 4 * largest), "workers_requested": self.worker_count, "workers_resolved": len(self.workers), "threads_per_worker_resolved": self.threads, "affinity_thread_budget": self.thread_budget, "worker_health": list(self.worker_health.values()), "dead_worker_count": sum(process.exitcode not in (None, 0) for process in self.workers), "task_failure_count": len(self.failures)}
 
     def close(self):
         if self.closed:
