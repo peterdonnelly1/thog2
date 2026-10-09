@@ -8,7 +8,7 @@
     if (!card) {
       const neighbour=by_id("processing_matrix_summary_card");
       if (!neighbour) return null;
-      card=document.createElement("section");
+      card=document.createElement("article");
       card.id="processing_cpu_summary_card";card.className="processing-card chart-card";card.dataset.chart="processing_cpu_summary";
       chart_titles.processing_cpu_summary="CPU preparation and copies";
       card.innerHTML='<div class="chart-card-header"><div class="chart-heading-copy"><h2>CPU preparation and copies</h2><p>Independent overlays; GPU device metrics remain unsplit</p></div><div class="chart-card-actions"><button class="maximize-button" data-maximize="processing_cpu_summary" type="button" aria-label="Maximize CPU preparation and copies" title="Maximize chart">'+chart_size_icon(false)+'</button></div></div><div id="processing_cpu_summary_body" style="padding:12px;overflow:auto;flex:1;min-height:0"></div><div class="panel-resizer panel-resizer-east" data-resize="east" title="Drag to resize chart width"></div><div class="panel-resizer panel-resizer-south" data-resize="south" title="Drag to resize chart height"></div><div class="panel-resizer panel-resizer-corner" data-resize="both" title="Drag to resize chart"></div>';

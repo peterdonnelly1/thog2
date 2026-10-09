@@ -61,9 +61,12 @@ snapshot.events.push({event:"pass_end",sequence:sequence++});
    await page.waitForFunction(()=>!by_id("processing_cpu_summary_card").classList.contains("maximized"));
    const resize=page.locator("#processing_cpu_summary_card .panel-resizer-corner");
    await resize.scrollIntoViewIfNeeded();
+   await resize.hover();
    const box=await resize.boundingBox();
    assert.ok(box);
-   await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.down();await page.mouse.move(box.x+box.width/2-35,box.y+box.height/2+30,{steps:6});await page.mouse.up();
+   await page.mouse.down();
+   console.log("CPU RESIZE START",JSON.stringify(await page.evaluate(()=>({maximized:app.maximized_chart,resizing:document.body.classList.contains("resizing-chart"),sizes:app.panel_sizes,handle:by_id("processing_cpu_summary_card").querySelector(".panel-resizer-corner").getBoundingClientRect().toJSON()}))));
+   await page.mouse.move(box.x+box.width/2-35,Math.min(950,box.y+box.height/2+30),{steps:6});await page.mouse.up();
    assert.ok(await page.evaluate(()=>JSON.parse(localStorage.getItem("thog2_local_panel_sizes")||"{}").processing_cpu_summary?.height>0));
    const recap=await page.evaluate(s=>{
     premat_start_snapshot(s);premat_finish_playback();premat_show_panel("inspector");

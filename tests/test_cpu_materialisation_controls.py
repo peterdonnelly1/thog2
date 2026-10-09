@@ -4,7 +4,7 @@ from dataclasses import replace
 import json
 from pathlib import Path
 import pytest
-from run_thog2_owt_core import build_parser, config_from_arguments
+from run_thog2_owt_core import build_parser, config_from_arguments, cpu_startup_text
 from sheet.premat_cpu_config import CPU_DEFAULTS, cpu_config_dict, cpu_identity, validate_cpu_arguments
 from sheet.training_config import TrainingConfig
 from tests.test_dashboard_processing_companion_pairing import _State
@@ -39,6 +39,10 @@ def test_cpu_all_controls_reach_model_identity_and_resolved_limits():
     assert canonical["premat_cpu_threads_per_worker_resolved"]==1 and canonical["premat_schema_version"]==5
     assert canonical["premat_gpu_timing_active"] is False and canonical["premat_target_offset_active"] is False
     assert cpu_identity(canonical).upper() in config.artifact_name.upper()
+    startup=cpu_startup_text(config)
+    assert "premat_cpu_staging_limit_bytes_resolved=524288" in startup
+    assert "premat_generated_dtype_resolved=float32" in startup
+    assert "premat_target_offset_active=False" in startup
 
 
 def test_inactive_lead_and_conflicting_gpu_timing_are_rejected_explicitly():

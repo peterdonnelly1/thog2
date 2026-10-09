@@ -1088,7 +1088,10 @@ def cpu_startup_text(config):
         return ""
     threads, budget = resolve_cpu_threads(controls["premat_cpu_workers"], controls["premat_cpu_threads_per_worker"])
     text = " " + " ".join(f"{name}={value}" for name, value in controls.items())
-    return text + f" threads_per_worker_resolved={threads} affinity_budget={budget} gpu_premat_timing=inactive cpu_all_layer_count={config.n_layer}"
+    canonical = getattr(config, "canonical_dict", None)
+    resolved = canonical(world_size=1) if callable(canonical) else {}
+    details = "".join(f" {name}={resolved[name]}" for name in ("premat_generated_dtype_resolved", "premat_cpu_staging_limit_bytes_resolved", "premat_target_offset_active", "premat_cpu_preparation_target_offset_active") if name in resolved)
+    return text + f" threads_per_worker_resolved={threads} affinity_budget={budget} gpu_premat_timing=inactive cpu_all_layer_count={config.n_layer}" + details
 # ^^^ THOG
 
 
