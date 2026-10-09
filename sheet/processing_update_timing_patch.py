@@ -15,6 +15,7 @@ import json
 import os
 import time
 from functools import wraps
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -276,6 +277,7 @@ class _UpdateTimingRecorder:
             "official_update_ms": None,
             "host_update_ms": None,
             "captured_update_host_ms": drain_end_ms,
+            "host_update_start_ns": self.host_update_start_ns,
             "cuda_main_update_ms": float(self.cuda_update_start.elapsed_time(self.cuda_update_end)),
             "gpu_completion_drain_ms": gpu_completion_drain_ms,
             "harvest_wait_ms": gpu_completion_drain_ms,
@@ -351,6 +353,11 @@ def _capture_train_one_update(
     run_label: str,
     capture_state: Dict[str, Any],
 ) -> Dict[str, Any]:
+    runtime = getattr(getattr(trainer, "raw_model", None), "_premat_runtime", None)
+    cpu = getattr(trainer.config, "premat_materialisation_device", "gpu") == "cpu_and_gpu"
+    from .premat_processing import processing_capture_scope
+    full_capture = processing_capture_scope(enabled=cpu and str(trainer.config.premat_processing_logging) == "enabled" and os.environ.get("THOG2_PREMAT_PROCESSING_UNDER_NSYS") == "1", completed_updates=optimizer_update-1, max_updates=trainer.config.max_updates, log_interval=trainer.config.log_interval, capture_update=optimizer_update, micro_step=0, device=trainer.device, runtime=runtime, full_update=True, already_drained=True) if cpu else nullcontext()
+    full_capture.__enter__()
     recorder = _UpdateTimingRecorder(trainer, optimizer_update, run_label=run_label)
     forward_open: list[Dict[str, Any]] = []
     backward_depth = 0
@@ -429,6 +436,9 @@ def _capture_train_one_update(
             flush=True,
         )
 
+    finally:
+        full_capture.__exit__(None, None, None)
+
     if caught is not None:
         raise caught
     if result is None:
@@ -444,6 +454,11 @@ def _publish_payload(
     official_elapsed_seconds: float,
 ) -> None:
     payload = _apply_official_elapsed(payload, float(official_elapsed_seconds) * 1000.0)
+    if getattr(trainer.config, "premat_materialisation_device", "gpu") == "cpu_and_gpu":
+        runtime = getattr(getattr(trainer, "raw_model", None), "_premat_runtime", None)
+        from .processing_cpu_evidence import update_timing_overlay
+        payload.update(update_timing_overlay(runtime, int(payload["optimizer_update"]), payload.get("host_update_start_ns")))
+        payload["schema_version"] = 3
     destination = _write_payload(store, payload)
     world_size = max(1, int(trainer.distributed.world_size))
     tokens_per_update = (

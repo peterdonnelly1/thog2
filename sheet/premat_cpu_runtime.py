@@ -17,6 +17,7 @@ from .depth_numerical_policy import PrematBindingContext, effective_depth_policy
 from .premat import CandidateEnvelope, CandidateState, PrematRuntime, decide_candidate_admission
 from .premat_cpu import CpuPreparationProvider, FAMILY_NAMES, GemmPredictor
 from .premat_cpu_config import cpu_config_dict
+from .premat_processing import processing_operation_range
 
 
 @dataclass
@@ -96,6 +97,10 @@ class CpuPrematRuntime(PrematRuntime):
         self.prediction_context, self.clock, self.origin_event = None, {}, None
         self.prediction_events = deque(maxlen=4096)
         self.prediction_timer = None
+        self.leading_opportunities = {}
+        self.pin_in_progress_bytes = self.pin_in_progress_peak = 0
+        self.active_source_job = None
+        self.last_memory_state = None
         self.control_counts, self.control_ns = {}, {}
 
     def _cpu_record(self, event):
@@ -130,7 +135,14 @@ class CpuPrematRuntime(PrematRuntime):
                 return
             if self.cpu_provider is None:
                 self.cpu_provider = CpuPreparationProvider(self.trajectory, families=selected, preparation=self.cpu_configuration["premat_cpu_preparation"], batch_size=self.cpu_configuration["premat_cpu_layer_batch_size"], workers=self.cpu_configuration["premat_cpu_workers"], threads=self.cpu_configuration["premat_cpu_threads_per_worker"], record=self._cpu_record, wake=self._wake)
-                self.cpu_provider.start()
+                try:
+                    self.cpu_provider.start()
+                except Exception as error:
+                    self.source_error = f"CPU worker startup failed: {error}"
+                    self._cpu_record({"event": "cpu_worker_start_failed", "error": self.source_error})
+                    self.cpu_provider.close()
+                    self.cpu_provider = None
+                    return
             snapshot, fresh = self.cpu_provider.begin_snapshot(self.cpu_policy)
             self.cpu_snapshot = snapshot
             self.source_paused = False
@@ -160,6 +172,7 @@ class CpuPrematRuntime(PrematRuntime):
                     if self.source_paused or not self.cpu_sources:
                         return
                     job = self.cpu_sources[0]
+                    self.active_source_job = job
                 if job["host"] is None:
                     job["host"] = torch.empty_like(job["source"], device="cpu", pin_memory=True)
                 with self.cpu_lock:
@@ -167,7 +180,7 @@ class CpuPrematRuntime(PrematRuntime):
                         return
                     source, host = job["source"].reshape(-1), job["host"].reshape(-1)
                     end = min(source.numel(), job["offset"] + max(1, 16 * 1024 ** 2 // source.element_size()))
-                    with torch.cuda.stream(self._stream), torch.no_grad():
+                    with processing_operation_range(owner="COPY", operation="snapshot_d2h", snapshot_id=job["snapshot_id"], source_name=job["name"], source_offset=job["offset"]), torch.cuda.stream(self._stream), torch.no_grad():
                         self._stream.wait_event(job["gate"])
                         host[job["offset"]:end].copy_(source[job["offset"]:end], non_blocking=True)
                         event = torch.cuda.Event()
@@ -188,6 +201,12 @@ class CpuPrematRuntime(PrematRuntime):
         except Exception as error:
             self.source_error = f"{type(error).__name__}: {error}"
             self._cpu_record({"event": "snapshot_download_failed", "error": self.source_error})
+        finally:
+            with self.cpu_lock:
+                self.active_source_job = None
+                self.source_thread = None
+                if not self.cpu_closed and not self.source_paused and self.cpu_sources and not self.source_error:
+                    self._start_sources()
 
     def before_optimizer_step(self):
         with self.cpu_lock:
@@ -214,6 +233,23 @@ class CpuPrematRuntime(PrematRuntime):
         self._transient_bytes = 0
         self.cpu_peak = max(self.cpu_peak, self._retained_bytes)
         self.pin_peak = max(self.pin_peak, sum(upload.nbytes for upload in self.cpu_uploads.values() if upload.pinned is not None))
+        states = self._memory_states()
+        signature = tuple(states.values())
+        if signature != self.last_memory_state:
+            self.last_memory_state = signature
+            self._cpu_record({"event": "cpu_memory", **states, "staging_limit_bytes": self.cpu_cap, "staging_peak_bytes": self.cpu_peak})
+
+    def _memory_states(self):
+        states = {"pending_upload_bytes": 0, "copying_bytes": 0, "available_bytes": 0, "autograd_retained_bytes": 0}
+        for upload in self.cpu_uploads.values():
+            key = "autograd_retained_bytes" if upload.consumed else "pending_upload_bytes" if upload.completion is None else "available_bytes" if upload.completion.query() else "copying_bytes"
+            states[key] += upload.nbytes
+        states.update(staging_bytes=self._retained_bytes, pinned_upload_bytes=sum(item.nbytes for item in self.cpu_uploads.values() if item.pinned is not None), pin_preparation_in_progress_bytes=self.pin_in_progress_bytes)
+        jobs = list(self.cpu_sources)
+        if self.active_source_job is not None and all(job is not self.active_source_job for job in jobs):
+            jobs.append(self.active_source_job)
+        states["pinned_snapshot_bytes"] = sum(job["host"].numel()*job["host"].element_size() for job in jobs if job["host"] is not None)
+        return states
 
     def _wake(self):
         with self.cpu_lock:
@@ -242,15 +278,26 @@ class CpuPrematRuntime(PrematRuntime):
                 return
             self._refresh_available()
             if self._shadow_mode:
+                self._shadow_admission(trigger, eligible_keys)
+                return
+            if self.cpu_provider is None:
                 return
             timing = self.cpu_configuration["premat_cpu_transfer_timing"]
-            if timing == "previous_gemm_leading_edge" and eligible_keys is None:
-                return
+            if timing == "previous_gemm_leading_edge":
+                if eligible_keys is not None:
+                    for key in eligible_keys:
+                        self.leading_opportunities[tuple(key)] = gate_event
+                else:
+                    eligible_keys = tuple(key for key in self.leading_opportunities if key in self._candidates and self._candidates[key].state == CandidateState.UNAVAILABLE)
+                    if not eligible_keys:
+                        return
+                    gate_event = self.leading_opportunities[eligible_keys[0]]
             if timing == "demand_driven" and not trigger.startswith("demand"):
                 return
             keys = eligible_keys
             if timing in ("as_soon_as_ready", "predicted_gemm_start") and keys is None:
                 keys = tuple((layer, family) for layer in self._layer_indices[self._position:] for family in self._families())
+            predictive_fallback = False
             while True:
                 candidate = self._next_premat_candidate(eligible_keys=keys)
                 if candidate is None:
@@ -271,8 +318,10 @@ class CpuPrematRuntime(PrematRuntime):
                             self.prediction_timer.daemon = True
                             self.prediction_timer.start()
                         return
-                    if not prediction["prediction_available"] and eligible_keys is None and candidate.layer_index not in self._target_layer_indices():
-                        return
+                    if not prediction["prediction_available"] and eligible_keys is None and not predictive_fallback:
+                        predictive_fallback = True
+                        keys = tuple((layer, family) for layer in self._target_layer_indices() for family in self._families())
+                        continue
                 if self._retained_bytes + candidate.envelope.retained_bytes > self.cpu_cap:
                     candidate.admission_reason = "cpu_staging_limit"
                     self._record("admission_considered", candidate=candidate, decision="defer", reason=candidate.admission_reason)
@@ -295,6 +344,21 @@ class CpuPrematRuntime(PrematRuntime):
                             setattr(candidate, key, reservation[value])
                 self._submit_upload(candidate, matrix, gate_event)
 
+
+    def _shadow_admission(self, trigger, eligible_keys):
+        shadow_charge = sum(item.envelope.retained_bytes for item in self._candidates.values() if item.owner == "shadow" and item.state == CandidateState.MATERIALISING)
+        while True:
+            candidate = self._next_premat_candidate(eligible_keys=eligible_keys)
+            if candidate is None or shadow_charge + candidate.envelope.retained_bytes > self.cpu_cap:
+                return
+            observation = self._observe_memory()
+            decision = decide_candidate_admission(observation=observation, envelope=candidate.envelope, stay_below_current_peak=self._stay_below_current_peak, gpu_memory_buffer_bytes=self._buffer_bytes)
+            self._record("shadow_admission", candidate=candidate, decision="admit" if decision.admitted else "defer", reason=decision.reason)
+            if not decision.admitted:
+                return
+            candidate.owner, candidate.state = "shadow", CandidateState.MATERIALISING
+            shadow_charge += candidate.envelope.retained_bytes
+
     def _prediction_wake(self):
         with self.cpu_lock:
             self.prediction_timer = None
@@ -316,7 +380,14 @@ class CpuPrematRuntime(PrematRuntime):
         self._aggregate["admitted"] += 1
         self._record("premat_submission", candidate=candidate, outcome="copy_queued")
         self._cpu_record({**metadata, "event": "upload_queued", "bytes": upload.nbytes})
-        self.upload_queue.put_nowait((upload, matrix, gate_event))
+        try:
+            self.upload_queue.put_nowait((upload, matrix, gate_event))
+        except queue.Full:
+            upload.failed = True
+            candidate.cpu_metadata["fallback_reason"] = "cpu_transfer_queue_full"
+            self._cpu_record({"event": "upload_failed", "upload_id": upload.identity, "fallback_reason": "cpu_transfer_queue_full"})
+            self._refresh_available()
+            return
         if self.upload_thread is None or not self.upload_thread.is_alive():
             self.upload_thread = threading.Thread(target=self._upload_coordinator, name="premat-upload-copy", daemon=True)
             self.upload_thread.start()
@@ -329,12 +400,15 @@ class CpuPrematRuntime(PrematRuntime):
                 continue
             started = time.perf_counter_ns()
             try:
+                with self.cpu_lock:
+                    self.pin_in_progress_bytes += upload.nbytes
+                    self.pin_in_progress_peak = max(self.pin_in_progress_peak, self.pin_in_progress_bytes)
                 pinned = matrix.pin_memory()
                 with self.cpu_lock:
                     if upload.identity not in self.cpu_uploads or upload.late or upload.failed:
                         continue
                     upload.pinned = pinned
-                    with torch.cuda.stream(self._stream), torch.no_grad():
+                    with processing_operation_range(owner="COPY", operation="matrix_h2d", family=upload.metadata["family"], layer_index=upload.metadata["layer_index"], snapshot_id=upload.metadata["snapshot_id"], cpu_task_id=upload.metadata.get("cpu_task_id"), cpu_matrix_id=upload.metadata.get("cpu_matrix_id"), upload_id=upload.identity, matrix_use_id=upload.metadata["matrix_use_id"]), torch.cuda.stream(self._stream), torch.no_grad():
                         if gate is not None:
                             self._stream.wait_event(gate)
                         upload.tensor = torch.empty_like(pinned, device=self._device)
@@ -344,7 +418,7 @@ class CpuPrematRuntime(PrematRuntime):
                         upload.tensor.copy_(pinned, non_blocking=True)
                         upload.completion = torch.cuda.Event(enable_timing=timed)
                         upload.completion.record(self._stream)
-                    upload.metadata.update({"copy_submission_ns": time.perf_counter_ns(), "pin_preparation_ms": (time.perf_counter_ns() - started) / 1e6, "copy_start_event": start})
+                    upload.metadata.update({"copy_submission_ns": time.perf_counter_ns(), "pin_preparation_ms": (time.perf_counter_ns() - started) / 1e6, "copy_start_event": start, "origin_event": self.origin_event, "origin_clock": self.clock})
                     self._cpu_record({**self._metadata(upload), "event": "upload_submitted", "direction": "H2D", "bytes": upload.nbytes})
                     self._sync_charge()
             except Exception as error:
@@ -356,6 +430,10 @@ class CpuPrematRuntime(PrematRuntime):
                         upload.completion = torch.cuda.Event()
                         upload.completion.record(self._stream)
                     self._refresh_available()
+            finally:
+                with self.cpu_lock:
+                    self.pin_in_progress_bytes -= upload.nbytes
+                self.upload_queue.task_done()
             self._wake()
 
     def _refresh_available(self):
@@ -369,6 +447,12 @@ class CpuPrematRuntime(PrematRuntime):
                     self._cpu_record({**self._metadata(upload), "event": "upload_complete_observed", "arrival_time_basis": "host_completion_observation_upper_bound"})
                     if self.cpu_configuration["premat_cpu_transfer_timing"] == "predicted_gemm_start":
                         self.cpu_predictor.uploads.append(upload.metadata["copy_start_event"].elapsed_time(upload.completion))
+                        origin, clock = upload.metadata.get("origin_event"), upload.metadata.get("origin_clock", {})
+                        if origin is not None and clock.get("uncertainty_ms") is not None and clock["uncertainty_ms"] <= 5 and origin.query():
+                            arrival = clock["host_origin_ns"] + int(origin.elapsed_time(upload.completion) * 1e6)
+                            upload.metadata.update(actual_gpu_available_ns=arrival, clock_uncertainty_ms=clock["uncertainty_ms"])
+                            intended = upload.metadata.get("intended_gpu_available_ns")
+                            self._cpu_record({**self._metadata(upload), "event": "upload_arrival_observed", "availability_error_ms": None if intended is None else (arrival-intended)/1e6, "arrival_time_basis": "qualified_cuda_event_clock"})
             safe_release = upload.retirement is not None and upload.retirement.query()
             if (upload.late or upload.failed) and (complete or upload.completion is None):
                 safe_release = True
@@ -411,7 +495,7 @@ class CpuPrematRuntime(PrematRuntime):
                 tensor.record_stream(stream)
                 lease = CpuStorageLease(self, upload, tensor, stream)
                 upload.consumed, upload.tensor, candidate.tensor = True, None, None
-                differentiable = torch.is_grad_enabled() and any(self.trajectory.coefficients[name].requires_grad for name in FAMILY_NAMES[family])
+                differentiable = torch.is_grad_enabled() and (self.trajectory.depth_basis.requires_grad or any(self.trajectory.coefficients[name].requires_grad for name in FAMILY_NAMES[family]))
                 if not differentiable:
                     self.eval_leases[candidate.sequence] = lease
                 output = self._attach(family, layer_index, tensor, binding_context=PrematBindingContext(self.cpu_policy, lease))
@@ -489,6 +573,7 @@ class CpuPrematRuntime(PrematRuntime):
                     for key in fields:
                         setattr(candidate, key, 0 if key.endswith("bytes") else None)
             super().end()
+            self.leading_opportunities.clear()
             self._refresh_available()
 
     def checkpoint_context(self, indices, microstep=None):
@@ -519,9 +604,9 @@ class CpuPrematRuntime(PrematRuntime):
     def _start_clock(self):
         clock = {"uncertainty_ms": None}
         origin = torch.cuda.Event(enable_timing=True)
+        lower = time.perf_counter_ns()
         origin.record(torch.cuda.current_stream(device=self._device))
         self.clock, self.origin_event = clock, origin
-        lower = time.perf_counter_ns()
         def align():
             origin.synchronize()
             upper = time.perf_counter_ns()
@@ -534,17 +619,18 @@ class CpuPrematRuntime(PrematRuntime):
         if self._active and self.cpu_configuration["premat_cpu_transfer_timing"] == "predicted_gemm_start":
             event = torch.cuda.Event(enable_timing=True)
             event.record(torch.cuda.current_stream(device=self._device))
-            self.prediction_events.append((event, self.origin_event, self.clock, self._prediction_key(family, layer_index), self._pass_sequence))
+            identity = {"optimizer_step": self.optimizer_step, "micro_step": self.micro_step, "phase": self.cpu_phase, "replay_invocation": self.replay_sequence if self.cpu_phase == "checkpoint_recompute" else None, "pass_sequence": self._pass_sequence}
+            self.prediction_events.append((event, self.origin_event, self.clock, self._prediction_key(family, layer_index), identity))
 
     def _collect_predictions(self):
         for _ in range(len(self.prediction_events)):
-            event, origin, clock, context, sequence = self.prediction_events.popleft()
+            event, origin, clock, context, identity = self.prediction_events.popleft()
             if origin is None or not event.query() or clock.get("uncertainty_ms") is None:
-                self.prediction_events.append((event, origin, clock, context, sequence))
+                self.prediction_events.append((event, origin, clock, context, identity))
                 continue
             offset = origin.elapsed_time(event)
             self.cpu_predictor.observe(context, offset, clock["uncertainty_ms"])
-            self._cpu_record({"event": "gemm_start_observed", "pass_sequence": sequence, "phase": context[0], "family": context[2], "layer_index": context[1], "actual_gemm_start_ns": clock["host_origin_ns"] + int(offset * 1e6), "clock_uncertainty_ms": clock["uncertainty_ms"]})
+            self._cpu_record({**identity, "event": "gemm_start_observed", "phase": context[0], "family": context[2], "layer_index": context[1], "actual_gemm_start_ns": clock["host_origin_ns"] + int(offset * 1e6), "clock_uncertainty_ms": clock["uncertainty_ms"]})
 
     def report(self):
         with self.cpu_lock:
@@ -557,7 +643,7 @@ class CpuPrematRuntime(PrematRuntime):
             for upload in self.cpu_uploads.values():
                 key = "autograd_retained_bytes" if upload.consumed else "pending_upload_bytes" if upload.completion is None else "available_bytes" if upload.completion.query() else "copying_bytes"
                 states[key] += upload.nbytes
-            runtime = {**provider, **states, "staging_bytes": self._retained_bytes, "staging_peak_bytes": self.cpu_peak, "staging_limit_bytes": self.cpu_cap, "pinned_upload_bytes": sum(upload.nbytes for upload in self.cpu_uploads.values() if upload.pinned is not None), "pinned_upload_peak_bytes": self.pin_peak, "pinned_snapshot_bytes": sum(job["host"].numel() * job["host"].element_size() for job in self.cpu_sources if job["host"] is not None), "control_path_counts": dict(self.control_counts), "control_path_host_ms": {name: value / 1e6 for name, value in self.control_ns.items()}, "prediction_context_count": len(self.cpu_predictor.samples), "prediction_event_count": len(self.prediction_events), "prediction_timer_count": int(self.prediction_timer is not None), "snapshot_download_error": self.source_error, "gpu_co_residency": "N/A: CPU materialisation"}
+            runtime = {**provider, **states, **self._memory_states(), "pin_preparation_peak_bytes": self.pin_in_progress_peak, "staging_bytes": self._retained_bytes, "staging_peak_bytes": self.cpu_peak, "staging_limit_bytes": self.cpu_cap, "pinned_upload_bytes": sum(upload.nbytes for upload in self.cpu_uploads.values() if upload.pinned is not None), "pinned_upload_peak_bytes": self.pin_peak, "pinned_snapshot_bytes": sum(job["host"].numel() * job["host"].element_size() for job in self.cpu_sources if job["host"] is not None), "control_path_counts": dict(self.control_counts), "control_path_host_ms": {name: value / 1e6 for name, value in self.control_ns.items()}, "prediction_context_count": len(self.cpu_predictor.samples), "prediction_event_count": len(self.prediction_events), "prediction_timer_count": int(self.prediction_timer is not None), "snapshot_download_error": self.source_error, "gpu_co_residency": "N/A: CPU materialisation"}
             report.update({"version": 5, "schema_version": 5, "materialisation_device": "cpu_and_gpu", "cpu_configuration": self.cpu_configuration, "phase": self.cpu_phase, "cpu_runtime": runtime, "cpu_lifecycle": events})
             return report
 
@@ -566,8 +652,7 @@ class CpuPrematRuntime(PrematRuntime):
             self.cpu_closed, self.source_paused = True, True
             if self.prediction_timer is not None:
                 self.prediction_timer.cancel()
-            if self.cpu_provider is not None:
-                self.cpu_provider.close()
+            provider = self.cpu_provider
             for upload in self.cpu_uploads.values():
                 if upload.completion is not None:
                     upload.completion.synchronize()
@@ -575,4 +660,6 @@ class CpuPrematRuntime(PrematRuntime):
                     upload.retirement.synchronize()
             self.cpu_uploads.clear()
             self.cpu_sources.clear()
+        if provider is not None:
+            provider.close()
 # ^^^ THOG

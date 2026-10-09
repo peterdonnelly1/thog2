@@ -101,6 +101,10 @@ def _premat_snapshot_for_storage(
     payload["history_detail_level"] = (
         "detailed" if retain_detailed_history else "recap_only"
     )
+    if snapshot.get("materialisation_device") == "cpu_and_gpu":
+        payload["events"] = [dict(event) for event in snapshot.get("events", ()) if isinstance(event, Mapping) and event.get("phase", "original_forward") == "original_forward"]
+        # Tensor-free CPU precursor/copy/replay records remain independently inspectable.
+        return payload
     if retain_detailed_history:
         return payload
     payload.pop("candidates", None)
@@ -989,6 +993,8 @@ def attach_telemetry(trainer: Any, telemetry: WandbTelemetry) -> None:
         captured_pass_updates: Dict[int, int] = {}
 
         def publish_premat(snapshot: Mapping[str, Any]) -> None:
+            if snapshot.get("phase") == "checkpoint_recompute":
+                return
             pass_sequence = int(snapshot.get("pass_sequence", 0))
             update = captured_pass_updates.pop(
                 pass_sequence,
@@ -998,6 +1004,9 @@ def attach_telemetry(trainer: Any, telemetry: WandbTelemetry) -> None:
 
         def capture_premat_update(pass_sequence: int) -> bool:
             nonlocal captured_update, captured_pass_sequence
+            runtime = getattr(getattr(trainer, "raw_model", None), "_premat_runtime", None)
+            if getattr(runtime, "cpu_phase", None) == "checkpoint_recompute":
+                return False
             update = max(1, int(trainer.state.completed_updates) + 1)
             interval = max(1, int(trainer.config.log_interval))
             sampled = (

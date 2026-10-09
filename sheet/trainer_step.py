@@ -916,6 +916,7 @@ class TrainerStepMixin:
                         capture_update=self.config.premat_processing_logging_capture_update,                                                               # <<< THOG decouple bounded Nsight capture timing from ordinary log cadence
                         micro_step=micro_step,
                         device=self.device,
+                        runtime=getattr(self.raw_model, "_premat_runtime", None),
                     ), self.autocast_context():
                     # ^^^ THOG
                         if plastic_inline_context is not None and micro_step == 0:

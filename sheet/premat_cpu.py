@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 import multiprocessing as mp
 from multiprocessing import shared_memory
 import queue
+import resource
 import statistics
 import threading
 import time
@@ -43,11 +44,11 @@ class SharedTensorOwner:
                 pass
 
 
-def shared_tensor(value):
+def shared_tensor(value, name=None):
     if hasattr(value, "_cpu_shared_owner"):
         return value
     value = value.detach().contiguous()
-    memory = shared_memory.SharedMemory(create=True, size=max(1, value.numel() * value.element_size()))
+    memory = shared_memory.SharedMemory(create=True, name=name, size=max(1, value.numel() * value.element_size()))
     result = torch.frombuffer(memory.buf, dtype=value.dtype, count=value.numel()).reshape(value.shape)
     result.copy_(value)
     result._cpu_shared_owner = SharedTensorOwner(memory, True)
@@ -77,6 +78,7 @@ def _worker(tasks, results, generation, threads):
         if task is None:
             return
         if task["generation"] != generation.value:
+            results.put({"event": "cpu_batch_finished", "cpu_task_id": task["cpu_task_id"], "generation": task["generation"], "discarded": True})
             continue
         try:
             sources = tuple(open_shared_tensor(item) for item in task["coefficients"])
@@ -87,17 +89,20 @@ def _worker(tasks, results, generation, threads):
                 identity = f'{task["snapshot_id"]}:{task["family"]}:{layer}'
                 fields = {"generation": task["generation"], "snapshot_id": task["snapshot_id"], "family": task["family"], "layer_index": layer, "cpu_matrix_id": identity, "cpu_task_id": task["cpu_task_id"], "worker_pid": mp.current_process().pid, "native_threads": threads, "batch_layers": task["layers"], "request_ns": task["request_ns"]}
                 started = time.perf_counter_ns()
+                cpu_started = time.process_time_ns()
                 results.put({**fields, "event": "cpu_task_start", "host_time_ns": started, "start_ns": started})
                 parts = [materialize_cpu(source, rows[layer], task["policy"]) for source in sources]
-                output = shared_tensor(torch.cat(parts, dim=0) if len(parts) > 1 else parts[0])
+                output = shared_tensor(torch.cat(parts, dim=0) if len(parts) > 1 else parts[0], name=f"thog_cpu_{task['cpu_task_id']}_{layer}")
                 ended = time.perf_counter_ns()
-                results.put({**fields, "event": "cpu_matrix_ready", "host_time_ns": ended, "start_ns": started, "end_ns": ended, "tensor": tensor_descriptor(output), "bytes": output.numel() * output.element_size()})
+                results.put({**fields, "event": "cpu_matrix_ready", "host_time_ns": ended, "start_ns": started, "end_ns": ended, "worker_cpu_service_ns": time.process_time_ns()-cpu_started, "worker_peak_rss_bytes": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss*1024, "tensor": tensor_descriptor(output), "bytes": output.numel() * output.element_size()})
                 output._cpu_shared_owner.unlink = False
                 del output, parts
             del sources, rows
         except Exception as error:
             results.put({"event": "cpu_task_failed", "host_time_ns": time.perf_counter_ns(), "cpu_task_id": task["cpu_task_id"], "generation": task["generation"], "snapshot_id": task["snapshot_id"], "family": task["family"], "batch_layers": task["layers"], "error": f"{type(error).__name__}: {error}"})
 
+        finally:
+            results.put({"event": "cpu_batch_finished", "cpu_task_id": task["cpu_task_id"], "generation": task["generation"]})
 
 def source_fingerprint(trajectory, policy, families):
     names = tuple(dict.fromkeys(name for family in families for name in FAMILY_NAMES[family]))
@@ -135,6 +140,8 @@ class CpuPreparationProvider:
         self.closed, self.started = False, False
         self.cache_peak, self.snapshot_peak = 0, 0
         self.worker_health = {}
+        self.pending_outputs = {}
+        self.collector = None
         atexit.register(self.close)
 
     def start(self):
@@ -145,7 +152,8 @@ class CpuPreparationProvider:
             process = self.context.Process(target=_worker, args=(self.tasks, self.results, self.generation, self.threads), daemon=True)
             process.start()
             self.workers.append(process)
-        threading.Thread(target=self._collect, daemon=True, name="premat-cpu-completions").start()
+        self.collector = threading.Thread(target=self._collect, daemon=True, name="premat-cpu-completions")
+        self.collector.start()
 
     def begin_snapshot(self, policy):
         fingerprint = source_fingerprint(self.trajectory, policy, self.families)
@@ -213,6 +221,7 @@ class CpuPreparationProvider:
                     self.tasks.put_nowait(task)
                 except queue.Full:
                     return
+                self.pending_outputs[task["cpu_task_id"]] = {f"thog_cpu_{task['cpu_task_id']}_{item}" for item in layers}
                 self.submitted.update((family, item) for item in layers)
                 self.record({key: value for key, value in {**task, "event": "cpu_task_queued", "host_time_ns": task["request_ns"], "batch_layers": layers}.items() if key not in ("coefficients", "rows", "policy")})
 
@@ -222,10 +231,21 @@ class CpuPreparationProvider:
                 event = self.results.get(timeout=0.1)
             except queue.Empty:
                 continue
+            except (ValueError, OSError, EOFError):
+                return
             descriptor = event.pop("tensor", None)
-            matrix = open_shared_tensor(descriptor, unlink=True) if descriptor is not None else None
+            try:
+                matrix = open_shared_tensor(descriptor, unlink=True) if descriptor is not None else None
+            except FileNotFoundError:
+                matrix = None
             with self.lock:
                 current = self.snapshot is not None and event.get("generation") == self.snapshot.generation
+                if descriptor is not None:
+                    self.pending_outputs.get(event.get("cpu_task_id"), set()).discard(descriptor["name"])
+                if event["event"] == "cpu_batch_finished":
+                    self.pending_outputs.pop(event["cpu_task_id"], None)
+                if event.get("worker_pid") in self.worker_health:
+                    self.worker_health[event["worker_pid"]].update({key:event[key] for key in ("host_time_ns", "worker_peak_rss_bytes", "worker_cpu_service_ns") if key in event})
                 if event["event"] == "cpu_worker_ready":
                     self.worker_health[event["worker_pid"]] = dict(event)
                 elif current and matrix is not None:
@@ -277,6 +297,18 @@ class CpuPreparationProvider:
             if process.is_alive():
                 process.terminate()
                 process.join(timeout=0.5)
+        if self.collector is not None and self.collector is not threading.current_thread():
+            self.collector.join(timeout=0.25)
+        # Outputs not yet received are named before submission; cleanup remains bounded after worker termination.
+        for names in self.pending_outputs.values():
+            for name in names:
+                try:
+                    memory = shared_memory.SharedMemory(name=name)
+                    memory.unlink()
+                    memory.close()
+                except FileNotFoundError:
+                    pass
+        self.pending_outputs.clear()
         self.cache.clear()
         self.snapshot = None
         for pipe in (self.tasks, self.results):

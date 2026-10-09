@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import threading
 from typing import Any, Dict, Iterable, Iterator, Mapping, Optional, Sequence
 import zipfile
 
@@ -53,6 +54,7 @@ _capture_active = False
 _capture_done = False
 _capture_stack_depth = 0
 _capture_start_ns: Optional[int] = None
+_capture_thread: Optional[int] = None
 
 
 def _processing_file_prefix(run_artifact: str, *, max_utf8_bytes: int = 180) -> str:
@@ -376,6 +378,9 @@ def register_processing_handoff(
             )
         },
     }
+    if config.get("premat_materialisation_device") == "cpu_and_gpu":
+        from .premat_cpu_config import cpu_config_dict
+        payload["config"].update(cpu_config_dict(config))
     destination = Path(target)
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(json.dumps(payload, indent=2, sort_keys=True))
@@ -409,12 +414,13 @@ def _nvtx_pop() -> None:
     torch.cuda.nvtx.range_pop()
 
 
-def _operation_label(owner: str, operation: str, family: Optional[str], layer_index: Optional[int]) -> str:
+def _operation_label(owner: str, operation: str, family: Optional[str], layer_index: Optional[int], **identity) -> str:
     fields = [PROCESSING_OPERATION_PREFIX, f"owner={owner}", f"operation={operation}"]
     if family is not None:
         fields.append(f"family={family}")
     if layer_index is not None:
         fields.append(f"layer={int(layer_index)}")
+    fields.extend(f"{key}={value}" for key, value in identity.items() if value is not None and "|" not in str(value))
     return "|".join(fields)
 
 
@@ -424,12 +430,14 @@ def processing_operation_push(
     *,
     family: Optional[str] = None,
     layer_index: Optional[int] = None,
+    **identity,
 ) -> bool:
     global _capture_stack_depth
     if not _capture_active:
         return False
-    _nvtx_push(_operation_label(owner, operation, family, layer_index))
-    _capture_stack_depth += 1
+    _nvtx_push(_operation_label(owner, operation, family, layer_index, **identity))
+    if threading.get_ident() == _capture_thread:
+        _capture_stack_depth += 1
     return True
 
 
@@ -437,7 +445,8 @@ def processing_operation_pop(pushed: bool) -> None:
     global _capture_stack_depth
     if pushed:
         _nvtx_pop()
-        _capture_stack_depth = max(0, _capture_stack_depth - 1)
+        if threading.get_ident() == _capture_thread:
+            _capture_stack_depth = max(0, _capture_stack_depth - 1)
 
 
 def processing_capture_elapsed_ms() -> Optional[float]:
@@ -454,8 +463,9 @@ def processing_operation_range(
     *,
     family: Optional[str] = None,
     layer_index: Optional[int] = None,
+    **identity,
 ) -> Iterator[None]:
-    pushed = processing_operation_push(owner, operation, family=family, layer_index=layer_index)
+    pushed = processing_operation_push(owner, operation, family=family, layer_index=layer_index, **identity)
     try:
         yield
     finally:
@@ -472,8 +482,14 @@ def processing_capture_scope(
     capture_update: int = PROCESSING_DEFAULT_CAPTURE_UPDATE,
     micro_step: int,
     device: Any,
+    runtime: Any = None,
+    full_update: bool = False,
+    already_drained: bool = False,
 ) -> Iterator[None]:
-    global _capture_active, _capture_done, _capture_stack_depth, _capture_start_ns
+    global _capture_active, _capture_done, _capture_stack_depth, _capture_start_ns, _capture_thread
+    if _capture_active:
+        yield
+        return
     selected = should_capture_processing_forward(
         enabled=enabled,
         completed_updates=completed_updates,
@@ -500,17 +516,21 @@ def processing_capture_scope(
             "max_updates": int(max_updates),
         }
     _capture_stack_depth = 0
+    _capture_thread = threading.get_ident()
+    host_push_lower = time.perf_counter_ns()
     _nvtx_push(PROCESSING_CAPTURE_RANGE)
     # The NSYS capture begins at the NVTX push, so establish the host timing
     # origin immediately afterwards rather than including profiler setup time.
     _capture_start_ns = time.perf_counter_ns()
     if metadata is not None:
         metadata["host_start_ns"] = int(_capture_start_ns)
+        metadata.update(host_nvtx_lower_ns=host_push_lower, host_nvtx_upper_ns=_capture_start_ns, full_update=bool(full_update))
     _capture_active = True
     try:
         yield
     finally:
-        torch.cuda.synchronize(device)
+        if not already_drained:
+            torch.cuda.synchronize(device)
         while _capture_stack_depth > 0:
             _nvtx_pop()
             _capture_stack_depth -= 1
@@ -518,10 +538,18 @@ def processing_capture_scope(
         _capture_active = False
         _capture_start_ns = None
         _capture_done = True
+        _capture_thread = None
         if metadata is not None:
             destination = Path(metadata_path)
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_text(json.dumps(metadata, indent=2, sort_keys=True))
+            if runtime is not None and getattr(runtime, "cpu_configuration", None) is not None:
+                try:
+                    report = runtime.report()
+                    report["capture"] = metadata
+                    (destination.parent / "cpu_capture.json").write_text(json.dumps(report, sort_keys=True, allow_nan=False))
+                except Exception as error:
+                    print(f"THOG2 WARNING: CPU capture evidence export failed: {error}", flush=True)
 
 
 def _table_names(connection: sqlite3.Connection) -> set[str]:
@@ -595,6 +623,7 @@ def _parse_operation_label(text: str) -> Optional[Dict[str, Any]]:
     if "owner" not in values or "operation" not in values:
         return None
     return {
+        **{key: value for key, value in values.items() if key not in ("owner", "operation", "family", "layer")},
         "owner": values["owner"],
         "operation": values["operation"],
         "family": values.get("family", ""),
@@ -937,6 +966,7 @@ def normalize_nsys_sqlite(
     capture_frequency_hz: int,
     handoff: Optional[Mapping[str, Any]] = None,
     capture_metadata: Optional[Mapping[str, Any]] = None,
+    cpu_report: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     output_directory = Path(output_directory)
     output_directory.mkdir(parents=True, exist_ok=True)
@@ -977,6 +1007,8 @@ def normalize_nsys_sqlite(
                 ):
                     correlation_to_operation[int(runtime["correlation"])] = operation
 
+        from .processing_cpu_evidence import copy_activities
+        copies, copies_supported = copy_activities(connection, tables, correlation_to_operation, capture_start, capture_end)
         candidates = []
         operation_kernel_intervals: Dict[int, list[tuple[float, float]]] = {}
         for kernel in kernels:
@@ -1237,6 +1269,11 @@ def normalize_nsys_sqlite(
         "metric_audit": metric_audit,
         "matrix_summary": matrix_summary,
     }
+    cpu_mode = (handoff or {}).get("config", {}).get("premat_materialisation_device") == "cpu_and_gpu" or cpu_report is not None
+    if cpu_mode:
+        from .processing_cpu_evidence import extend_processing
+        extend_processing(processing_data, output_directory, prefix, cpu_report, copies, copies_supported, capture_start, capture_end)
+        (output_directory / processing_files["metadata"]).write_text(json.dumps(metadata, indent=2, sort_keys=True))
     (output_directory / "processing_data.json").write_text(
         json.dumps(processing_data, separators=(",", ":"), allow_nan=False)
     )
@@ -1248,6 +1285,7 @@ def normalize_nsys_sqlite(
             processing_files["attribution_resource_stats"],
             processing_files["metric_audit"],
             processing_files["metadata"], "processing_data.json",
+            *(metadata["files"][key] for key in ("transfers", "cpu_tasks", "cpu_memory", "cpu_lifecycle") if key in metadata["files"]),
         ):
             archive.write(output_directory / name, arcname=name)
     return processing_data
@@ -1270,6 +1308,16 @@ def maybe_reexec_under_nsys(arguments: Sequence[str], *, entrypoint: Path) -> Op
     environment[_PROCESSING_CHILD_ENV] = "1"
     environment[_PROCESSING_HANDOFF_ENV] = str(handoff_path)
     environment[_PROCESSING_CAPTURE_METADATA_ENV] = str(capture_metadata_path)
+    if profiler == "nsys" and _argv_value(arguments, "--premat_materialisation_device", "gpu") == "cpu_and_gpu":
+        timing_requested = os.environ.get("THOG2_PROCESSING_UPDATE_TIMING_UPDATE", "").strip()
+        processing_explicit = _argv_value(arguments, "--premat_processing_logging_capture_update")
+        if timing_requested and processing_explicit and int(timing_requested) != int(processing_explicit):
+            raise ValueError("CPU whole-update and Processing capture update selectors must agree")
+        capture_update = int(timing_requested or processing_explicit or _argv_value(arguments, "--max_iters", "100"))
+        if capture_update < 1:
+            raise ValueError("CPU whole-update capture selector must be positive")
+        environment["THOG2_PROCESSING_UPDATE_TIMING_UPDATE"] = str(capture_update)
+        rewritten_arguments = rewrite_processing_cli_for_core([*arguments, "--premat_processing_logging_capture_update", str(capture_update)])
 
     if profiler == "nsys":
         nsys = _find_nsys()
@@ -1289,7 +1337,7 @@ def maybe_reexec_under_nsys(arguments: Sequence[str], *, entrypoint: Path) -> Op
         )
         print(
             f"THOG2 PREMAT processing capture: Nsight Systems @ {frequency} Hz; "
-            f"capturing update {capture_update}, first forward microstep",
+            f"capturing update {capture_update}, " + ("complete optimizer update" if environment.get("THOG2_PROCESSING_UPDATE_TIMING_UPDATE") and _argv_value(arguments, "--premat_materialisation_device", "gpu") == "cpu_and_gpu" else "first forward microstep"),
             flush=True,
         )
         completed = subprocess.run(command, env=environment)
@@ -1324,6 +1372,7 @@ def maybe_reexec_under_nsys(arguments: Sequence[str], *, entrypoint: Path) -> Op
             capture_frequency_hz=frequency,
             handoff=handoff,
             capture_metadata=capture_metadata,
+            cpu_report=json.loads((temporary_root / "cpu_capture.json").read_text()) if (temporary_root / "cpu_capture.json").exists() else None,
         )
         processing_files = processing_data["metadata"]["files"]
         shutil.copy2(report_path, processing_directory / processing_files["raw_trace"])
