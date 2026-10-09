@@ -17,12 +17,14 @@ output=root/"evidence"/"cpu_materialisation_ci"
 output.mkdir(parents=True,exist_ok=True)
 environment=dict(os.environ, PYTHONPATH=".", OMP_NUM_THREADS="1", MKL_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1")
 results={}
+infrastructure=[]
 for label, folder in (("base",base),("candidate",root)):
     xml=output/f"{label}.xml"
     args=[sys.executable,"-m","pytest","-q","tests","--timeout=60","--junitxml="+str(xml),*[f"--ignore={p}" for p in EXCLUDED]]
     run=subprocess.run(args,cwd=folder,env=environment,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True)
     (output/f"{label}.log").write_text(run.stdout)
     print(f"{label} pytest exit={run.returncode}\n"+run.stdout[-6000:],flush=True)
+    if run.returncode not in (0,1):infrastructure.append(label+": pytest exit "+str(run.returncode))
     failures=[]
     count=skipped=0
     if xml.exists():
@@ -50,5 +52,6 @@ js_introduced=[name for name,item in js["candidate"].items() if item["exit"] and
 payload={"base_commit":"e29e32db916fc5ceb87a089d057fb78456c1a98a","pytest":results,"introduced_failures":introduced,"resolved_failures":resolved,"javascript":js,"introduced_javascript_failures":js_introduced,"excluded_legacy_browser_tests":list(EXCLUDED)}
 (output/"comparison.json").write_text(json.dumps(payload,indent=2)+"\n")
 print(json.dumps({key:payload[key] for key in ("introduced_failures","resolved_failures","introduced_javascript_failures")},indent=2),flush=True)
-raise SystemExit(bool(introduced or js_introduced))
+print("Infrastructure failures: "+repr(infrastructure),flush=True)
+raise SystemExit(bool(introduced or js_introduced or infrastructure))
 # ^^^ THOG

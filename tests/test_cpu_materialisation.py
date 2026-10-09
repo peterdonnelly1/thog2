@@ -171,4 +171,11 @@ def test_prediction_requires_qualified_clock_and_warm_history():
     assert not predictor.predict(("checkpoint_recompute",), 100000000, 2, 0.1)["prediction_available"]
     predictor.reset("shape_changed")
     assert not predictor.samples
+
+def test_finite_batch_starts_at_requested_layer_without_revisiting_predecessors():
+    provider=CpuPreparationProvider(tiny_trajectory(),families=("O",),preparation="scheduled",batch_size="4",workers=1,threads=1)
+    try:
+        assert provider.batch_layers(2)==(2,3)
+        assert provider.batch_layers(1)==(1,2,3)
+    finally:provider.close()
 # ^^^ THOG

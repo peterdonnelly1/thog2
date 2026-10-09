@@ -38,7 +38,7 @@ snapshot.events.push({event:"pass_end",sequence:sequence++});
    await page.evaluate(async payload=>{local_set_detail_tab("charts");processing_view.charts_tab_visible=true;await processing_render(payload,true);},data);
    await page.waitForFunction(()=>by_id("processing_timeline_plot")?.data?.some(trace=>trace.meta?.operations_owner==="CPU"));
    const lanes=await page.locator("#processing_timeline_plot").evaluate(node=>node.layout.yaxis.ticktext);
-   assert.deepEqual(lanes,["CPU","COPY","PREMAT","MAIN"]);
+   assert.deepEqual(lanes,["CPU","COPY D2H","COPY H2D","PREMAT","MAIN"]);
    assert.ok(await page.locator("#processing_cpu_summary_body").textContent().then(t=>t.includes("N/A: CPU materialisation")&&t.includes("clock alignment unknown")));
    const controls=await page.locator(".processing-operations-key-toggle").count();assert.ok(controls>0);
    const first=page.locator(".processing-operations-key-toggle").first();await first.click();await first.click();
@@ -76,6 +76,7 @@ snapshot.events.push({event:"pass_end",sequence:sequence++});
    while(Date.now()<stop){await page.evaluate(async payload=>{await processing_render(payload,true);},data);iterations++;await page.waitForTimeout(400);}
    const after=await page.evaluate(()=>({dom:document.querySelectorAll("*").length,trace:by_id("processing_timeline_plot").data.length}));
    assert.equal(after.trace,before.trace);assert.ok(after.dom<=before.dom+60,JSON.stringify({before,after}));assert.deepEqual(errors,[]);
+   await page.unrouteAll({behavior:"wait"});
    console.log(JSON.stringify({browser:type.name(),cpu_evidence:true,recap:true,downloads:4,zoom:true,maximize:true,legend:true,runner:true,soak_seconds:Number(process.env.INSTRA_CPU_SOAK_SECONDS||60),iterations,before,after,page_errors:errors}));
   }finally{await browser.close();}
  }

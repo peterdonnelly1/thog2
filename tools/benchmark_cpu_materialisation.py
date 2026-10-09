@@ -1,0 +1,148 @@
+# vvv THOG matched unprofiled DEPTH / GPU PREMAT / CPU+GPU smoke and preliminary field measurements
+from __future__ import annotations
+import argparse
+import gc
+import json
+import math
+import os
+from pathlib import Path
+import platform
+import statistics
+import sys
+import time
+
+ROOT=Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(ROOT))
+import torch
+import psutil
+from sheet.trainer import SharedTrainer
+from sheet.training_config import TrainingConfig
+
+
+def parser():
+    p=argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--smoke",action="store_true",help="three tiny updates/provider, A=2, checkpoint segment=2")
+    p.add_argument("--device",default="cuda")
+    p.add_argument("--dtype",choices=("float32","float16","bfloat16"),default="float32")
+    p.add_argument("--layers",type=int,default=4)
+    p.add_argument("--width",type=int,default=32)
+    p.add_argument("--heads",type=int,default=4)
+    p.add_argument("--depth-order",type=int,default=3)
+    p.add_argument("--batch",type=int,default=2)
+    p.add_argument("--context",type=int,default=16)
+    p.add_argument("--accumulation",type=int,default=2)
+    p.add_argument("--checkpoint",type=int,default=2)
+    p.add_argument("--updates",type=int,default=20)
+    p.add_argument("--warmup",type=int,default=3)
+    p.add_argument("--repeats",type=int,default=3)
+    p.add_argument("--workers",type=int,default=1)
+    p.add_argument("--threads",type=int,default=0)
+    p.add_argument("--preparation",choices=("eager","scheduled","demand_driven"),default="eager")
+    p.add_argument("--layer-batch",default="single_layer")
+    p.add_argument("--transfer",choices=("as_the_code_flies","previous_gemm_leading_edge","as_soon_as_ready","demand_driven","predicted_gemm_start"),default="as_the_code_flies")
+    p.add_argument("--lead-ms",type=float,default=0)
+    p.add_argument("--staging-mb",type=float,default=0)
+    p.add_argument("--replay",choices=("disabled","enabled"),default="disabled")
+    p.add_argument("--logging",choices=("disabled","enabled"),default="disabled")
+    p.add_argument("--label",default=platform.node())
+    p.add_argument("--output",type=Path,default=Path("evidence/cpu_materialisation_field.json"))
+    return p
+
+
+def memory(runtime):
+    parent=psutil.Process()
+    processes=[parent]
+    if runtime is not None and getattr(runtime,"cpu_provider",None) is not None:
+        for worker in runtime.cpu_provider.workers:
+            if worker.is_alive():processes.append(psutil.Process(worker.pid))
+    rows=[]
+    for process in processes:
+        try:
+            info=process.memory_full_info()
+            rows.append({"pid":process.pid,"rss_bytes":info.rss,"pss_bytes":getattr(info,"pss",None)})
+        except (psutil.NoSuchProcess,psutil.AccessDenied):pass
+    return {"processes":rows,"total_pss_bytes":sum(row["pss_bytes"] for row in rows) if rows and all(row["pss_bytes"] is not None for row in rows) else None,"accounting":"RSS is reported per process; shared pages are not summed as unique memory. PSS is summed only when available."}
+
+
+def run(options,mode,repeat):
+    cpu=mode=="cpu_and_gpu"
+    kwargs={}
+    if cpu:
+        kwargs={"premat_materialisation_device":mode,"premat_cpu_workers":options.workers,"premat_cpu_threads_per_worker":options.threads,"premat_cpu_preparation":options.preparation,"premat_cpu_layer_batch_size":options.layer_batch,"premat_cpu_transfer_timing":options.transfer,"premat_cpu_transfer_lead_ms":options.lead_ms,"premat_cpu_staging_limit_mb":options.staging_mb,"premat_cpu_checkpoint_replay":options.replay}
+    config=TrainingConfig(model_type="thog2_sheet",geometry_preset="depth",basis_family="chebyshev",block_size=options.context,vocab_size=128,n_layer=options.layers,n_embd=options.width,n_head=options.heads,depth_order=options.depth_order,base_row_order=1,batch_size=options.batch,gradient_accumulation_steps=options.accumulation,checkpoint_segment_size=options.checkpoint,max_updates=options.warmup+options.updates,learning_rate=1e-3,min_learning_rate=1e-3,decay_learning_rate=False,decay_updates=options.warmup+options.updates,weight_decay=0,grad_clip=0,dropout=0.1,eval_interval=0,checkpoint_interval=0,device=options.device,dtype=options.dtype,model_seed=171,data_seed=272,premat="disabled" if mode=="off" else "enabled",premat_gpu_memory_buffer_gb=0,premat_headroom_stay_below_current_peak=False,premat_headroom_stay_within_global_buffer=True,premat_logging=options.logging,premat_instra="disabled",premat_processing_logging="disabled",nonfinite_update_policy="raise",**kwargs)
+    tokens=torch.arange(max(65536,options.context*16),dtype=torch.long).remainder(128)
+    trainer=SharedTrainer(config,tokens,tokens)
+    runtime=getattr(trainer.raw_model,"_premat_runtime",None)
+    try:
+        for _ in range(options.warmup):
+            result=trainer.train_one_update()
+            if result.get("skipped_update"):raise AssertionError("warmup update was skipped")
+        torch.cuda.synchronize(trainer.device)
+        torch.cuda.reset_peak_memory_stats(trainer.device)
+        before=memory(runtime)
+        started=time.perf_counter_ns()
+        losses=[]
+        for _ in range(options.updates):
+            result=trainer.train_one_update()
+            if result.get("skipped_update"):raise AssertionError("measured update was skipped")
+            losses.append(float(result["training_loss"]))
+        # Same final device drain for all providers; no CPU-job completion wait is added.
+        torch.cuda.synchronize(trainer.device)
+        elapsed=(time.perf_counter_ns()-started)/1e9
+        peak_allocated=torch.cuda.max_memory_allocated(trainer.device)
+        peak_reserved=torch.cuda.max_memory_reserved(trainer.device)
+        after=memory(runtime)
+        report={} if runtime is None else runtime.report()
+        if cpu:
+            health=report.get("cpu_runtime",{})
+            assert health.get("staging_peak_bytes",0)<=health.get("staging_limit_bytes",0)
+            assert not any(worker.get("cuda_initialized") for worker in health.get("worker_health",()))
+        values={name:parameter.detach().cpu().clone() for name,parameter in trainer.raw_model.named_parameters()}
+        gradients={name:parameter.grad.detach().cpu().clone() for name,parameter in trainer.raw_model.named_parameters() if parameter.grad is not None}
+        payload={"mode":mode,"repeat":repeat,"completed_updates":trainer.state.completed_updates,"losses":losses,"elapsed_seconds":elapsed,"milliseconds_per_update":elapsed*1000/options.updates,"tokens_per_second":options.updates*options.batch*options.context*options.accumulation/elapsed,"gpu_peak_allocated_bytes":peak_allocated,"gpu_peak_reserved_bytes":peak_reserved,"cpu_memory_before":before,"cpu_memory_after":after,"runtime":report}
+        return payload,values,gradients
+    finally:
+        trainer.close()
+        del trainer
+        gc.collect()
+        torch.cuda.empty_cache()
+
+
+def main():
+    options=parser().parse_args()
+    if not torch.cuda.is_available() or not options.device.startswith("cuda"):
+        raise SystemExit("An actual CUDA GPU is required; this script does not substitute CPU measurements.")
+    if options.dtype=="bfloat16" and not torch.cuda.is_bf16_supported():raise SystemExit("Selected GPU does not support BF16")
+    if options.smoke:
+        options.updates=3;options.warmup=0;options.repeats=1
+    for name in ("updates","repeats","layers","width","heads","batch","context","accumulation"):
+        if getattr(options,name)<1:raise SystemExit(name+" must be positive")
+    torch.backends.cuda.matmul.allow_tf32=False
+    payload={"schema_version":1,"purpose":"matched unprofiled smoke" if options.smoke else "matched unprofiled preliminary field experiment","host":options.label,"platform":platform.platform(),"python":sys.version,"torch":str(torch.__version__),"cuda":torch.version.cuda,"gpu":torch.cuda.get_device_name(),"configuration":{key:str(value) if isinstance(value,Path) else value for key,value in vars(options).items()},"runs":[],"parity":[],"qualification":"No speedup or memory improvement is assumed. CPU deadlines use ordinary immediate GPU fallback."}
+    modes=("off","gpu","cpu_and_gpu")
+    atol,rtol=(3e-5,3e-4) if options.dtype=="float32" else (4e-4,0.02) if options.dtype=="float16" else (3e-3,0.06)
+    for repeat in range(options.repeats):
+        results={}
+        for mode in modes[repeat%3:]+modes[:repeat%3]:
+            record,parameters,gradients=run(options,mode,repeat)
+            payload["runs"].append(record);results[mode]=(record,parameters,gradients)
+            print(json.dumps({key:record[key] for key in ("mode","repeat","milliseconds_per_update","tokens_per_second","gpu_peak_allocated_bytes")}),flush=True)
+        for mode in ("gpu","cpu_and_gpu"):
+            reference=results["off"];candidate=results[mode]
+            torch.testing.assert_close(torch.tensor(reference[0]["losses"]),torch.tensor(candidate[0]["losses"]),atol=atol,rtol=rtol)
+            for label,index in (("parameters",1),("gradients",2)):
+                assert reference[index].keys()==candidate[index].keys()
+                max_abs=0
+                for name,value in reference[index].items():
+                    torch.testing.assert_close(candidate[index][name],value,atol=atol,rtol=rtol,msg=lambda message,name=name:name+": "+message)
+                    max_abs=max(max_abs,float((candidate[index][name]-value).abs().max()))
+                payload["parity"].append({"repeat":repeat,"mode":mode,"kind":label,"max_absolute_difference":max_abs,"atol":atol,"rtol":rtol,"passed":True})
+        options.output.parent.mkdir(parents=True,exist_ok=True)
+        options.output.write_text(json.dumps(payload,indent=2,allow_nan=False)+"\n")
+    payload["summary"]={mode:{"median_tokens_per_second":statistics.median(item["tokens_per_second"] for item in payload["runs"] if item["mode"]==mode),"median_ms_per_update":statistics.median(item["milliseconds_per_update"] for item in payload["runs"] if item["mode"]==mode),"max_gpu_peak_allocated_bytes":max(item["gpu_peak_allocated_bytes"] for item in payload["runs"] if item["mode"]==mode)} for mode in modes}
+    options.output.write_text(json.dumps(payload,indent=2,allow_nan=False)+"\n")
+    print("PASS matched losses/gradients/updates and CPU staging cap; evidence: "+str(options.output),flush=True)
+
+
+if __name__=="__main__":main()
+# ^^^ THOG

@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import atexit
+import ctypes
 from collections import OrderedDict, deque
 from dataclasses import dataclass, field
 import multiprocessing as mp
 from multiprocessing import shared_memory
 import queue
 import resource
+import platform
 import statistics
 import threading
 import time
@@ -50,7 +52,7 @@ def shared_tensor(value, name=None):
     value = value.detach().contiguous()
     memory = shared_memory.SharedMemory(create=True, name=name, size=max(1, value.numel() * value.element_size()))
     result = torch.frombuffer(memory.buf, dtype=value.dtype, count=value.numel()).reshape(value.shape)
-    result.copy_(value)
+    ctypes.memmove(result.data_ptr(), value.data_ptr(), value.numel()*value.element_size())
     result._cpu_shared_owner = SharedTensorOwner(memory, True)
     return result
 
@@ -195,7 +197,7 @@ class CpuPreparationProvider:
         if self.batch_size == "all_layers":
             return tuple(range(self.n_layer))
         size = 1 if self.batch_size == "single_layer" else int(self.batch_size)
-        start = (int(layer) // size) * size
+        start = int(layer)
         return tuple(range(start, min(self.n_layer, start + size)))
 
     def request(self, family, layer):
@@ -280,7 +282,7 @@ class CpuPreparationProvider:
             dtype_bytes = 4 if self.snapshot is None or self.snapshot.policy.output_dtype == "float32" else 2
             sizes = [sum(self.trajectory.coefficients[name].shape[0] * self.trajectory.coefficients[name].shape[1] for name in FAMILY_NAMES[family]) * dtype_bytes for family in self.families]
             largest = max(sizes, default=0)
-            return {"snapshot_id": None if self.snapshot is None else self.snapshot.snapshot_id, "cpu_cache_bytes": self.cache_bytes(), "cpu_cache_peak_bytes": self.cache_peak, "snapshot_bytes": self.snapshot_bytes(), "snapshot_peak_bytes": self.snapshot_peak, "cpu_cache_bound_bytes": self.n_layer * sum(sizes), "cpu_pending_output_bound_bytes": self.queue_limit * largest, "snapshot_storage_bound_bytes": (self.worker_count + 1) * self.snapshot_peak, "cpu_worker_workspace_bound_bytes": self.worker_count * (2 * self.snapshot_peak + 4 * largest), "workers_requested": self.worker_count, "workers_resolved": len(self.workers), "threads_per_worker_resolved": self.threads, "affinity_thread_budget": self.thread_budget, "worker_health": list(self.worker_health.values()), "dead_worker_count": sum(process.exitcode not in (None, 0) for process in self.workers), "task_failure_count": len(self.failures)}
+            return {"platform": platform.platform(), "torch_version": str(torch.__version__), "cuda_runtime_version": torch.version.cuda, "snapshot_id": None if self.snapshot is None else self.snapshot.snapshot_id, "cpu_cache_bytes": self.cache_bytes(), "cpu_cache_peak_bytes": self.cache_peak, "snapshot_bytes": self.snapshot_bytes(), "snapshot_peak_bytes": self.snapshot_peak, "cpu_cache_bound_bytes": self.n_layer * sum(sizes), "cpu_pending_output_bound_bytes": self.queue_limit * largest, "snapshot_storage_bound_bytes": (self.worker_count + 1) * self.snapshot_peak, "cpu_worker_workspace_bound_bytes": self.worker_count * (2 * self.snapshot_peak + 4 * largest), "workers_requested": self.worker_count, "workers_resolved": len(self.workers), "threads_per_worker_resolved": self.threads, "affinity_thread_budget": self.thread_budget, "worker_health": list(self.worker_health.values()), "dead_worker_count": sum(process.exitcode not in (None, 0) for process in self.workers), "task_failure_count": len(self.failures)}
 
     def close(self):
         if self.closed:

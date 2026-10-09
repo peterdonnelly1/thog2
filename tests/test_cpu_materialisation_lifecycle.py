@@ -42,7 +42,12 @@ class Destination(_FakeTensor):
 def setup_runtime(monkeypatch, *, target_layer=0, cap=0, transfer="as_the_code_flies", shadow=False):
     cuda, trajectory = _FakeCuda(), tiny_trajectory()
     cuda.install(monkeypatch)
-    monkeypatch.setattr(_FakeEvent, "synchronize", lambda event: setattr(event, "complete", True), raising=False)
+    def synchronize(event):
+        while not event.complete and not runtime.cpu_closed:
+            time.sleep(0.001)
+        if runtime.cpu_closed:
+            event.complete = True
+    monkeypatch.setattr(_FakeEvent, "synchronize", synchronize, raising=False)
     monkeypatch.setattr(cpu_module, "CpuPreparationProvider", Provider)
     monkeypatch.setattr(CpuPrematRuntime, "_start_sources", lambda self: None)
     monkeypatch.setattr(CpuPrematRuntime, "_start_clock", lambda self: None)

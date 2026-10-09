@@ -1310,16 +1310,18 @@ def maybe_reexec_under_nsys(arguments: Sequence[str], *, entrypoint: Path) -> Op
     environment[_PROCESSING_CHILD_ENV] = "1"
     environment[_PROCESSING_HANDOFF_ENV] = str(handoff_path)
     environment[_PROCESSING_CAPTURE_METADATA_ENV] = str(capture_metadata_path)
-    if profiler == "nsys" and _argv_value(arguments, "--premat_materialisation_device", "gpu") == "cpu_and_gpu":
-        timing_requested = os.environ.get("THOG2_PROCESSING_UPDATE_TIMING_UPDATE", "").strip()
+    # CPU adds whole-update scope only when the established public full-step control is enabled.
+    from .full_step_timing_cli_patch import _raw_explicit_state
+    full_enabled, full_explicit = _raw_explicit_state(arguments)
+    cpu_full_capture = profiler == "nsys" and _argv_value(arguments, "--premat_materialisation_device", "gpu") == "cpu_and_gpu" and full_enabled == "enable"
+    if cpu_full_capture:
         processing_explicit = _argv_value(arguments, "--premat_processing_logging_capture_update")
-        if timing_requested and processing_explicit and int(timing_requested) != int(processing_explicit):
+        if full_explicit is not None and processing_explicit is not None and full_explicit != int(processing_explicit):
             raise ValueError("CPU whole-update and Processing capture update selectors must agree")
-        capture_update = int(timing_requested or processing_explicit or _argv_value(arguments, "--max_iters", "100"))
+        capture_update = int(full_explicit or processing_explicit or _argv_value(arguments, "--max_iters", "100"))
         if capture_update < 1:
             raise ValueError("CPU whole-update capture selector must be positive")
-        environment["THOG2_PROCESSING_UPDATE_TIMING_UPDATE"] = str(capture_update)
-        rewritten_arguments = rewrite_processing_cli_for_core([*arguments, "--premat_processing_logging_capture_update", str(capture_update)])
+        rewritten_arguments = rewrite_processing_cli_for_core([*arguments, "--premat_processing_logging_capture_update", str(capture_update), "--premat_instra__full_step_timing_capture_and_chart_capture", "step", str(capture_update)])
 
     if profiler == "nsys":
         nsys = _find_nsys()
@@ -1339,7 +1341,7 @@ def maybe_reexec_under_nsys(arguments: Sequence[str], *, entrypoint: Path) -> Op
         )
         print(
             f"THOG2 PREMAT processing capture: Nsight Systems @ {frequency} Hz; "
-            f"capturing update {capture_update}, " + ("complete optimizer update" if environment.get("THOG2_PROCESSING_UPDATE_TIMING_UPDATE") and _argv_value(arguments, "--premat_materialisation_device", "gpu") == "cpu_and_gpu" else "first forward microstep"),
+            f"capturing update {capture_update}, " + ("complete optimizer update" if cpu_full_capture else "first forward microstep"),
             flush=True,
         )
         completed = subprocess.run(command, env=environment)

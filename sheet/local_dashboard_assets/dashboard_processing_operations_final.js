@@ -236,7 +236,7 @@
       ? load_json(operation_colour_storage_key, {})
       : {}
   );
-  const lane_y = Object.freeze({MAIN:1.00, PREMAT:0.70, OTHER:0.40, UNKNOWN:0.15, COPY:0.35, CPU:0.00});
+  const lane_y = Object.freeze({MAIN:1.00, PREMAT:0.70, OTHER:0.40, UNKNOWN:0.15, COPY:0.35, CPU:-0.35});
   const lane_width = 0.30;
   const layer_top_y = 1.32;
   const layer_bottom_y = 0.38;
@@ -300,6 +300,7 @@
     const operation = String(row.operation || "").toLowerCase();
     const colour = family_colour(row);
     const marker = {color:colour, line:{width:0}};
+    if (owner === "CPU" || owner === "COPY") marker.pattern = {shape:owner === "CPU" ? "." : "-",fgcolor:"rgba(255,255,255,.8)",bgcolor:colour,size:6,solidity:.25};
     if (owner === "PREMAT" || operation === "materialize") {
       marker.pattern = {
         shape:"/",
@@ -566,7 +567,10 @@
   }
 
   function current_y_range() {
-    if (processing_view.operations_payload?.metadata?.materialisation_device === "cpu_and_gpu") return [-0.20, 1.40];
+    if (processing_view.operations_payload?.metadata?.materialisation_device === "cpu_and_gpu") {
+      const workers = new Set((processing_view.operations_payload.cpu_tasks || []).map(row => row.worker_pid ?? "unknown")).size;
+      return [-0.55 - 0.30 * Math.max(0, workers-1), 1.40];
+    }
     return operations_card_maximized() ? maximized_y_range : normal_y_range;
   }
 
@@ -1064,6 +1068,7 @@
       ...(payload.cpu_tasks || []).filter(row => row.start_us !== null && row.end_us !== null && Number(row.end_us)>Number(row.start_us)).map(row => ({...row, owner:"CPU", operation:"cpu_prepare", layer:row.layer_index, kernel_name:"", evidence:row.cpu_matrix_id, family:row.family})),
       ...(payload.transfers || []).map(row => ({...row, owner:"COPY", operation:row.direction, kernel_name:"", evidence:row.upload_id || row.snapshot_id || "logical identity unknown"})),
     ] : [];
+    const workers = [...new Set(overlay.filter(row => row.owner === "CPU").map(row => row.worker_pid ?? "unknown"))];
     const groups = new Map();
     for (const row of [...intervals, ...overlay]) {
       const owner = ["MAIN", "PREMAT", "OTHER", "UNKNOWN", "CPU", "COPY"].includes(String(row.owner || ""))
@@ -1073,7 +1078,7 @@
       const label = semantic_label(row);
       const family = String(row.family || "").toUpperCase();
       const operation = String(row.operation || "misc").toLowerCase();
-      const key = `${owner}:${family}:${operation}:${label}`;
+      const key = `${owner}:${owner === "CPU" ? row.worker_pid ?? "unknown" : ""}:${family}:${operation}:${label}`;
       if (!groups.has(key)) groups.set(key, {owner, label, rows:[]});
       groups.get(key).rows.push(row);
     }
@@ -1095,7 +1100,7 @@
         visible:processing_view.operations_hidden_keys.has(state_key) ? false : true,
         x:group.rows.map(row => Math.max(0, Number(row.end_us) - Number(row.start_us)) / 1000.0),
         base:group.rows.map(row => Number(row.start_us) / 1000.0),
-        y:group.rows.map(() => lane_y[group.owner] ?? lane_y.UNKNOWN),
+        y:group.rows.map(row => group.owner === "CPU" ? lane_y.CPU - 0.30 * workers.indexOf(row.worker_pid ?? "unknown") : group.owner === "COPY" && row.direction === "D2H" ? 0.0 : lane_y[group.owner] ?? lane_y.UNKNOWN),
         width:lane_width,
         marker,
         meta:{
@@ -1113,7 +1118,7 @@
           row.kernel_name || "",
           Number(row.start_us) / 1000.0,
           Math.max(0, Number(row.end_us) - Number(row.start_us)) / 1000.0,
-          row.evidence ? processing_escape(`${row.evidence} · ${row.bytes ?? "unknown"} bytes · raw ${row.raw_start_ns ?? row.start_ns ?? "unknown"}–${row.raw_end_ns ?? row.end_ns ?? "unknown"} ns · clock uncertainty ${row.clock_uncertainty_ms ?? "unknown"} ms · left/right censored ${Boolean(row.left_censored)}/${Boolean(row.right_censored)}`) : "",
+          row.evidence ? processing_escape(`${row.evidence} · worker ${row.worker_pid ?? "unknown"} · ${row.bytes ?? "unknown"} bytes · raw ${row.raw_start_ns ?? row.start_ns ?? "unknown"}–${row.raw_end_ns ?? row.end_ns ?? "unknown"} ns · clock uncertainty ${row.clock_uncertainty_ms ?? "unknown"} ms · left/right censored ${Boolean(row.left_censored)}/${Boolean(row.right_censored)}`) : "",
         ]),
         hovertemplate:"%{customdata[0]} · Layer %{customdata[2]}<br>%{customdata[3]}<br>%{customdata[4]:.4f} ms capture time<br>Duration: %{customdata[5]:.4f} ms<br>%{customdata[6]}<extra></extra>",
       });
@@ -1121,7 +1126,8 @@
     traces.push(...contention_traces(payload), ...slowdown_outline_traces(payload));
 
     const guides = layer_guides(intervals);
-    const tick_owners = cpu_mode ? ["CPU", "COPY", "PREMAT", "MAIN"] : ["PREMAT", "MAIN"];
+    const tick_owners = cpu_mode ? [...(workers.length ? workers.map(pid => workers.length === 1 ? "CPU" : `CPU ${pid}`) : ["CPU"]), "COPY D2H", "COPY H2D", "PREMAT", "MAIN"] : ["PREMAT", "MAIN"];
+    const tick_values = cpu_mode ? [...(workers.length ? workers.map((pid,index) => lane_y.CPU - 0.30 * index) : [lane_y.CPU]), 0.0, 0.35, 0.70, 1.00] : tick_owners.map(owner => lane_y[owner]);
     const capture_ms = Number(payload.metadata?.capture_duration_ms || 0);
     const mount = by_id("processing_timeline_plot");
     const retained_range = retained_layer_range(mount, processing_view.run_id, capture_ms);
@@ -1137,7 +1143,7 @@
       xaxis:{title:"capture time (ms)", range:retained_range || (capture_ms > 0 ? [0, capture_ms] : undefined)},
       yaxis:{
         tickmode:"array",
-        tickvals:tick_owners.map(owner => lane_y[owner]),
+        tickvals:tick_values,
         ticktext:tick_owners,
         range:current_y_range(),
         automargin:true,

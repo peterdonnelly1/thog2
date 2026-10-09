@@ -83,6 +83,7 @@ class CpuPrematRuntime(PrematRuntime):
         super().__init__(**kwargs)
         self.trajectory = trajectory
         self.cpu_lock, self.event_lock = threading.RLock(), threading.Lock()
+        self.cpu_event_sequence = 0
         self.cpu_events = deque(maxlen=max(4096, trajectory.config.n_layer * 256))
         self.cpu_uploads, self.eval_leases = {}, {}
         self.cpu_provider = self.cpu_policy = self.cpu_snapshot = None
@@ -90,6 +91,8 @@ class CpuPrematRuntime(PrematRuntime):
         self.source_thread, self.source_paused, self.source_error = None, False, None
         self.upload_queue = queue.Queue(maxsize=max(16, trajectory.config.n_layer * 6))
         self.upload_thread, self.cpu_closed = None, False
+        self.completion_queue = queue.Queue(maxsize=max(32, trajectory.config.n_layer*12))
+        self.completion_thread = None
         self.cpu_phase = "original_forward"
         self.optimizer_step = self.micro_step = self.replay_sequence = 0
         self.cpu_cap = self.cpu_peak = self.pin_peak = 0
@@ -104,8 +107,11 @@ class CpuPrematRuntime(PrematRuntime):
         self.control_counts, self.control_ns = {}, {}
 
     def _cpu_record(self, event):
-        fields = {"schema_version": 5, "host_time_ns": time.perf_counter_ns(), "optimizer_step": self.optimizer_step, "micro_step": self.micro_step, "phase": self.cpu_phase, "replay_invocation": self.replay_sequence if self.cpu_phase == "checkpoint_recompute" else None, **event}
+        domain = "cpu" if str(event.get("event", "")).startswith(("cpu_task", "cpu_matrix", "cpu_batch", "cpu_worker")) else "cuda_copy" if event.get("direction") else "control"
+        fields = {"schema_version": 5, "execution_domain": domain, "materialisation_device": "cpu_and_gpu", "host_time_ns": time.perf_counter_ns(), "optimizer_step": self.optimizer_step, "micro_step": self.micro_step, "phase": self.cpu_phase, "replay_invocation": self.replay_sequence if self.cpu_phase == "checkpoint_recompute" else None, **event}
         with self.event_lock:
+            self.cpu_event_sequence += 1
+            fields["cpu_event_sequence"] = self.cpu_event_sequence
             self.cpu_events.append(fields)
 
     @contextmanager
@@ -252,9 +258,13 @@ class CpuPrematRuntime(PrematRuntime):
         return states
 
     def _wake(self):
-        with self.cpu_lock:
-            if self._active and not self.cpu_closed:
-                self._advance(trigger="cpu_notification")
+        try:
+            with self.cpu_lock:
+                if self._active and not self.cpu_closed:
+                    self._advance(trigger="cpu_notification")
+        except Exception as error:
+            self.source_error = f"CPU notification failed: {error}"
+            self._cpu_record({"event": "cpu_control_failed", "error": self.source_error})
 
     def layer_start(self, layer_index):
         with self.cpu_lock, self._control("layer_start"):
@@ -413,6 +423,7 @@ class CpuPrematRuntime(PrematRuntime):
                             self._stream.wait_event(gate)
                         upload.tensor = torch.empty_like(pinned, device=self._device)
                         timed = self.cpu_configuration["premat_cpu_transfer_timing"] == "predicted_gemm_start"
+                        timed = timed or self._enable_gpu_timing_diagnostic
                         start = torch.cuda.Event(enable_timing=timed)
                         start.record(self._stream)
                         upload.tensor.copy_(pinned, non_blocking=True)
@@ -421,6 +432,7 @@ class CpuPrematRuntime(PrematRuntime):
                     upload.metadata.update({"copy_submission_ns": time.perf_counter_ns(), "pin_preparation_ms": (time.perf_counter_ns() - started) / 1e6, "copy_start_event": start, "origin_event": self.origin_event, "origin_clock": self.clock})
                     self._cpu_record({**self._metadata(upload), "event": "upload_submitted", "direction": "H2D", "bytes": upload.nbytes})
                     self._sync_charge()
+                    self._queue_completion(upload.completion)
             except Exception as error:
                 with self.cpu_lock:
                     upload.failed = True
@@ -436,6 +448,33 @@ class CpuPrematRuntime(PrematRuntime):
                 self.upload_queue.task_done()
             self._wake()
 
+    def _queue_completion(self, event):
+        try:
+            self.completion_queue.put_nowait(event)
+        except queue.Full:
+            self._cpu_record({"event": "completion_notification_queue_full", "reason": "natural_reconsideration_remains_available"})
+            return
+        if self.completion_thread is None or not self.completion_thread.is_alive():
+            self.completion_thread = threading.Thread(target=self._completion_notifications, name="premat-copy-completions", daemon=True)
+            self.completion_thread.start()
+
+    def _completion_notifications(self):
+        while not self.cpu_closed:
+            try:
+                event = self.completion_queue.get(timeout=0.1)
+            except queue.Empty:
+                continue
+            try:
+                # Only this coordinator waits; readiness and Main Stream never wait for CPU uploads.
+                event.synchronize()
+                with self.cpu_lock:
+                    self._refresh_available()
+                self._wake()
+            except Exception as error:
+                self._cpu_record({"event": "completion_notification_failed", "error": str(error)})
+            finally:
+                self.completion_queue.task_done()
+
     def _refresh_available(self):
         self._collect_predictions()
         for identity, upload in tuple(self.cpu_uploads.items()):
@@ -445,8 +484,9 @@ class CpuPrematRuntime(PrematRuntime):
                 if "copy_complete_observed_ns" not in upload.metadata:
                     upload.metadata["copy_complete_observed_ns"] = time.perf_counter_ns()
                     self._cpu_record({**self._metadata(upload), "event": "upload_complete_observed", "arrival_time_basis": "host_completion_observation_upper_bound"})
-                    if self.cpu_configuration["premat_cpu_transfer_timing"] == "predicted_gemm_start":
-                        self.cpu_predictor.uploads.append(upload.metadata["copy_start_event"].elapsed_time(upload.completion))
+                    if self.cpu_configuration["premat_cpu_transfer_timing"] == "predicted_gemm_start" or self._enable_gpu_timing_diagnostic:
+                        upload.metadata["h2d_copy_ms"] = upload.metadata["copy_start_event"].elapsed_time(upload.completion)
+                        self.cpu_predictor.uploads.append(upload.metadata["h2d_copy_ms"])
                         origin, clock = upload.metadata.get("origin_event"), upload.metadata.get("origin_clock", {})
                         if origin is not None and clock.get("uncertainty_ms") is not None and clock["uncertainty_ms"] <= 5 and origin.query():
                             arrival = clock["host_origin_ns"] + int(origin.elapsed_time(upload.completion) * 1e6)
@@ -502,13 +542,13 @@ class CpuPrematRuntime(PrematRuntime):
                 candidate.final_outcome, candidate.state = "FULL HIT", CandidateState.CONSUMING
                 self._aggregate["available_hits"] += 1
                 self._aggregate["fully_hidden_hits"] += 1
-                metadata.update({"materialisation_device": "cpu", "final_outcome": "FULL HIT"})
+                metadata.update({"materialisation_device": "cpu_and_gpu", "consumed_source": "cpu", "readiness": "ready", "final_outcome": "FULL HIT"})
             else:
                 if upload is not None:
                     upload.late = True
                     self._cpu_record({**metadata, "upload_id": upload.identity, "event": "late_copy", "bytes": upload.nbytes})
                 reason = "not_targeted" if not targeted else "shadow_mode" if self._shadow_mode else "cpu_snapshot_download_failed" if self.source_error else "cpu_upload_failed" if upload is not None and upload.failed else "upload_not_complete" if upload is not None else candidate.admission_reason if candidate.admission_reason not in ("admitted", "not_checked") else current.get("fallback_reason", "cpu_preparation_not_ready")
-                metadata.update({"materialisation_device": "gpu", "final_outcome": "COMPLETE MISS" if targeted else "NOT TARGETED", "fallback_reason": reason})
+                metadata.update({"materialisation_device": "cpu_and_gpu", "consumed_source": "gpu", "readiness": "not_ready" if targeted else "not_targeted", "final_outcome": "COMPLETE MISS" if targeted else "NOT TARGETED", "fallback_reason": reason})
                 candidate.final_outcome = metadata["final_outcome"]
                 candidate.owner, candidate.state, candidate.tensor = "main", CandidateState.CONSUMING, None
                 self._aggregate["main_stream_misses"] += int(targeted)
@@ -524,7 +564,7 @@ class CpuPrematRuntime(PrematRuntime):
         output = super().materialize_for_consumption(family, layer_index)
         if self.cpu_phase == "checkpoint_recompute":
             targeted = self._target_families is None or family in self._target_families
-            self._cpu_record({"event": "matrix_use", "matrix_use_id": f"{self.optimizer_step}:{self.micro_step}:replay:{self.replay_sequence}:{layer_index}:{family}", "snapshot_id": None if self.cpu_snapshot is None else self.cpu_snapshot.snapshot_id, "family": family, "layer_index": layer_index, "materialisation_device": "gpu", "final_outcome": "COMPLETE MISS" if targeted else "NOT TARGETED", "fallback_reason": "checkpoint_replay_disabled", "targeted": targeted})
+            self._cpu_record({"event": "matrix_use", "matrix_use_id": f"{self.optimizer_step}:{self.micro_step}:replay:{self.replay_sequence}:{layer_index}:{family}", "snapshot_id": None if self.cpu_snapshot is None else self.cpu_snapshot.snapshot_id, "family": family, "layer_index": layer_index, "materialisation_device": "cpu_and_gpu", "consumed_source": "gpu", "final_outcome": "COMPLETE MISS" if targeted else "NOT TARGETED", "fallback_reason": "checkpoint_replay_disabled", "targeted": targeted})
         return output
 
     def consumed(self, family, layer_index):
@@ -544,6 +584,7 @@ class CpuPrematRuntime(PrematRuntime):
                 upload.retirement = torch.cuda.Event()
                 upload.retirement.record(stream)
                 upload.metadata["release_submitted_ns"] = time.perf_counter_ns()
+                self._queue_completion(upload.retirement)
 
     def _record(self, event, **kwargs):
         payload = super()._record(event, **kwargs)
@@ -619,7 +660,9 @@ class CpuPrematRuntime(PrematRuntime):
         if self._active and self.cpu_configuration["premat_cpu_transfer_timing"] == "predicted_gemm_start":
             event = torch.cuda.Event(enable_timing=True)
             event.record(torch.cuda.current_stream(device=self._device))
-            identity = {"optimizer_step": self.optimizer_step, "micro_step": self.micro_step, "phase": self.cpu_phase, "replay_invocation": self.replay_sequence if self.cpu_phase == "checkpoint_recompute" else None, "pass_sequence": self._pass_sequence}
+            candidate = self._candidates.get((int(layer_index), str(family)))
+            predicted = None if candidate is None else getattr(candidate, "cpu_metadata", {}).get("predicted_gemm_start_ns")
+            identity = {"matrix_use_id": None if candidate is None else self._use_id(candidate), "predicted_gemm_start_ns": predicted, "optimizer_step": self.optimizer_step, "micro_step": self.micro_step, "phase": self.cpu_phase, "replay_invocation": self.replay_sequence if self.cpu_phase == "checkpoint_recompute" else None, "pass_sequence": self._pass_sequence}
             self.prediction_events.append((event, self.origin_event, self.clock, self._prediction_key(family, layer_index), identity))
 
     def _collect_predictions(self):
@@ -630,7 +673,9 @@ class CpuPrematRuntime(PrematRuntime):
                 continue
             offset = origin.elapsed_time(event)
             self.cpu_predictor.observe(context, offset, clock["uncertainty_ms"])
-            self._cpu_record({**identity, "event": "gemm_start_observed", "phase": context[0], "family": context[2], "layer_index": context[1], "actual_gemm_start_ns": clock["host_origin_ns"] + int(offset * 1e6), "clock_uncertainty_ms": clock["uncertainty_ms"]})
+            actual = clock["host_origin_ns"] + int(offset * 1e6) if clock["uncertainty_ms"] <= 5 else None
+            predicted = identity.get("predicted_gemm_start_ns")
+            self._cpu_record({**identity, "event": "gemm_start_observed", "phase": context[0], "family": context[2], "layer_index": context[1], "actual_gemm_start_ns": actual, "prediction_error_ms": None if actual is None or predicted is None else (actual-predicted)/1e6, "gpu_event_offset_ms": offset, "clock_uncertainty_ms": clock["uncertainty_ms"]})
 
     def report(self):
         with self.cpu_lock:
@@ -643,8 +688,8 @@ class CpuPrematRuntime(PrematRuntime):
             for upload in self.cpu_uploads.values():
                 key = "autograd_retained_bytes" if upload.consumed else "pending_upload_bytes" if upload.completion is None else "available_bytes" if upload.completion.query() else "copying_bytes"
                 states[key] += upload.nbytes
-            runtime = {**provider, **states, **self._memory_states(), "pin_preparation_peak_bytes": self.pin_in_progress_peak, "staging_bytes": self._retained_bytes, "staging_peak_bytes": self.cpu_peak, "staging_limit_bytes": self.cpu_cap, "pinned_upload_bytes": sum(upload.nbytes for upload in self.cpu_uploads.values() if upload.pinned is not None), "pinned_upload_peak_bytes": self.pin_peak, "pinned_snapshot_bytes": sum(job["host"].numel() * job["host"].element_size() for job in self.cpu_sources if job["host"] is not None), "control_path_counts": dict(self.control_counts), "control_path_host_ms": {name: value / 1e6 for name, value in self.control_ns.items()}, "prediction_context_count": len(self.cpu_predictor.samples), "prediction_event_count": len(self.prediction_events), "prediction_timer_count": int(self.prediction_timer is not None), "snapshot_download_error": self.source_error, "gpu_co_residency": "N/A: CPU materialisation"}
-            report.update({"version": 5, "schema_version": 5, "materialisation_device": "cpu_and_gpu", "cpu_configuration": self.cpu_configuration, "phase": self.cpu_phase, "cpu_runtime": runtime, "cpu_lifecycle": events})
+            runtime = {**provider, **states, **self._memory_states(), "pin_preparation_peak_bytes": self.pin_in_progress_peak, "staging_bytes": self._retained_bytes, "staging_peak_bytes": self.cpu_peak, "staging_limit_bytes": self.cpu_cap, "pinned_upload_bytes": sum(upload.nbytes for upload in self.cpu_uploads.values() if upload.pinned is not None), "pinned_upload_peak_bytes": self.pin_peak, "control_path_counts": dict(self.control_counts), "control_path_host_ms": {name: value / 1e6 for name, value in self.control_ns.items()}, "prediction_context_count": len(self.cpu_predictor.samples), "prediction_event_count": len(self.prediction_events), "prediction_timer_count": int(self.prediction_timer is not None), "snapshot_download_error": self.source_error, "gpu_co_residency": "N/A: CPU materialisation"}
+            report.update({"version": 5, "schema_version": 5, "materialisation_device": "cpu_and_gpu", "cpu_configuration": self.cpu_configuration, "phase": self.cpu_phase, "cpu_runtime": runtime, "cpu_lifecycle": events, "cpu_lifecycle_dropped_events": max(0, self.cpu_event_sequence-len(events))})
             return report
 
     def close(self):

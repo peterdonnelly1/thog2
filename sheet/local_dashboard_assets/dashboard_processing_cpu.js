@@ -24,7 +24,10 @@
       ["Eligible matrix uses",s.eligible_matrix_uses],["Full hits",s.full_hits],["Complete misses",s.complete_misses],["Not targeted",s.not_targeted_uses],
       ["Unique CPU matrices",s.unique_cpu_matrices],["CPU task service",value(s.cpu_service_ms," ms")],
       ["H2D / D2H busy",value(s.h2d_busy_us," μs")+" / "+value(s.d2h_busy_us," μs")],
-      ["CUDA copy coverage",s.cuda_copy_coverage||"unknown"],["Late uploads",s.late_upload_count],
+      ["CUDA copy coverage",s.cuda_copy_coverage||"unknown"],["Late uploads / bytes",`${s.late_upload_count??"unknown"} / ${s.late_upload_bytes??"unknown"}`],
+      ["H2D bytes / copy versus Main overlap",`${s.h2d_bytes??"unknown"} / ${value(s.copy_main_overlap_us," μs")}`],
+      ["CPU cache reuses",s.cpu_cache_reuse_count],["Phase and family outcomes",JSON.stringify(s.phase_family||{})],
+      ["Qualified / unavailable predictions",`${s.prediction_qualified_uses??"unknown"} / ${s.prediction_unavailable_uses??"unknown"}`],["Prediction / arrival errors (ms)",JSON.stringify({prediction:s.prediction_error_ms,arrival:s.arrival_error_ms})],["Release lag (ms)",JSON.stringify(s.release_lag_ms||[])],["Older lifecycle records omitted",s.lifecycle_dropped_events],
       ["CPU cache / peak bytes",`${m.cpu_cache_bytes??"unknown"} / ${m.cpu_cache_peak_bytes??"unknown"}`],
       ["GPU staging / peak / limit bytes",`${m.staging_bytes??"unknown"} / ${m.staging_peak_bytes??"unknown"} / ${m.staging_limit_bytes??"unknown"}`],
       ["Pending / copying / available / autograd bytes",`${m.pending_upload_bytes??"unknown"} / ${m.copying_bytes??"unknown"} / ${m.available_bytes??"unknown"} / ${m.autograd_retained_bytes??"unknown"}`],
@@ -63,6 +66,15 @@
       if(origin&&boundaries.length)traces.push({type:"scatter",mode:"markers",name:"COPY / readiness boundaries (host)",x:boundaries.map(row=>(row.host_time_ns-origin)/1e6),y:boundaries.map(()=>lane-0.23),marker:{symbol:"line-ns",size:10,color:"#427ba8"},hovertext:boundaries.map(row=>processing_escape(`${row.event} · ${row.upload_id||row.matrix_use_id||"unknown identity"} · host boundary; DMA duration requires CUDA evidence`)),hoverinfo:"text"});
     });
     return traces;
+  };
+  const old_plot=processing_plot;
+  processing_plot=async function(mount_id,traces,layout){
+    const payload=processing_view.operations_payload;
+    if(mount_id==="processing_resource_plot"&&cpu(payload)){
+      const bands=(payload.transfers||[]).map(row=>({type:"rect",xref:"x",yref:"paper",x0:row.start_us/1000,x1:row.end_us/1000,y0:0,y1:1,line:{width:0},fillcolor:row.direction==="H2D"?"rgba(50,110,180,.15)":"rgba(190,120,40,.15)",layer:"below",name:row.direction+" DMA coverage",showlegend:true,legendgroup:"COPY_"+row.direction}));
+      layout={...layout,shapes:[...(layout.shapes||[]),...bands]};
+    }
+    return old_plot(mount_id,traces,layout);
   };
   window.processing_cpu_test_hooks=Object.freeze({summary,cpu});
 })();

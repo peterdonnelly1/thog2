@@ -67,7 +67,7 @@ def cpu_task_rows(events, capture_metadata, gpu_start, gpu_end):
     tasks = {}
     for event in events:
         identity = event.get('cpu_matrix_id')
-        if not identity or event.get('event') not in ('cpu_task_start','cpu_matrix_ready'):
+        if not identity or (event.get('event') not in ('cpu_task_start','cpu_matrix_ready') and (event.get('start_ns') is None or event.get('end_ns') is None)):
             continue
         tasks.setdefault(identity, {}).update(event)
     duration_ns = gpu_end-gpu_start
@@ -86,7 +86,9 @@ def cpu_task_rows(events, capture_metadata, gpu_start, gpu_end):
             'cpu_service_us':None if start is None or end is None else (end-start)/1000,
             'precursor':bool(before), 'outside_capture':bool(before or after),
             'left_censored':bool(known and start < origin < end),
-            'right_censored':bool(known and start < origin+duration_ns < end),
+            'right_censored':bool(known and start < origin+duration_ns < end) if end is not None else True,
+            'within_capture':bool(known and not before and not after),
+            'phase':'cpu_preparation',
         })
     return rows
 
@@ -121,7 +123,32 @@ def extend_processing(data, output_directory, prefix, report, copies, copies_sup
         copy['overlaps_main']=bool(overlap)
     for row in data.get('stream_resources',()):
         row['copy_activity_present']=any(copy['end_us']>float(row.get('start_us',0)) and copy['start_us']<float(row.get('end_us',0)) for copy in copies)
+    for row in data.get('main_idle_intervals',()):
+        a,b=float(row.get('start_us',0)),float(row.get('end_us',0))
+        row['kernel_idle']=True
+        row['copy_busy_us']=union_duration((max(a,item['start_us']),min(b,item['end_us'])) for item in copies if min(b,item['end_us'])>max(a,item['start_us']))
+        row['copy_contaminated']=bool(row['copy_busy_us']) if copies_supported else None
     runtime=(report or {}).get('cpu_runtime',{})
+    phase_family={}
+    for event in uses:
+        key=str(event.get('phase','unknown'))+':'+str(event.get('family','unknown'))
+        item=phase_family.setdefault(key,{'eligible_uses':0,'full_hits':0,'complete_misses':0,'not_targeted':0,'fallback_reasons':{}})
+        if not event.get('targeted',True):
+            item['not_targeted']+=1
+        else:
+            item['eligible_uses']+=1
+            if event.get('final_outcome')=='FULL HIT':item['full_hits']+=1
+            if event.get('final_outcome')=='COMPLETE MISS':
+                item['complete_misses']+=1
+                reason=event.get('fallback_reason','unknown')
+                item['fallback_reasons'][reason]=item['fallback_reasons'].get(reason,0)+1
+    late={event.get('upload_id'):event for event in relevant if event.get('event')=='late_copy'}
+    released=[event for event in relevant if event.get('event')=='gpu_storage_released']
+    release_lags=[(event['host_time_ns']-event['release_submitted_ns'])/1e6 for event in released if event.get('release_submitted_ns') is not None]
+    predictions=[event for event in uses if event.get('prediction_available') is not None]
+    errors=[event.get('prediction_error_ms') for event in relevant if event.get('prediction_error_ms') is not None]
+    arrival_errors=[event.get('availability_error_ms') for event in relevant if event.get('availability_error_ms') is not None]
+
     data.update(cpu_tasks=tasks, transfers=copies, cpu_lifecycle=relevant, cpu_memory=memory, cpu_runtime=runtime,
                 cpu_configuration=(report or {}).get('cpu_configuration',metadata.get('run',{}).get('config',{})))
     data['cpu_summary']={
@@ -136,14 +163,28 @@ def extend_processing(data, output_directory, prefix, report, copies, copies_sup
         'h2d_busy_us':union_duration((row['start_us'],row['end_us']) for row in copies if row['direction']=='H2D') if copies_supported else None,
         'd2h_busy_us':union_duration((row['start_us'],row['end_us']) for row in copies if row['direction']=='D2H') if copies_supported else None,
         'late_upload_count':len({event.get('upload_id') for event in relevant if event.get('event')=='late_copy'}),
+        'late_upload_bytes':sum(event.get('bytes') or 0 for event in late.values()),
+        'phase_family':phase_family,'cpu_cache_reuse_count':sum(max(0,count-1) for count in reused.values()),
+        'h2d_bytes':sum(event.get('bytes') or 0 for event in copies if event['direction']=='H2D') if copies_supported else None,
+        'd2h_bytes':sum(event.get('bytes') or 0 for event in copies if event['direction']=='D2H') if copies_supported else None,
+        'copy_main_overlap_us':union_duration((max(a,item['start_us']),min(b,item['end_us'])) for a,b in main for item in copies if min(b,item['end_us'])>max(a,item['start_us'])) if copies_supported else None,
+        'release_lag_ms':release_lags,'prediction_qualified_uses':sum(bool(event['prediction_available']) for event in predictions),
+        'prediction_unavailable_uses':sum(not event['prediction_available'] for event in predictions),
+        'prediction_error_ms':errors,'arrival_error_ms':arrival_errors,
+        'lifecycle_dropped_events':(report or {}).get('cpu_lifecycle_dropped_events',0),
         'gpu_co_residency':'N/A: CPU materialisation', 'accounting':'CPU and COPY are overlays; device metrics and exclusive update phase totals are unchanged',
     }
     metadata.update(schema_version=5, materialisation_device='cpu_and_gpu', gpu_co_residency='N/A: CPU materialisation', copy_coverage=data['cpu_summary']['cuda_copy_coverage'])
+    metadata.update(cpu_configuration=data['cpu_configuration'],cpu_runtime=runtime,
+                    numerical_policies=[event['numerical_policy'] for event in relevant if event.get('event')=='cpu_pass_begin' and event.get('numerical_policy')],
+                    clock_alignment={'host_nvtx_lower_ns':capture.get('host_nvtx_lower_ns'),'host_nvtx_upper_ns':capture.get('host_nvtx_upper_ns'),'gpu_capture_start_ns':capture_start,'gpu_capture_end_ns':capture_end,'qualified':host_clock(capture,capture_start)[0] is not None})
+    if report and report.get('cpu_lifecycle_dropped_events'):
+        metadata['warnings'].append('Bounded CPU lifecycle history omitted '+str(report['cpu_lifecycle_dropped_events'])+' older records; retain gap metadata when interpreting observed totals')
     if report is None:
         metadata['warnings'].append('CPU lifecycle evidence is missing; CPU work, matrix-use and hit totals are unknown')
     datasets={'transfers':copies,'cpu_tasks':tasks,'cpu_memory':memory,'cpu_lifecycle':relevant}
     for key,rows in datasets.items():
-        filename=f'{prefix}processing_{key}.csv'
+        filename=f'{prefix}processing_memory.csv' if key=='cpu_memory' else f'{prefix}processing_{key}.csv'
         metadata['files'][key]=filename
         export_rows(Path(output_directory)/filename,rows,('activity_id',) if key=='transfers' else ('event',))
     data['premat_compatibility']={'available':False,'reason':'N/A: CPU materialisation','rows':[]}
