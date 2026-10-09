@@ -50,8 +50,9 @@ snapshot.events.push({event:"pass_end",sequence:sequence++});
    await page.locator('#processing_timeline_card .maximize-button').click();await page.waitForTimeout(250);
    assert.ok(await page.locator("#processing_timeline_card").evaluate(n=>n.classList.contains("maximized")));
    await page.locator('#processing_timeline_card .maximize-button').click();
+   await page.waitForFunction(()=>!by_id("processing_timeline_card").classList.contains("maximized"));
    for(const key of ["transfers","cpu_tasks","cpu_memory","cpu_lifecycle"]){
-    const link=page.locator("#processing_download_"+key);assert.ok(await link.isVisible());
+    const link=page.locator("#processing_download_"+key);await link.waitFor({state:"visible"});assert.ok(await link.isVisible(),key);
     const download=page.waitForEvent("download");await link.click();assert.ok((await download).url().includes("cpu_fixture"));
    }
    const recap=await page.evaluate(s=>{

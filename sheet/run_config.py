@@ -1775,7 +1775,7 @@ class OwtRunConfig:
                 from .premat import normalize_premat_target_matrices
                 numbers = normalize_premat_target_matrices(selected)
             automatic = 2 * sum(families[number] for number in numbers) * self.n_embd ** 2 * (4 if generated == "float32" else 2)
-            values.update({"premat_cpu_threads_per_worker_requested": self.premat_cpu_threads_per_worker, "premat_cpu_threads_per_worker_resolved": threads, "premat_cpu_workers_resolved": self.premat_cpu_workers, "premat_cpu_affinity_thread_budget": budget, "premat_cpu_staging_limit_bytes_resolved": int(self.premat_cpu_staging_limit_mb * 1024 ** 2) if self.premat_cpu_staging_limit_mb else automatic, "premat_generated_dtype_resolved": generated, "premat_gpu_timing_active": False, "premat_cpu_all_layer_count": self.n_layer, "premat_target_offset_active": self.premat_cpu_transfer_timing in ("as_the_code_flies", "previous_gemm_leading_edge"), "premat_schema_version": 5})
+            values.update({"premat_cpu_threads_per_worker_requested": self.premat_cpu_threads_per_worker, "premat_cpu_threads_per_worker_resolved": threads, "premat_cpu_workers_resolved": self.premat_cpu_workers, "premat_cpu_affinity_thread_budget": budget, "premat_cpu_staging_limit_bytes_resolved": int(self.premat_cpu_staging_limit_mb * 1024 ** 2) if self.premat_cpu_staging_limit_mb else automatic, "premat_generated_dtype_resolved": generated, "premat_gpu_timing_active": False, "premat_cpu_all_layer_count": self.n_layer, "premat_target_offset_active": self.premat_cpu_transfer_timing in ("as_the_code_flies", "previous_gemm_leading_edge"), "premat_cpu_preparation_target_offset_active": self.premat_cpu_preparation == "scheduled", "premat_schema_version": 5})
         return values
 
 

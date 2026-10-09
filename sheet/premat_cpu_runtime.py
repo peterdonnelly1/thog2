@@ -293,6 +293,11 @@ class CpuPrematRuntime(PrematRuntime):
             if self.cpu_provider is None:
                 return
             timing = self.cpu_configuration["premat_cpu_transfer_timing"]
+            if self.cpu_configuration["premat_cpu_preparation"] == "scheduled":
+                for target_layer in self._target_layer_indices():
+                    for family in self._families():
+                        if self._target_families is None or family in self._target_families:
+                            self.cpu_provider.request(family, target_layer)
             if timing == "previous_gemm_leading_edge":
                 if eligible_keys is not None:
                     for key in eligible_keys:
@@ -312,8 +317,6 @@ class CpuPrematRuntime(PrematRuntime):
                 candidate = self._next_premat_candidate(eligible_keys=keys)
                 if candidate is None:
                     return
-                if self.cpu_configuration["premat_cpu_preparation"] == "scheduled":
-                    self.cpu_provider.request(candidate.family, candidate.layer_index)
                 matrix, metadata = self.cpu_provider.lookup(candidate.family, candidate.layer_index, self.cpu_policy)
                 candidate.cpu_metadata = {**metadata, "snapshot_id": self.cpu_snapshot.snapshot_id, "numerical_policy": self.cpu_policy.policy_id, "phase": self.cpu_phase, "replay_invocation": self.replay_sequence if self.cpu_phase == "checkpoint_recompute" else None}
                 if matrix is None:
@@ -688,7 +691,7 @@ class CpuPrematRuntime(PrematRuntime):
             for upload in self.cpu_uploads.values():
                 key = "autograd_retained_bytes" if upload.consumed else "pending_upload_bytes" if upload.completion is None else "available_bytes" if upload.completion.query() else "copying_bytes"
                 states[key] += upload.nbytes
-            runtime = {**provider, **states, **self._memory_states(), "pin_preparation_peak_bytes": self.pin_in_progress_peak, "staging_bytes": self._retained_bytes, "staging_peak_bytes": self.cpu_peak, "staging_limit_bytes": self.cpu_cap, "pinned_upload_bytes": sum(upload.nbytes for upload in self.cpu_uploads.values() if upload.pinned is not None), "pinned_upload_peak_bytes": self.pin_peak, "control_path_counts": dict(self.control_counts), "control_path_host_ms": {name: value / 1e6 for name, value in self.control_ns.items()}, "prediction_context_count": len(self.cpu_predictor.samples), "prediction_event_count": len(self.prediction_events), "prediction_timer_count": int(self.prediction_timer is not None), "snapshot_download_error": self.source_error, "gpu_co_residency": "N/A: CPU materialisation"}
+            runtime = {**provider, **states, **self._memory_states(), "pin_preparation_peak_bytes": self.pin_in_progress_peak, "staging_bytes": self._retained_bytes, "staging_peak_bytes": self.cpu_peak, "staging_limit_bytes": self.cpu_cap, "pinned_upload_bytes": sum(upload.nbytes for upload in self.cpu_uploads.values() if upload.pinned is not None), "pinned_upload_peak_bytes": self.pin_peak, "control_path_counts": dict(self.control_counts), "control_path_host_ms": {name: value / 1e6 for name, value in self.control_ns.items()}, "prediction_context_count": len(self.cpu_predictor.samples), "prediction_event_count": len(self.prediction_events), "prediction_timer_count": int(self.prediction_timer is not None), "snapshot_download_error": self.source_error, "gpu_co_residency": "N/A: CPU materialisation", "target_offset_active_for_upload": self.cpu_configuration["premat_cpu_transfer_timing"] in ("as_the_code_flies", "previous_gemm_leading_edge"), "target_offset_active_for_preparation": self.cpu_configuration["premat_cpu_preparation"] == "scheduled"}
             report.update({"version": 5, "schema_version": 5, "materialisation_device": "cpu_and_gpu", "cpu_configuration": self.cpu_configuration, "phase": self.cpu_phase, "cpu_runtime": runtime, "cpu_lifecycle": events, "cpu_lifecycle_dropped_events": max(0, self.cpu_event_sequence-len(events))})
             return report
 

@@ -1318,7 +1318,7 @@ def maybe_reexec_under_nsys(arguments: Sequence[str], *, entrypoint: Path) -> Op
         processing_explicit = _argv_value(arguments, "--premat_processing_logging_capture_update")
         if full_explicit is not None and processing_explicit is not None and full_explicit != int(processing_explicit):
             raise ValueError("CPU whole-update and Processing capture update selectors must agree")
-        capture_update = int(full_explicit or processing_explicit or _argv_value(arguments, "--max_iters", "100"))
+        capture_update = int(full_explicit or processing_explicit or _argv_value(arguments, "--max-iters", "100"))
         if capture_update < 1:
             raise ValueError("CPU whole-update capture selector must be positive")
         rewritten_arguments = rewrite_processing_cli_for_core([*arguments, "--premat_processing_logging_capture_update", str(capture_update), "--premat_instra__full_step_timing_capture_and_chart_capture", "step", str(capture_update)])

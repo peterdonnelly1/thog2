@@ -39,7 +39,7 @@ class Destination(_FakeTensor):
         return self
 
 
-def setup_runtime(monkeypatch, *, target_layer=0, cap=0, transfer="as_the_code_flies", shadow=False):
+def setup_runtime(monkeypatch, *, target_layer=0, cap=0, transfer="as_the_code_flies", shadow=False, preparation="eager"):
     cuda, trajectory = _FakeCuda(), tiny_trajectory()
     cuda.install(monkeypatch)
     def synchronize(event):
@@ -60,7 +60,7 @@ def setup_runtime(monkeypatch, *, target_layer=0, cap=0, transfer="as_the_code_f
     def attach(family, layer, tensor, *, binding_context):
         bindings.append(binding_context)
         return tensor
-    runtime = CpuPrematRuntime(trajectory=trajectory, cpu_configuration={**CPU_DEFAULTS, "premat_materialisation_device": "cpu_and_gpu", "premat_cpu_staging_limit_mb": cap, "premat_cpu_transfer_timing": transfer}, materialize=materialize, attach=attach, n_embd=8, n_head=2, attention_mode="fused", target_matrix=2, stay_below_current_peak=False, gpu_memory_buffer_gb=0, target_layer=target_layer, weight_matrix_target_order="r_to_l", cuda_stream_priority="normal", diagnostic_layer_delay_ms=0, enable_gpu_timing_diagnostic=False, logging_enabled=True, shadow_mode=shadow)
+    runtime = CpuPrematRuntime(trajectory=trajectory, cpu_configuration={**CPU_DEFAULTS, "premat_materialisation_device": "cpu_and_gpu", "premat_cpu_staging_limit_mb": cap, "premat_cpu_transfer_timing": transfer, "premat_cpu_preparation": preparation}, materialize=materialize, attach=attach, n_embd=8, n_head=2, attention_mode="fused", target_matrix=2, stay_below_current_peak=False, gpu_memory_buffer_gb=0, target_layer=target_layer, weight_matrix_target_order="r_to_l", cuda_stream_priority="normal", diagnostic_layer_delay_ms=0, enable_gpu_timing_diagnostic=False, logging_enabled=True, shadow_mode=shadow)
     runtime.begin(tuple(range(4)), reference=_FakeTensor())
     return runtime, cuda, calls, bindings
 
@@ -194,4 +194,10 @@ def test_only_source_mutation_guard_adds_main_stream_dependency(monkeypatch):
     assert cuda.main_stream.waited_events == [event]
     runtime.end()
     runtime.close()
+
+def test_scheduled_preparation_uses_target_resolver_independently_of_soonest_upload(monkeypatch):
+    runtime,_,_,_=setup_runtime(monkeypatch,target_layer=2,transfer="as_soon_as_ready",preparation="scheduled",cap=0.00001)
+    runtime.layer_start(0)
+    assert runtime.cpu_provider.requests and all(layer==2 for family,layer in runtime.cpu_provider.requests)
+    runtime.end();runtime.close()
 # ^^^ THOG

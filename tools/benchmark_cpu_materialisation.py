@@ -64,12 +64,32 @@ def memory(runtime):
     return {"processes":rows,"total_pss_bytes":sum(row["pss_bytes"] for row in rows) if rows and all(row["pss_bytes"] is not None for row in rows) else None,"accounting":"RSS is reported per process; shared pages are not summed as unique memory. PSS is summed only when available."}
 
 
-def run(options,mode,repeat):
+def training_config(options,mode):
     cpu=mode=="cpu_and_gpu"
     kwargs={}
     if cpu:
         kwargs={"premat_materialisation_device":mode,"premat_cpu_workers":options.workers,"premat_cpu_threads_per_worker":options.threads,"premat_cpu_preparation":options.preparation,"premat_cpu_layer_batch_size":options.layer_batch,"premat_cpu_transfer_timing":options.transfer,"premat_cpu_transfer_lead_ms":options.lead_ms,"premat_cpu_staging_limit_mb":options.staging_mb,"premat_cpu_checkpoint_replay":options.replay}
-    config=TrainingConfig(model_type="thog2_sheet",geometry_preset="depth",basis_family="chebyshev",block_size=options.context,vocab_size=128,n_layer=options.layers,n_embd=options.width,n_head=options.heads,depth_order=options.depth_order,base_row_order=1,batch_size=options.batch,gradient_accumulation_steps=options.accumulation,checkpoint_segment_size=options.checkpoint,max_updates=options.warmup+options.updates,learning_rate=1e-3,min_learning_rate=1e-3,decay_learning_rate=False,decay_updates=options.warmup+options.updates,weight_decay=0,grad_clip=0,dropout=0.1,eval_interval=0,checkpoint_interval=0,device=options.device,dtype=options.dtype,model_seed=171,data_seed=272,premat="disabled" if mode=="off" else "enabled",premat_gpu_memory_buffer_gb=0,premat_headroom_stay_below_current_peak=False,premat_headroom_stay_within_global_buffer=True,premat_logging=options.logging,premat_instra="disabled",premat_processing_logging="disabled",nonfinite_update_policy="raise",**kwargs)
+    return TrainingConfig(model_type="thog2_sheet",geometry_preset="depth",basis_family="chebyshev",block_size=options.context,vocab_size=128,n_layer=options.layers,n_embd=options.width,n_head=options.heads,depth_order=options.depth_order,base_row_order=1,batch_size=options.batch,gradient_accumulation_steps=options.accumulation,checkpoint_segment_size=options.checkpoint,max_updates=options.warmup+options.updates,learning_rate=1e-3,min_learning_rate=1e-3,decay_learning_rate=False,decay_updates=options.warmup+options.updates,weight_decay=0,grad_clip=0,dropout=0.1,eval_interval=0,checkpoint_interval=0,device=options.device,dtype=options.dtype,model_seed=171,data_seed=272,premat="disabled" if mode=="off" else "enabled",premat_gpu_memory_buffer_gb=0,premat_headroom_stay_below_current_peak=False,premat_headroom_stay_within_global_buffer=True,premat_logging=options.logging,premat_instra="disabled",premat_processing_logging="disabled",nonfinite_update_policy="raise",**kwargs)
+
+
+def optimizer_values(trainer):
+    names={id(parameter):name for name,parameter in trainer.raw_model.named_parameters()}
+    result={}
+    def collect(prefix,value):
+        if torch.is_tensor(value):result[prefix]=value.detach().cpu().clone()
+        elif isinstance(value,dict):
+            for key,item in value.items():collect(prefix+"."+str(key),item)
+        elif isinstance(value,(int,float,bool)):result[prefix]=torch.tensor(value,dtype=torch.float64)
+        elif isinstance(value,(list,tuple)):
+            for index,item in enumerate(value):collect(prefix+"."+str(index),item)
+        else:raise TypeError("Unqualified optimizer-state value at "+prefix+": "+type(value).__name__)
+    for parameter,state in trainer.optimizer.state.items():collect(names[id(parameter)],state)
+    return result
+
+
+def run(options,mode,repeat):
+    cpu=mode=="cpu_and_gpu"
+    config=training_config(options,mode)
     tokens=torch.arange(max(65536,options.context*16),dtype=torch.long).remainder(128)
     trainer=SharedTrainer(config,tokens,tokens)
     runtime=getattr(trainer.raw_model,"_premat_runtime",None)
@@ -100,7 +120,7 @@ def run(options,mode,repeat):
         values={name:parameter.detach().cpu().clone() for name,parameter in trainer.raw_model.named_parameters()}
         gradients={name:parameter.grad.detach().cpu().clone() for name,parameter in trainer.raw_model.named_parameters() if parameter.grad is not None}
         payload={"mode":mode,"repeat":repeat,"completed_updates":trainer.state.completed_updates,"losses":losses,"elapsed_seconds":elapsed,"milliseconds_per_update":elapsed*1000/options.updates,"tokens_per_second":options.updates*options.batch*options.context*options.accumulation/elapsed,"gpu_peak_allocated_bytes":peak_allocated,"gpu_peak_reserved_bytes":peak_reserved,"cpu_memory_before":before,"cpu_memory_after":after,"runtime":report}
-        return payload,values,gradients
+        return payload,values,gradients,optimizer_values(trainer)
     finally:
         trainer.close()
         del trainer
@@ -124,13 +144,13 @@ def main():
     for repeat in range(options.repeats):
         results={}
         for mode in modes[repeat%3:]+modes[:repeat%3]:
-            record,parameters,gradients=run(options,mode,repeat)
-            payload["runs"].append(record);results[mode]=(record,parameters,gradients)
+            record,parameters,gradients,optimizer_state=run(options,mode,repeat)
+            payload["runs"].append(record);results[mode]=(record,parameters,gradients,optimizer_state)
             print(json.dumps({key:record[key] for key in ("mode","repeat","milliseconds_per_update","tokens_per_second","gpu_peak_allocated_bytes")}),flush=True)
         for mode in ("gpu","cpu_and_gpu"):
             reference=results["off"];candidate=results[mode]
             torch.testing.assert_close(torch.tensor(reference[0]["losses"]),torch.tensor(candidate[0]["losses"]),atol=atol,rtol=rtol)
-            for label,index in (("parameters",1),("gradients",2)):
+            for label,index in (("parameters",1),("gradients",2),("optimizer_state",3)):
                 assert reference[index].keys()==candidate[index].keys()
                 max_abs=0
                 for name,value in reference[index].items():
@@ -141,7 +161,7 @@ def main():
         options.output.write_text(json.dumps(payload,indent=2,allow_nan=False)+"\n")
     payload["summary"]={mode:{"median_tokens_per_second":statistics.median(item["tokens_per_second"] for item in payload["runs"] if item["mode"]==mode),"median_ms_per_update":statistics.median(item["milliseconds_per_update"] for item in payload["runs"] if item["mode"]==mode),"max_gpu_peak_allocated_bytes":max(item["gpu_peak_allocated_bytes"] for item in payload["runs"] if item["mode"]==mode)} for mode in modes}
     options.output.write_text(json.dumps(payload,indent=2,allow_nan=False)+"\n")
-    print("PASS matched losses/gradients/updates and CPU staging cap; evidence: "+str(options.output),flush=True)
+    print("PASS matched losses/gradients/parameters/optimizer state and CPU staging cap; evidence: "+str(options.output),flush=True)
 
 
 if __name__=="__main__":main()
