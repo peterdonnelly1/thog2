@@ -236,7 +236,7 @@
       ? load_json(operation_colour_storage_key, {})
       : {}
   );
-  const lane_y = Object.freeze({MAIN:1.00, PREMAT:0.70, OTHER:0.40, UNKNOWN:0.15});
+  const lane_y = Object.freeze({MAIN:1.00, PREMAT:0.70, OTHER:0.40, UNKNOWN:0.15, COPY:0.35, CPU:0.00});
   const lane_width = 0.30;
   const layer_top_y = 1.32;
   const layer_bottom_y = 0.38;
@@ -289,6 +289,8 @@
   function hover_label(row) {
     const owner = String(row.owner || "UNKNOWN").toUpperCase();
     const family = String(row.family || "").toUpperCase();
+    if (owner === "CPU") return `CPU · ${family}`;
+    if (owner === "COPY") return `COPY · ${row.direction || "unknown"}`;
     if (owner === "PREMAT") return family ? `PREMAT · ${family}` : "PREMAT";
     return semantic_label(row);
   }
@@ -564,6 +566,7 @@
   }
 
   function current_y_range() {
+    if (processing_view.operations_payload?.metadata?.materialisation_device === "cpu_and_gpu") return [-0.20, 1.40];
     return operations_card_maximized() ? maximized_y_range : normal_y_range;
   }
 
@@ -1056,12 +1059,17 @@
     ensure_ancillary_button();
     processing_view.operations_payload = payload;
     const intervals = Array.isArray(payload.intervals) ? payload.intervals : [];
+    const cpu_mode = payload.metadata?.materialisation_device === "cpu_and_gpu";
+    const overlay = cpu_mode ? [
+      ...(payload.cpu_tasks || []).filter(row => row.start_us !== null && row.end_us !== null && Number(row.end_us)>Number(row.start_us)).map(row => ({...row, owner:"CPU", operation:"cpu_prepare", layer:row.layer_index, kernel_name:"", evidence:row.cpu_matrix_id, family:row.family})),
+      ...(payload.transfers || []).map(row => ({...row, owner:"COPY", operation:row.direction, kernel_name:"", evidence:row.upload_id || row.snapshot_id || "logical identity unknown"})),
+    ] : [];
     const groups = new Map();
-    for (const row of intervals) {
-      const owner = ["MAIN", "PREMAT", "OTHER", "UNKNOWN"].includes(String(row.owner || ""))
+    for (const row of [...intervals, ...overlay]) {
+      const owner = ["MAIN", "PREMAT", "OTHER", "UNKNOWN", "CPU", "COPY"].includes(String(row.owner || ""))
         ? String(row.owner)
         : "UNKNOWN";
-      if (!(["MAIN", "PREMAT"].includes(owner))) continue;
+      if (!(["MAIN", "PREMAT", "CPU", "COPY"].includes(owner))) continue;
       const label = semantic_label(row);
       const family = String(row.family || "").toUpperCase();
       const operation = String(row.operation || "misc").toLowerCase();
@@ -1105,14 +1113,15 @@
           row.kernel_name || "",
           Number(row.start_us) / 1000.0,
           Math.max(0, Number(row.end_us) - Number(row.start_us)) / 1000.0,
+          row.evidence ? processing_escape(`${row.evidence} · ${row.bytes ?? "unknown"} bytes · raw ${row.raw_start_ns ?? row.start_ns ?? "unknown"}–${row.raw_end_ns ?? row.end_ns ?? "unknown"} ns · clock uncertainty ${row.clock_uncertainty_ms ?? "unknown"} ms · left/right censored ${Boolean(row.left_censored)}/${Boolean(row.right_censored)}`) : "",
         ]),
-        hovertemplate:"%{customdata[0]} · Layer %{customdata[2]}<br>%{customdata[3]}<br>%{customdata[4]:.4f} ms capture time<br>Duration: %{customdata[5]:.4f} ms<extra></extra>",
+        hovertemplate:"%{customdata[0]} · Layer %{customdata[2]}<br>%{customdata[3]}<br>%{customdata[4]:.4f} ms capture time<br>Duration: %{customdata[5]:.4f} ms<br>%{customdata[6]}<extra></extra>",
       });
     }
     traces.push(...contention_traces(payload), ...slowdown_outline_traces(payload));
 
     const guides = layer_guides(intervals);
-    const tick_owners = ["PREMAT", "MAIN"];
+    const tick_owners = cpu_mode ? ["CPU", "COPY", "PREMAT", "MAIN"] : ["PREMAT", "MAIN"];
     const capture_ms = Number(payload.metadata?.capture_duration_ms || 0);
     const mount = by_id("processing_timeline_plot");
     const retained_range = retained_layer_range(mount, processing_view.run_id, capture_ms);
@@ -1147,7 +1156,7 @@
     install_layer_zoom(mount, guides, capture_ms);
     sync_layer_scrollbar(mount);
     const heading = by_id("processing_timeline_card")?.querySelector(".chart-heading-copy h2");
-    if (heading) heading.textContent = "GPT Level Operations by Stream (MAIN/PREMAT)";
+    if (heading) heading.textContent = cpu_mode ? "GPT Operations · CPU / COPY / MAIN" : "GPT Level Operations by Stream (MAIN/PREMAT)";
     processing_gpu_link_time_axes();
   };
 

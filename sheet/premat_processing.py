@@ -517,14 +517,16 @@ def processing_capture_scope(
         }
     _capture_stack_depth = 0
     _capture_thread = threading.get_ident()
-    host_push_lower = time.perf_counter_ns()
+    cpu_capture = full_update or getattr(runtime, "cpu_configuration", None) is not None
+    host_push_lower = time.perf_counter_ns() if cpu_capture else None
     _nvtx_push(PROCESSING_CAPTURE_RANGE)
     # The NSYS capture begins at the NVTX push, so establish the host timing
     # origin immediately afterwards rather than including profiler setup time.
     _capture_start_ns = time.perf_counter_ns()
     if metadata is not None:
         metadata["host_start_ns"] = int(_capture_start_ns)
-        metadata.update(host_nvtx_lower_ns=host_push_lower, host_nvtx_upper_ns=_capture_start_ns, full_update=bool(full_update))
+        if cpu_capture:
+            metadata.update(host_nvtx_lower_ns=host_push_lower, host_nvtx_upper_ns=_capture_start_ns, full_update=bool(full_update))
     _capture_active = True
     try:
         yield

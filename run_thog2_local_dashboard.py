@@ -84,6 +84,9 @@ def _processing_pair_key(state: Any) -> tuple[str, str] | None:
     if not separator or not encoded:
         return None
     host = str(configuration.get("host_label", "")).strip()
+    if configuration.get("premat_materialisation_device", "gpu") == "cpu_and_gpu":
+        from sheet.premat_cpu_config import cpu_identity
+        encoded += ":cpu:" + cpu_identity(configuration)
     return host, encoded
 
 
@@ -1001,6 +1004,10 @@ def _processing_payload_with_ncu_companion(
     data = payload.get("data")
     if not isinstance(data, dict):
         return payload
+    if data.get("metadata", {}).get("materialisation_device") == "cpu_and_gpu" or data.get("metadata", {}).get("run", {}).get("config", {}).get("premat_materialisation_device") == "cpu_and_gpu":
+        data["premat_compatibility"] = {"available": False, "reason": "N/A: CPU materialisation", "rows": []}
+        data.pop("premat_compatibility_source", None)
+        return payload
 
     companion = _matching_ncu_companion(
         self,
@@ -1537,6 +1544,7 @@ _processing_patch_names = (
     "dashboard_processing_pair_state_final.js",
     "dashboard_processing_nsys_eye_select.js",
     "dashboard_processing_user_fixes.js",
+    "dashboard_processing_cpu.js",
 )
 
 # vvv THOG build one explicit dashboard asset overlay at server startup; this avoids hidden import/read hooks and guarantees the resource view follows Processing

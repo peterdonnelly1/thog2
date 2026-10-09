@@ -32,3 +32,62 @@ jobs:
           node --check sheet/local_dashboard_assets/dashboard_runner.js
       - name: CPU arithmetic, checkpoint and lifecycle regressions
         run: PYTHONPATH=. python -m pytest -q tests/test_cpu_materialisation*.py tests/test_premat.py tests/test_run_thog2_owt_startup_report.py tests/test_stage3b_model_semantic_attention.py
+
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      OMP_NUM_THREADS: '1'
+      MKL_NUM_THREADS: '1'
+      OPENBLAS_NUM_THREADS: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: e29e32db916fc5ceb87a089d057fb78456c1a98a
+          path: regression_base
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install numpy pytest pytest-subtests pytest-timeout psutil tiktoken tensorboard plotly
+      - run: python -m pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cpu
+      - run: npm install --prefix /tmp/instra-browser jsdom playwright
+      - name: Complete base versus candidate regression
+        env:
+          NODE_PATH: /tmp/instra-browser/node_modules
+        run: python tools/check_cpu_materialisation_regressions.py regression_base
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cpu-materialisation-regression
+          path: evidence/cpu_materialisation_ci
+  browsers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      OMP_NUM_THREADS: '1'
+      MKL_NUM_THREADS: '1'
+      NODE_PATH: /tmp/instra-browser/node_modules
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install numpy psutil tiktoken tensorboard plotly
+      - run: python -m pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cpu
+      - run: npm install --prefix /tmp/instra-browser jsdom playwright
+      - run: /tmp/instra-browser/node_modules/.bin/playwright install --with-deps chromium firefox
+      - name: Chromium legacy settings and Runner
+        env:
+          INSTRA_TEST_BROWSER: chromium
+        run: PYTHONPATH=. python tests/run_instra_oct07_browser.py tests/instra_oct08_browser_regression.js
+      - name: Firefox legacy settings and Runner
+        env:
+          INSTRA_TEST_BROWSER: firefox
+        run: PYTHONPATH=. python tests/run_instra_oct07_browser.py tests/instra_oct08_browser_regression.js
+      - name: CPU evidence and recap in Chromium and Firefox
+        run: PYTHONPATH=. python tests/run_instra_oct07_browser.py tests/instra_cpu_materialisation_browser.js
+      - name: Legacy live-session soak
+        env:
+          INSTRA_SOAK_SECONDS: '120'
+        run: PYTHONPATH=. python tests/run_instra_oct07_browser.py tests/instra_oct03_soak_browser.js
