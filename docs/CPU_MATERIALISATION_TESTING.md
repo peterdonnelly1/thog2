@@ -118,6 +118,8 @@ Append the canonical CPU fragment to an otherwise known working DEPTH wrapper co
 
 Check the PREMAT startup row and resolved JSON: requested/resolved thread counts, generated dtype, all L layers, stage cap and inactive GPU timing must agree. CPU flags are separate experiment dimensions in Runner. GPU Recipes must omit inactive CPU flags from generated commands; saved Recipes retain requested dimensions.
 
+In Runner, select `cpu_and_gpu` in `--premat_materialisation_device` before entering CPU options. CPU fields are disabled for GPU-only Recipes immediately when opening a parameter tab or search result; switching back to CPU mode restores the retained requests. `--premat_cpu_transfer_lead_ms` becomes editable only when the CPU transfer timing includes `predicted_gemm_start`. The native typing, tab, search, sweep and Recipe-save checks run in Chromium and Firefox with `python tests/run_instra_oct07_browser.py tests/instra_runner_cpu_fields_browser.js`.
+
 For complete update 50, append the existing controls:
 
     --premat_processing_logging enabled \

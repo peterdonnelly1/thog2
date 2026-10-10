@@ -546,9 +546,9 @@
       show_fields(fields,keys,query ? profiling_match && (!filter_category || category==="NSIGHT") : category==="NSIGHT");
       if(query && !keys.length && !profiling_match)add(fields,"p","No matching fields","runner-search-empty");
       update_category_states();
+      check_recipe(); // <<< THOG apply conditional controls before the first keystroke in a new tab or search
     }
     search.addEventListener("input",()=>show_category(search.value));show_category();
-    check_recipe();
   }
   function wall_time(value) {
     if (!value) return "—";
