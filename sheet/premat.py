@@ -610,8 +610,10 @@ class PrematRuntime:
         logging_enabled: bool,
         target_matrix: object = None,                                                                                                                      # <<< THOG runtime filter for one or more fused matrix families
         timing: str = "as_the_code_flies",
+        materialisation_element_size: Optional[Callable[[], int]] = None,                                                                                  # <<< THOG price the authoritative materialiser separately from activation autocast
     ) -> None:
         self._materialize = materialize
+        self._materialisation_element_size = materialisation_element_size
         self._attach = attach or (lambda _family, _layer_index, tensor: tensor)
         self._n_embd = int(n_embd)
         self._n_head = int(n_head)
@@ -697,6 +699,7 @@ class PrematRuntime:
         self._retained_bytes = 0
         self._transient_bytes = 0
         self._activation_bytes = 0
+        self._activation_element_bytes = 0
         self._dtype_bytes = 0
         self._batch_size = 0
         self._sequence_length = 0
@@ -1485,11 +1488,7 @@ class PrematRuntime:
         self._candidates.clear()
         self._display_layer_pair = None
         self._display_candidates = []
-        # Price the tensors that Premat will actually allocate.  The pass
-        # reference can remain FP32 under CUDA autocast even though matrix
-        # materialisation and its overlapping Main Stream activations are
-        # BF16/FP16.  Charging the reference dtype therefore doubles the
-        # admission envelope for mixed-precision training.
+        # vvv THOG activation autocast does not determine materialised weight storage: native DEPTH matmul remains FP32
         if torch.is_autocast_enabled("cuda"):
             autocast_dtype = torch.get_autocast_dtype("cuda")
             if autocast_dtype not in (torch.float16, torch.bfloat16):
@@ -1497,10 +1496,16 @@ class PrematRuntime:
                     "Premat CUDA autocast requires float16 or bfloat16; "
                     f"got {autocast_dtype}"
                 )
-            self._dtype_bytes = 2
+            self._activation_element_bytes = 2
         else:
-            self._dtype_bytes = int(reference.element_size())
-        self._activation_bytes = int(reference.numel() * self._dtype_bytes)
+            self._activation_element_bytes = int(reference.element_size())
+        self._dtype_bytes = (
+            int(self._materialisation_element_size())
+            if self._materialisation_element_size is not None
+            else self._activation_element_bytes
+        )
+        self._activation_bytes = int(reference.numel() * self._activation_element_bytes)
+        # ^^^ THOG
         self._batch_size = int(reference.shape[0]) if reference.ndim >= 1 else 1
         self._sequence_length = int(reference.shape[1]) if reference.ndim >= 2 else 1
         self._pass_start_ns = time.perf_counter_ns()
@@ -2206,7 +2211,7 @@ class PrematRuntime:
                 * self._n_head
                 * self._sequence_length
                 * self._sequence_length
-                * self._dtype_bytes
+                * self._activation_element_bytes                                                                                                           # <<< THOG attention intermediates follow activation precision, independently of weight storage
             )
             causal_mask_bytes = self._sequence_length * self._sequence_length
             attention_peak += 2 * score_bytes + causal_mask_bytes

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import traceback
 from typing import Callable, Optional, Sequence, Tuple
 
 import torch
@@ -68,6 +69,20 @@ def _cpu_checkpoint_options(logical_block, indices):
 # ^^^ THOG
 
 
+# vvv THOG an interrupted non-reentrant forward must unwind saved-tensor hooks even when its exception is retained
+def _checkpoint_segment(function, value, **options):
+    try:
+        return checkpoint(function, value, **options)
+    except BaseException as error:
+        # The upstream generator owns the forward hook context. Its frame can
+        # survive in a retained exception traceback, capturing later training
+        # graphs. Clear unwound frame locals to close it while retaining the
+        # original exception, message and traceback locations.
+        traceback.clear_frames(error.__traceback__)
+        raise
+# ^^^ THOG
+
+
 def execute_logical_layers(
     hidden: Tensor,
     *,
@@ -120,7 +135,7 @@ def execute_logical_layers(
             else:
                 run_segment = regional_segment_runner_factory(tuple(range(start, end)))
 
-            hidden = checkpoint(
+            hidden = _checkpoint_segment(
                 run_segment,
                 hidden,
                 # vvv THOG premat's physical scheduling is autograd-transparent,
@@ -170,7 +185,7 @@ def execute_logical_layers(
                 segment_output = logical_block(segment_output, layer_index)
             return segment_output
 
-        hidden = checkpoint(
+        hidden = _checkpoint_segment(
             run_sparse_segment,
             hidden,
             # vvv THOG see the dense checkpoint path above
@@ -245,7 +260,7 @@ def execute_logical_layer_checkpoints(
             return segment_output
 
         if use_checkpointing:
-            hidden = checkpoint(
+            hidden = _checkpoint_segment(
                 run_segment,
                 hidden,
                 # vvv THOG PLASTIC prefix segments use the same safe premat boundary

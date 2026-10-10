@@ -20,7 +20,7 @@ Record the commit and environment for each host.
 
 2. On an actual CUDA host, run the hardware suite:
 
-       PYTHONPATH=. python -m pytest -q tests/test_cpu_materialisation_cuda.py tests/test_premat_matmul_binding.py
+       PYTHONPATH=. python -m pytest -q tests/test_cpu_materialisation_cuda.py tests/test_cpu_materialisation_benchmark.py tests/test_premat_matmul_binding.py
 
    CUDA absence skips this suite; a skipped suite does not pass hardware qualification. Unsupported BF16 hardware skips only BF16 cases. Check that the real-worker success-path test runs and passes. It forces a completed upload before readiness outside any measured update, then checks input gradients and lifetime.
 
@@ -33,6 +33,15 @@ Record the commit and environment for each host.
    The benchmark resets the training/dropout RNG after constructing every trainer. Its default `--training-seed 373` increases by one per repeat and is identical across providers within that repeat. Model seed 171 and data seed 272 remain fixed. JSON verifies identical initial model, training RNG and data RNG fingerprints, then identical final RNG and batch traces. This corrects the unmatched dropout masks in the original field harness; numerical tolerances remain unchanged. Evidence is saved after each provider even if parity fails, identifies the failing provider and component, and has `status: parity_failed` or `runtime_failed`. Timing remains unqualified until `status: passed`.
 
    The trainer clears gradients after each optimizer update. The benchmark therefore captures real gradients immediately before the optimizer in one extra, unmeasured validation update. `gradient_validation` records its loss, update number and number of gradient tensors. Measured losses, parameters, optimizer state, RNG/batch traces, timing and memory remain those of the requested timed endpoint; gradient capture and its extra update are outside that measurement. Empty gradient sets fail qualification.
+
+   The default smoke and preliminary commands use FP32 training. A pass does not qualify FP16 or BF16. After the mixed-precision admission fix, run the hardware tests above in a fresh process and smoke both backends explicitly:
+
+       python tools/benchmark_cpu_materialisation.py --smoke --dtype float16 --backend matmul --threads 1 --label scruffy --output evidence/scruffy_cpu_float16_matmul_smoke.json
+       python tools/benchmark_cpu_materialisation.py --smoke --dtype float16 --backend einsum --threads 1 --label scruffy --output evidence/scruffy_cpu_float16_einsum_smoke.json
+       python tools/benchmark_cpu_materialisation.py --smoke --dtype bfloat16 --backend matmul --threads 1 --label scruffy --output evidence/scruffy_cpu_bfloat16_matmul_smoke.json
+       python tools/benchmark_cpu_materialisation.py --smoke --dtype bfloat16 --backend einsum --threads 1 --label scruffy --output evidence/scruffy_cpu_bfloat16_einsum_smoke.json
+
+   Repeat on dreedle where supported. Native DEPTH matmul retains FP32 generated weights under FP16/BF16 activation autocast; einsum follows the autocast output dtype. Both providers now price these weights using the actual materialiser policy, independently of activation and attention-intermediate precision. Checkpoint failures propagate their original exception and unwind forward hooks so later runs do not inherit the failed graph.
 
 4. Smoke-test fallback and replay explicitly:
 

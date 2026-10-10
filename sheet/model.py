@@ -31,6 +31,7 @@ from .compact_identity import (
     validate_current_sheet_support,
 )
 from .depth_trajectory import DepthTrajectory
+from .depth_numerical_policy import effective_depth_policy                                                                                               # <<< THOG both providers price the actual DEPTH materialiser output dtype
 from .geometry import SheetGeometryConfig
 # vvv THOG coupled field machine HYPERBLOCK is an architecture-wide trajectory, separate from legacy BLOCK geometries
 from .hyperblock import (
@@ -644,6 +645,7 @@ class SheetGPT(nn.Module):
                 **provider_options,
             # ^^^ THOG
                 materialize=self._premat_materialize_candidate,
+                materialisation_element_size=self._premat_materialisation_element_size,
                 attach=self._premat_attach_candidate,
                 n_embd=config.n_embd,
                 n_head=config.n_head,
@@ -684,6 +686,10 @@ class SheetGPT(nn.Module):
         return self.trajectory.materialize_vector(name, layer_index)
 
     # vvv THOG authoritative candidate materialisers and pass lifecycle shared by eager and checkpoint recomputation
+    def _premat_materialisation_element_size(self) -> int:
+        policy = effective_depth_policy(self.trajectory, qualify_cpu=False)
+        return getattr(torch, policy.output_dtype).itemsize
+
     def _premat_materialize_candidate(self, family: str, layer_index: int) -> Tensor:
         if family == "QKV":
             if self.config.bypass_semantic_qkv_adapter:
