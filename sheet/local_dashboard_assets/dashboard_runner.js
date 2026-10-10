@@ -173,6 +173,22 @@
       errors.push("--min-lr must not exceed --learning-rate");
     return errors;
   }
+
+  // vvv THOG CPU controls are conditional dimensions; saved values remain in the Recipe
+  function cpu_field_active(key, parameters) {
+    const providers=parameters["--premat_materialisation_device"];
+    const cpu=(Array.isArray(providers)?providers:[providers]).includes("cpu_and_gpu");
+    if (key==="--premat_timing") return !cpu;
+    if (!key.startsWith("--premat_cpu_")) return true;
+    if (!cpu) return false;
+    if (key==="--premat_cpu_transfer_lead_ms") {
+      const modes=parameters["--premat_cpu_transfer_timing"];
+      return (Array.isArray(modes)?modes:[modes]).includes("predicted_gemm_start");
+    }
+    return true;
+  }
+  // ^^^ THOG
+
   function check_recipe(require_gpu=true) {
     const errors = recipe_problems(current_recipe(), network?.hosts, require_gpu);
     // vvv THOG update the visible selector immediately when the preset changes
@@ -199,8 +215,11 @@
       current_recipe().parameters?.["--model-type"]==="dense";
     for (const field of detail.querySelectorAll("input[data-runner-field]")) {
       const key=field.dataset.runnerField,spec=snapshot?.catalogue[key];
-      if (spec) field.setAttribute("aria-invalid",String(Boolean(invalid_field_value(key,field.value,spec) ||
-        dense_only && spec.dense_compatible===false && field.value.trim())));
+      const active=cpu_field_active(key,current_recipe().parameters || {});
+      field.disabled=!active;field.dataset.inactive=String(!active);
+      field.title=field_help(spec || {})+(!active ? " Inactive for the selected materialisation provider or transfer timing; saved request retained." : "");
+      if (spec) field.setAttribute("aria-invalid",String(Boolean(active && (invalid_field_value(key,field.value,spec) ||
+        dense_only && spec.dense_compatible===false && field.value.trim()))));
     }
     for (const field of detail.querySelectorAll('input[aria-invalid="true"]')) errors.push(`${field.dataset.runnerField} has invalid syntax`);
     const notice = by_id("runner_required_fields");
@@ -353,6 +372,11 @@
       });
       change_default.classList.add("runner-change-default");
       field.dataset.runnerField = key;
+      if (spec.choices?.length) {
+        const options=add(label,"datalist");options.id="runner_choices_"+key.replace(/[^a-z0-9]/gi,"_");
+        for(const choice of spec.choices) {const item=add(options,"option");item.value=String(choice);}
+        field.setAttribute("list",options.id);
+      } // <<< THOG provide enum choices while retaining independent comma-separated sweeps
       field.title=field_help(spec);
       field.value = Array.isArray(current_recipe().parameters[key]) ? current_recipe().parameters[key].join(spec.kind === "list" ? "\n" : ", ") :
         String(current_recipe().parameters[key] ?? "");
@@ -522,9 +546,9 @@
       show_fields(fields,keys,query ? profiling_match && (!filter_category || category==="NSIGHT") : category==="NSIGHT");
       if(query && !keys.length && !profiling_match)add(fields,"p","No matching fields","runner-search-empty");
       update_category_states();
+      check_recipe(); // <<< THOG apply conditional controls before the first keystroke in a new tab or search
     }
     search.addEventListener("input",()=>show_category(search.value));show_category();
-    check_recipe();
   }
   function wall_time(value) {
     if (!value) return "—";
@@ -1004,6 +1028,6 @@
     render();
   });
   setInterval(()=>{if(visible && tab!=="recipes")refresh();},5000);
-  window.instra_runner_test_hooks = Object.freeze({recipe_problems,apply_width_selection,current_recipe,remember_default,format_duration,grid_elapsed,estimate_range,estimated_run_end,history_outcome,field_help,invalid_field_value,premat_enabled,category_enabled,categories_for_field,matches_search,compare_fields});
+  window.instra_runner_test_hooks = Object.freeze({cpu_field_active,recipe_problems,apply_width_selection,current_recipe,remember_default,format_duration,grid_elapsed,estimate_range,estimated_run_end,history_outcome,field_help,invalid_field_value,premat_enabled,category_enabled,categories_for_field,matches_search,compare_fields});
 })();
 // ^^^ THOG

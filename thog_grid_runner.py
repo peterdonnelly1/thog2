@@ -52,6 +52,9 @@ MANUAL_SHORT = {"-q", "-g", "-G", "-I", "-F", "-N", "-U", "-V", "-P", "-E", "-T"
 
 def _scalar(name, value):
     item = CATALOGUE[name]
+    if name == "--premat_cpu_layer_batch_size":
+        from sheet.premat_cpu_config import normalize_cpu_batch
+        return normalize_cpu_batch(value)
     if isinstance(value, (dict, list)) or value is None:
         raise ValueError(f"{name} requires a scalar value")
     kind = item["type"]
@@ -221,6 +224,24 @@ def expand(recipe, *, stable_preview=False):
             config_from_arguments(arguments, geometry_plan=geometry_plan_from_arguments(arguments))
             # ^^^ THOG
         # ^^^ THOG
+
+        # vvv THOG inactive CPU dimensions collapse GPU trials while saved Recipes retain requests
+        provider = values.get("--premat_materialisation_device", "gpu")
+        if provider == "gpu":
+            values = {name: value for name, value in values.items() if not name.startswith("--premat_cpu_") and name != "--premat_materialisation_device"}
+        else:
+            from sheet.premat_cpu_config import CPU_DEFAULTS, validate_cpu_configuration
+            controls = {name: values.get("--" + name, default) for name, default in CPU_DEFAULTS.items()}
+            if controls["premat_cpu_transfer_timing"] != "predicted_gemm_start":
+                if float(values.get("--premat_cpu_transfer_lead_ms", 0)):
+                    raise ValueError("premat_cpu_transfer_lead_ms requires predicted_gemm_start")
+                values.pop("--premat_cpu_transfer_lead_ms", None)
+            if "--premat_timing" in values and values["--premat_timing"] != controls["premat_cpu_transfer_timing"]:
+                raise ValueError("inactive premat_timing conflicts with CPU transfer timing")
+            values.pop("--premat_timing", None)
+            validate_cpu_configuration({**controls, "premat": values.get("--premat", "disabled"), "geometry_preset": values.get("--geometry-preset", "depth"), "model_type": values.get("--model-type", "sheet"), "device": "cuda", "premat_attention_mode": values.get("--premat_attention_mode", "fused"), "plastic__enabled": values.get("--plastic__enabled", False), "hyperblock": values.get("--hyperblock", False), "n_layer": values.get("--n-layer", 12), "layer_dropout_stratum_size": values.get("--layer-dropout-stratum-size"), "layer_dropout_active_per_stratum": values.get("--layer-dropout-active-per-stratum")})
+        # ^^^ THOG
+
         identity = json.dumps(values, sort_keys=True, separators=(",", ":"))
         if identity in seen:
             continue
@@ -261,6 +282,10 @@ def command_for(run, gpu, *, python="python", entry="run_thog2_owt", host_label=
             and "--plastic__enabled" not in values and "--no-plastic__enabled" not in values):
         args.append("--plastic__enabled")
     for name, value in values.items():
+        if name.startswith("--premat_cpu_") and values.get("--premat_materialisation_device", "gpu") != "cpu_and_gpu":
+            continue  # <<< THOG direct exports never forward dormant CPU fields
+        if name == "--premat_cpu_transfer_lead_ms" and values.get("--premat_cpu_transfer_timing") != "predicted_gemm_start":
+            continue
         # vvv THOG dormant depth defaults do not silently activate or invalidate width-only runs
         if name == "--select-depth" or width_selected and (name == "--select-width" or name.startswith("DEPTH.") and not depth_selected):
             continue

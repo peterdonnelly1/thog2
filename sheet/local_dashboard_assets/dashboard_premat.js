@@ -174,6 +174,7 @@ function premat_append_trace(record, state) {
 }
 
 function premat_update_from_event(record, event) {
+  record.cpu = {...(record.cpu || {}), ...Object.fromEntries(Object.entries(event).filter(([key]) => /^(cpu_|snapshot_id|upload_id|matrix_use_id|phase|micro_step|replay_|readiness_|copy_|predicted_gemm|intended_|actual_gpu|prediction_|release_|fallback_reason)/.test(key)))};
   if (event.predicted_retained_bytes !== null
       && event.predicted_retained_bytes !== undefined
       && Number.isFinite(Number(event.predicted_retained_bytes))) {
@@ -206,7 +207,7 @@ function premat_update_from_event(record, event) {
       charged_bytes: Number.isFinite(Number(event.cumulative_charged_bytes)) ? Number(event.cumulative_charged_bytes) : null,
     });
   }
-  if (event.event === "materialising" && event.owner === "premat") {
+  if (["materialising", "premat_submission"].includes(event.event) && ["premat", "cpu_upload"].includes(event.owner)) {
     if (Number.isFinite(elapsed_ms)) record.submission_ms = elapsed_ms;
     record.submission_queue_depth = Number.isFinite(Number(event.queue_depth)) ? Number(event.queue_depth) : null;
     record.submission_charged_bytes = Number.isFinite(Number(event.cumulative_charged_bytes)) ? Number(event.cumulative_charged_bytes) : null;
@@ -287,6 +288,7 @@ function premat_build_model(snapshot) {
   };
 
   const events = [...(snapshot.events || [])]
+    .filter(event => snapshot.materialisation_device !== "cpu_and_gpu" || (event.phase || "original_forward") === "original_forward")
     .sort((left, right) => Number(left.sequence) - Number(right.sequence));
   for (const event of events) {
     if (!event.family || !Number.isFinite(Number(event.layer_index))) continue;
@@ -304,6 +306,21 @@ function premat_build_model(snapshot) {
 
     // pass_end_release reports the candidate's last state, not a transition.
     // Handle it first so it cannot fabricate another timed state frame.
+    if (snapshot.materialisation_device === "cpu_and_gpu" && event_name === "premat_submission") {
+      record.path = "cpu_upload";
+      premat_append_trace(record, "UPLOAD PENDING");
+      add_frame({key, state:"materialising", outcome:record.outcome}, event, "UPLOAD PENDING");
+      continue;
+    }
+    if (snapshot.materialisation_device === "cpu_and_gpu" && event_name === "matrix_acquired") {
+      const hit = event.final_outcome === "FULL HIT";
+      record.path = hit ? "full" : record.targeted === false ? "not-targeted-main" : "main";
+      record.outcome = event.final_outcome || (hit ? "FULL HIT" : "COMPLETE MISS");
+      const label = hit ? "CONSUMING · NO WAIT" : record.targeted === false ? "MAIN · NOT TARGETED" : "MAIN FALLBACK · NO CPU WAIT";
+      premat_append_trace(record, label);
+      add_frame({key,state:hit ? "consuming-full" : "main-consuming",outcome:record.outcome},event,label);
+      continue;
+    }
     if (event.event === "pass_end_release") {
       record.outcome = "INCOMPLETE PASS";
       premat_append_trace(record, "INCOMPLETE PASS");
@@ -328,11 +345,12 @@ function premat_build_model(snapshot) {
     }
 
     if (state === "AVAILABLE" && event_name === "available") {
-      if (owner === "premat" && !event.critical_path_miss) {
+      if (["premat", "cpu_upload"].includes(owner) && !event.critical_path_miss) {
         record.path = "full";
         record.outcome = "FULL HIT";
-        premat_append_trace(record, "AVAILABLE");
-        add_frame({key, state: "available", outcome: record.outcome}, event, "AVAILABLE");
+        const label = owner === "cpu_upload" ? "GPU AVAILABLE · COPY COMPLETE" : "AVAILABLE";
+        premat_append_trace(record, label);
+        add_frame({key, state: "available", outcome: record.outcome}, event, label);
       }
       continue;
     }
@@ -550,7 +568,7 @@ function premat_raw_event_rows(snapshots) {
       ?? snapshot.weight_matrix_target_order
       ?? snapshot.target_order
       ?? "";
-    const snapshot_events = [...(snapshot.events || [])]
+    const snapshot_events = [...(snapshot.events || []), ...(snapshot.materialisation_device === "cpu_and_gpu" ? snapshot.cpu_lifecycle || [] : [])]
       .sort((left, right) => Number(left.sequence ?? 0) - Number(right.sequence ?? 0));
     for (const event of snapshot_events) {
       const process_allocated = premat_optional_number(event.process_allocated_bytes);
@@ -753,6 +771,8 @@ function premat_inspector_rows(snapshot, model) {
         ? record.trace[record.trace.length - 2]
         : (record.trace[0] || "—");
       rows.push({
+        ...(record.cpu || {}),
+        cpu_precursors: (snapshot.cpu_lifecycle || []).filter(event => event.cpu_matrix_id && event.cpu_matrix_id === record.cpu?.cpu_matrix_id && ["cpu_task_start","cpu_matrix_ready"].includes(event.event)).map(event => `${event.event}: ${event.cpu_task_id} ${event.start_ns ?? "unknown"}–${event.end_ns ?? "unknown"} ns`).join(" | "),
         step: Number(snapshot.optimizer_update ?? 0),
         layer: layer_index + 1,
         matrix: record.label,
@@ -790,6 +810,8 @@ function premat_inspector_rows(snapshot, model) {
 }
 
 function premat_detailed_history_csv(snapshots) {
+  const cpu = (snapshots || []).some(snapshot => snapshot.materialisation_device === "cpu_and_gpu");
+  const cpu_fields = ["snapshot_id","cpu_task_id","cpu_matrix_id","upload_id","matrix_use_id","phase","micro_step","replay_invocation","fallback_reason","readiness_check_ns","copy_submission_ns","copy_complete_observed_ns","actual_gpu_available_ns","predicted_gemm_start_ns","intended_gpu_available_ns","intended_upload_submission_ns","prediction_available","prediction_fallback_reason","release_submitted_ns","cpu_precursors"];
   const header = [
     "step", "layer", "matrix", "target", "target_offset", "matrix_order",
     "matrix_order_position", "size_bytes", "buffer_margin_bytes", "headroom_bytes",
@@ -800,6 +822,7 @@ function premat_detailed_history_csv(snapshots) {
     "processing", "processing_trace", "outcome", "progress_percent",
     "submission_queue_depth", "submission_charged_bytes", "wait_ms",
     "premat_materialisation_ms", "main_materialisation_ms",
+    ...(cpu ? cpu_fields : []),
   ];
   const complete = [...(snapshots || [])]
     .filter(premat_snapshot_complete)
@@ -820,6 +843,7 @@ function premat_detailed_history_csv(snapshots) {
         row.progress_percent, row.submission_queue_depth,
         row.submission_charged_bytes, row.wait_ms, row.materialisation_ms,
         row.main_materialisation_ms,
+        ...(cpu ? cpu_fields.map(key => row[key] ?? "") : []),
       ].map(premat_csv_cell).join(","));
     }
   }
@@ -903,6 +927,7 @@ function premat_render_summary(snapshot, model) {
     : "—";
   // vvv THOG timing-diagnostic snapshots expose six forensic discriminators without requiring detailed history retention
   const summary_items = [
+    ...(snapshot.materialisation_device === "cpu_and_gpu" ? [["provider","CPU + GPU"],["CPU cache",premat_bytes(snapshot.cpu_runtime?.cpu_cache_bytes)],["staging",`${premat_bytes(snapshot.cpu_runtime?.staging_bytes)} / ${premat_bytes(snapshot.cpu_runtime?.staging_limit_bytes)}`],["pinned upload",premat_bytes(snapshot.cpu_runtime?.pinned_upload_bytes)],["workers",`${snapshot.cpu_runtime?.workers_resolved ?? "unknown"} × ${snapshot.cpu_runtime?.threads_per_worker_resolved ?? "unknown"} threads`],["co-residency","N/A: CPU materialisation"]] : []),
     ["mode", model.attention_mode],
     ["target", Number(snapshot.target_layer ?? snapshot.target_offset ?? 1) === 10 ? "l+1 → l+0" : `l+${Number(snapshot.target_offset ?? snapshot.target_layer ?? 1)}`],
     ["matrix target", premat_target_family(snapshot, model.attention_mode) || "all"],                                                                  // <<< THOG make fixed-family isolation explicit in recap summary
@@ -1029,7 +1054,8 @@ function premat_render_inspector(snapshot, model) {
   premat_view.inspector_snapshot = snapshot;
   premat_view.inspector_model = model;
   by_id("premat_inspector_step").textContent = String(snapshot.optimizer_update ?? "—");
-  by_id("premat_inspector_detail").textContent = `${model.layers.length} layers · ${rows.length} matrix opportunities`;
+  by_id("premat_inspector_detail").textContent = `${model.layers.length} layers · ${rows.length} matrix opportunities` + (snapshot.materialisation_device === "cpu_and_gpu" ? ` · CPU jobs linked by snapshot/task ID · ${new Set((snapshot.cpu_lifecycle || []).filter(event => event.phase === "checkpoint_recompute" && event.event === "matrix_use").map(event => event.matrix_use_id)).size} replay uses in raw history` : "");
+  if (snapshot.materialisation_device === "cpu_and_gpu") rows.forEach((row,index) => { markup[index] = markup[index].replace("<tr>", `<tr title="${premat_escape(`${row.snapshot_id || "unknown snapshot"} · ${row.cpu_task_id || "unknown task"} · ${row.fallback_reason || row.outcome} · ${row.cpu_precursors || "CPU precursor timestamps unknown"}`)}">`); });
   by_id("premat_inspector_body").innerHTML = markup.join("");
   by_id("premat_inspector_download").disabled = rows.length === 0;
   by_id("premat_inspect_button").disabled = false;

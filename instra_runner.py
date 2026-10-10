@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 import fcntl
 import json
 import os
-import re                                                                                                                                                    # <<< THOG recognize an existing Copy label before allocating the next immutable Recipe
+import re                                                                                                                                                  # <<< THOG recognize an existing Copy label before allocating the next immutable Recipe
 from pathlib import Path
 import threading
 import time
@@ -41,7 +41,7 @@ def _read():
 
 
 def _write(value):
-    _capture_wall_times(value)                                                                                                                               # <<< THOG persist run/Grid wall-clock boundaries alongside the completed-run duration estimator history
+    _capture_wall_times(value)                                                                                                                             # <<< THOG persist run/Grid wall-clock boundaries alongside the completed-run duration estimator history
     STATE_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
     temporary = STATE_PATH.with_name(f".{STATE_PATH.name}.{os.getpid()}.tmp")
     with temporary.open("w") as stream:
@@ -148,7 +148,7 @@ class RunnerService:
         self._lease_release_scheduled = False
         if self.controller:
             self._clean_uncommitted_files()
-            persisted = _read()                                                                                                                              # <<< THOG backfill recoverable historical run/Grid clocks once, without inventing missing timestamps
+            persisted = _read()                                                                                                                            # <<< THOG backfill recoverable historical run/Grid clocks once, without inventing missing timestamps
             previous = json.dumps(persisted, sort_keys=True)
             _capture_wall_times(persisted)
             if json.dumps(persisted, sort_keys=True) != previous:
@@ -340,7 +340,11 @@ class RunnerService:
                 if not requested or gpu_id in requested:
                     pool.append({"host_id": host_id, "host_label": host["display_name"],
                                  "execution_profile": discovery["execution_profiles"][0].get("execution_profile_id", "current"),
-                                 "gpu": gpu, "reservation_owner": current.get("reservations", {}).get(gpu["gpu_key"])})
+                                 # "gpu": gpu, "reservation_owner": current.get("reservations", {}).get(gpu["gpu_key"])})
+                                 # vvv THOG persist resolved CPU host affinity with each placement
+                                 "gpu": gpu, "reservation_owner": current.get("reservations", {}).get(gpu["gpu_key"]),
+                                 "cpu_execution": current.get("cpu_execution")})
+                                 # ^^^ THOG
         if requested - {p["gpu"].get("gpu_id", f"{p['host_id']}.gpu.{p['gpu']['gpu_key']}") for p in pool}:
             raise ValueError("A selected GPU is unavailable or execution is disabled")
         # Caps are remembered per GPU, but only resolved placements consume them.
@@ -613,10 +617,10 @@ class RunnerService:
             run.update(state="queued", blocking_reason="Retry requested")
             run.pop("released", None)
             run.pop("next_retry_at", None)
-            run.pop("finished_at", None)                                                                                                                      # <<< THOG a retry opens a new end clock and must replace the previous attempt's estimator duration
+            run.pop("finished_at", None)                                                                                                                   # <<< THOG a retry opens a new end clock and must replace the previous attempt's estimator duration
             run.pop("duration_seconds", None)
             grid["state"] = "queued"
-            grid.pop("finished_at", None)  # <<< THOG resume the execution clock on an explicit retry
+            grid.pop("finished_at", None)                                                                                                                  # <<< THOG resume the execution clock on an explicit retry
             _grid_event(grid, "retry", f"Run {run_id} queued for a new attempt")
             _write(state)
             return grid
@@ -750,6 +754,7 @@ class RunnerService:
                 snapshot.setdefault("reservations", {})[key] = reserved.get("reservation", {"grid_id": grid["grid_id"]})
                 dtype, backend = _dtype_backend(place["gpu"])
                 run.update(host_id=host_id, host_label=place["host_label"], gpu=place["gpu"],
+                           cpu_execution=snapshot.get("cpu_execution", place.get("cpu_execution")),                                                        # <<< THOG dynamic reassignment uses its actual CPU host for future duration estimates
                            execution_profile=place["execution_profile"], dtype=dtype, attention_backend=backend,
                            requested_power_w=request["power_cap_w"], default_power_w=live.get("default_power_w"),
                            current_power_w=live.get("power_cap_w"), placement_status="assigned",
@@ -966,7 +971,7 @@ class RunnerService:
                         run.pop("released", None)
                         attempt_id = uuid.uuid4().hex
                         latest = {"attempt_id": attempt_id, "started_at": now(), "state": "dispatching"}
-                        grid.setdefault("started_at", latest["started_at"])  # <<< THOG persist the first dispatch clock
+                        grid.setdefault("started_at", latest["started_at"])                                                                                # <<< THOG persist the first dispatch clock
                         run["attempts"].append(latest)
                         run.update(state="dispatching", blocking_reason="")
                         _write(state)  # Commit the attempt identity BEFORE sending it to the Node Agent.
@@ -1078,7 +1083,7 @@ class RunnerService:
                                   f"exit={last.get('exit_code', 'pending')}; {reason[:240]}")
                         _grid_event(grid, "run", detail)
                 if grid["state"] in TERMINAL:
-                    grid.setdefault("finished_at", now())  # <<< THOG freeze elapsed time across reloads and restarts
+                    grid.setdefault("finished_at", now())                                                                                                  # <<< THOG freeze elapsed time across reloads and restarts
                 if grid["state"] != previous_state:
                     _grid_event(grid, "grid", f"{previous_state} -> {grid['state']}")
                 directory = GRID_SCRIPTS / grid["grid_tag"]

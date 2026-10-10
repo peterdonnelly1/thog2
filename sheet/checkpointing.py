@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import traceback
 from typing import Callable, Optional, Sequence, Tuple
 
 import torch
@@ -53,6 +54,32 @@ def _validate_layer_indices(layer_indices: Sequence[int], n_layer: int) -> Tuple
             raise ValueError("layer_indices must be strictly increasing")
         previous = layer_index
     return resolved
+# ^^^ THOG
+
+
+
+# vvv THOG checkpoint contexts add no options or objects to ordinary GPU/off execution
+def _cpu_checkpoint_options(logical_block, indices):
+    owner = getattr(logical_block, "__self__", None)
+    runtime = getattr(owner, "_premat_runtime", None)
+    if runtime is None or not hasattr(runtime, "checkpoint_context"):
+        return {}
+    microstep = runtime.micro_step
+    return {"context_fn": lambda: runtime.checkpoint_context(indices, microstep)}
+# ^^^ THOG
+
+
+# vvv THOG an interrupted non-reentrant forward must unwind saved-tensor hooks even when its exception is retained
+def _checkpoint_segment(function, value, **options):
+    try:
+        return checkpoint(function, value, **options)
+    except BaseException as error:
+        # The upstream generator owns the forward hook context. Its frame can
+        # survive in a retained exception traceback, capturing later training
+        # graphs. Clear unwound frame locals to close it while retaining the
+        # original exception, message and traceback locations.
+        traceback.clear_frames(error.__traceback__)
+        raise
 # ^^^ THOG
 
 
@@ -108,7 +135,7 @@ def execute_logical_layers(
             else:
                 run_segment = regional_segment_runner_factory(tuple(range(start, end)))
 
-            hidden = checkpoint(
+            hidden = _checkpoint_segment(
                 run_segment,
                 hidden,
                 # vvv THOG premat's physical scheduling is autograd-transparent,
@@ -116,6 +143,7 @@ def execute_logical_layers(
                 use_reentrant=False,
                 # ^^^ THOG
                 preserve_rng_state=True,
+                **_cpu_checkpoint_options(logical_block, tuple(range(start, end))),  # <<< THOG actual non-reentrant replay segment entry
             )
             checkpoint_segments += 1
 
@@ -157,7 +185,7 @@ def execute_logical_layers(
                 segment_output = logical_block(segment_output, layer_index)
             return segment_output
 
-        hidden = checkpoint(
+        hidden = _checkpoint_segment(
             run_sparse_segment,
             hidden,
             # vvv THOG see the dense checkpoint path above
@@ -232,7 +260,7 @@ def execute_logical_layer_checkpoints(
             return segment_output
 
         if use_checkpointing:
-            hidden = checkpoint(
+            hidden = _checkpoint_segment(
                 run_segment,
                 hidden,
                 # vvv THOG PLASTIC prefix segments use the same safe premat boundary

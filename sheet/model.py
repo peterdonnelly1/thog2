@@ -31,6 +31,7 @@ from .compact_identity import (
     validate_current_sheet_support,
 )
 from .depth_trajectory import DepthTrajectory
+from .depth_numerical_policy import effective_depth_policy                                                                                               # <<< THOG both providers price the actual DEPTH materialiser output dtype
 from .geometry import SheetGeometryConfig
 # vvv THOG coupled field machine HYPERBLOCK is an architecture-wide trajectory, separate from legacy BLOCK geometries
 from .hyperblock import (
@@ -53,6 +54,9 @@ from .plastic_depth import (
 # ^^^ THOG
 # vvv THOG dynamic pre-materialisation configuration and CUDA runtime
 from .premat import PrematRuntime, validate_premat_configuration
+# vvv THOG shared CPU configuration and identity resolution
+from .premat_cpu_config import CPU_DEFAULTS, cpu_config_dict, cpu_identity, strip_inactive_cpu, validate_cpu_configuration, resolve_cpu_threads
+# ^^^ THOG
 from .premat_processing import processing_operation_pop, processing_operation_push, processing_operation_range                             # <<< THOG semantic NVTX labels for INSTRA Processing
 # ^^^ THOG
 from .semantic_materializer import LegacySheetColMaterializer
@@ -150,6 +154,17 @@ class SheetGPTConfig:
     premat: str = "disabled"
     premat_attention_mode: str = "fused"
     premat_timing: str = "as_the_code_flies"
+    # vvv THOG CPU provider settings remain dormant at GPU defaults
+    premat_materialisation_device: str = "gpu"
+    premat_cpu_preparation: str = "eager"
+    premat_cpu_layer_batch_size: str = "single_layer"
+    premat_cpu_workers: int = 1
+    premat_cpu_threads_per_worker: int = 0
+    premat_cpu_transfer_timing: str = "as_the_code_flies"
+    premat_cpu_transfer_lead_ms: float = 0.0
+    premat_cpu_staging_limit_mb: float = 0.0
+    premat_cpu_checkpoint_replay: str = "disabled"
+    # ^^^ THOG
     premat_target_layer: int = 1
     premat_target_matrix: object = None                                                                                                                    # <<< THOG carry optional fused-family PREMAT selector set into model runtime
     premat_weight_matrix_target_order: str = "r_to_l"
@@ -339,6 +354,7 @@ class SheetGPTConfig:
         # vvv THOG validate the public premat controls and force pass-local materialisation lifetimes when enabled
         if self.premat_target_layer == 10:
             self.premat_weight_matrix_target_order = "r_to_l"
+        validate_cpu_configuration(self)                 # <<< THOG reject unsupported CPU combinations before model allocation
         validate_premat_configuration(
             premat=self.premat,
             attention_mode=self.premat_attention_mode,
@@ -519,7 +535,7 @@ class SheetGPTConfig:
         return selectors
 
     def to_dict(self) -> Dict[str, object]:
-        return asdict(self)
+        return strip_inactive_cpu(asdict(self))
 
 
 class SheetGPT(nn.Module):
@@ -619,8 +635,17 @@ class SheetGPT(nn.Module):
         if config.premat == "enabled":
             if not isinstance(self.trajectory, DepthTrajectory):
                 raise ValueError("--premat enabled currently requires the DEPTH trajectory")
-            self._premat_runtime = PrematRuntime(
+            # vvv THOG instantiate the CPU provider only for the explicit CPU capability
+            runtime_class, provider_options = PrematRuntime, {}
+            if config.premat_materialisation_device == "cpu_and_gpu":
+                from .premat_cpu_runtime import CpuPrematRuntime
+                runtime_class = CpuPrematRuntime
+                provider_options = {"trajectory": self.trajectory, "cpu_configuration": cpu_config_dict(config)}
+            self._premat_runtime = runtime_class(
+                **provider_options,
+            # ^^^ THOG
                 materialize=self._premat_materialize_candidate,
+                materialisation_element_size=self._premat_materialisation_element_size,
                 attach=self._premat_attach_candidate,
                 n_embd=config.n_embd,
                 n_head=config.n_head,
@@ -661,6 +686,10 @@ class SheetGPT(nn.Module):
         return self.trajectory.materialize_vector(name, layer_index)
 
     # vvv THOG authoritative candidate materialisers and pass lifecycle shared by eager and checkpoint recomputation
+    def _premat_materialisation_element_size(self) -> int:
+        policy = effective_depth_policy(self.trajectory, qualify_cpu=False)
+        return getattr(torch, policy.output_dtype).itemsize
+
     def _premat_materialize_candidate(self, family: str, layer_index: int) -> Tensor:
         if family == "QKV":
             if self.config.bypass_semantic_qkv_adapter:
@@ -691,6 +720,7 @@ class SheetGPT(nn.Module):
         family: str,
         layer_index: int,
         generated: Tensor,
+        *, binding_context=None,                       # <<< THOG CPU uses a fresh numerical-policy/storage binding per matrix use
     ) -> Tensor:
         family_names = {
             "QKV": (
@@ -708,7 +738,7 @@ class SheetGPT(nn.Module):
             names = family_names[family]
         except KeyError as exc:
             raise KeyError(f"unknown premat candidate family: {family}") from exc
-        return self.trajectory.attach_prematerialized(names, layer_index, generated)
+        return self.trajectory.attach_prematerialized(names, layer_index, generated, binding_context=binding_context)
 
     def _premat_begin_pass(self, layer_indices: Sequence[int], reference: Tensor) -> bool:
         runtime = self._premat_runtime

@@ -281,7 +281,7 @@ def test_retired_plastic_memory_budget_cli_names_replacement(capsys) -> None:
     assert "--premat_gpu_memory_buffer_gb" in capsys.readouterr().err
 
 
-def test_public_cli_exposes_exactly_the_seventeen_premat_options() -> None:
+def test_public_cli_exposes_existing_options_and_nine_cpu_controls() -> None:
     parser = build_parser()
     option_strings = {
         option
@@ -291,6 +291,15 @@ def test_public_cli_exposes_exactly_the_seventeen_premat_options() -> None:
     }
     assert option_strings == {
         "--premat",
+        "--premat_materialisation_device",
+        "--premat_cpu_preparation",
+        "--premat_cpu_layer_batch_size",
+        "--premat_cpu_workers",
+        "--premat_cpu_threads_per_worker",
+        "--premat_cpu_transfer_timing",
+        "--premat_cpu_transfer_lead_ms",
+        "--premat_cpu_staging_limit_mb",
+        "--premat_cpu_checkpoint_replay",
         "--premat_allocator_aware_admission",
         "--premat_attention_mode",
         "--premat_timing",

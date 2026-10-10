@@ -297,6 +297,14 @@
     const card = ensure_compatibility_card();
     const mount = by_id("processing_resource_compatibility_plot");
     if (!card || !mount) return;
+    if (payload.metadata?.materialisation_device === "cpu_and_gpu" || payload.cpu_summary) {
+      processing_view.compatibility_available = true;
+      card.hidden = !processing_view.charts_tab_visible;
+      const source = by_id("processing_compatibility_source");
+      if (source) source.textContent = "N/A: CPU materialisation";
+      await processing_plot("processing_resource_compatibility_plot", [], {annotations:[{text:"N/A: CPU materialisation",showarrow:false,xref:"paper",yref:"paper",x:0.5,y:0.5}],xaxis:{visible:false},yaxis:{visible:false},margin:{t:10,b:10,l:10,r:10}});
+      return;
+    }
     const compatibility = compatibility_rows(payload);
     processing_view.compatibility_available = compatibility.length > 0;
     const source = compatibility_source(payload);

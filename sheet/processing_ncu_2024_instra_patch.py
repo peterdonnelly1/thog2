@@ -211,6 +211,10 @@ def maybe_reexec_under_nsys(
     environment[_processing._PROCESSING_HANDOFF_ENV] = str(handoff_path)
     environment[_processing._PROCESSING_CAPTURE_METADATA_ENV] = str(capture_metadata_path)
 
+    # vvv THOG active Instra launcher shares CPU full-update capture selection
+    capture_update, rewritten_arguments, cpu_full_capture = _processing.resolve_processing_capture(arguments, capture_update, profiler)
+    # ^^^ THOG
+
     if profiler == "nsys":
         nsys = _processing._find_nsys()
         if nsys is None:
@@ -229,7 +233,7 @@ def maybe_reexec_under_nsys(
         )
         print(
             f"THOG2 PREMAT processing capture: Nsight Systems @ {frequency} Hz; "
-            f"capturing update {capture_update}, first forward microstep",
+            f"capturing update {capture_update}, " + ("complete optimizer update" if cpu_full_capture else "first forward microstep"),
             flush=True,
         )
         completed = subprocess.run(command, env=environment)
@@ -277,6 +281,9 @@ def maybe_reexec_under_nsys(
             capture_frequency_hz=frequency,
             handoff=handoff,
             capture_metadata=capture_metadata,
+            # vvv THOG CPU precursors, copies, memory and replay must reach the active normalizer
+            **({"cpu_report": json.loads((temporary_root / "cpu_capture.json").read_text())} if (temporary_root / "cpu_capture.json").exists() else {}),
+            # ^^^ THOG
         )
         _postrun_progress(5, total, "GPU samples, kernel intervals and resource attribution normalized")
 

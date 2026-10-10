@@ -65,6 +65,9 @@ from .plastic_depth import (
 # ^^^ THOG
 # vvv THOG dynamic pre-materialisation configuration validation
 from .premat import validate_premat_configuration
+# vvv THOG shared CPU configuration and identity resolution
+from .premat_cpu_config import CPU_DEFAULTS, cpu_config_dict, cpu_identity, strip_inactive_cpu, validate_cpu_configuration, resolve_cpu_threads
+# ^^^ THOG
 # ^^^ THOG
 
 
@@ -301,6 +304,17 @@ class TrainingConfig:
     premat: str = "disabled"
     premat_attention_mode: str = "fused"
     premat_timing: str = "as_the_code_flies"
+    # vvv THOG CPU provider settings remain dormant at GPU defaults
+    premat_materialisation_device: str = "gpu"
+    premat_cpu_preparation: str = "eager"
+    premat_cpu_layer_batch_size: str = "single_layer"
+    premat_cpu_workers: int = 1
+    premat_cpu_threads_per_worker: int = 0
+    premat_cpu_transfer_timing: str = "as_the_code_flies"
+    premat_cpu_transfer_lead_ms: float = 0.0
+    premat_cpu_staging_limit_mb: float = 0.0
+    premat_cpu_checkpoint_replay: str = "disabled"
+    # ^^^ THOG
     premat_target_layer: int = 1
     premat_target_matrix: object = None                                                                                                                    # <<< THOG persist optional fused-family PREMAT selector set through training/checkpoint config
     premat_weight_matrix_target_order: str = "r_to_l"
@@ -617,6 +631,7 @@ class TrainingConfig:
             raise ValueError("premat_enable_gpu_timing_diagnostic must be bool")
         if not isinstance(self.premat_enable_shadow_mode, bool):
             raise ValueError("premat_enable_shadow_mode must be bool")
+        validate_cpu_configuration(self)                 # <<< THOG reject unsupported CPU combinations before model allocation
         validate_premat_configuration(
             premat=self.premat,
             attention_mode=self.premat_attention_mode,
@@ -1053,7 +1068,7 @@ class TrainingConfig:
 
     # vvv THOG serialize no dormant PLASTIC DEPTH fields when disabled so checkpoint and report metadata remain exact regressions
     def persistent_dict(self) -> Dict[str, Any]:
-        values = asdict(self)
+        values = strip_inactive_cpu(asdict(self))         # <<< THOG GPU persistent configuration remains byte stable
         if values.get("instrumentation__optimizer_histories__full_matrix_every_n_steps") == 0:
             values.pop("instrumentation__optimizer_histories__full_matrix_every_n_steps", None)
         # vvv THOG old optimizer checkpoint identity is unchanged at default settings
@@ -1158,6 +1173,7 @@ class TrainingConfig:
                     "premat": self.premat,
                     "premat_attention_mode": self.premat_attention_mode,
                     "premat_timing": self.premat_timing,
+                    **(cpu_config_dict(self) if self.premat_materialisation_device == "cpu_and_gpu" else {}),             # <<< THOG carry numerical provider to model arguments
                     "premat_target_layer": self.premat_target_layer,
                     "premat_target_matrix": self.premat_target_matrix,                                                                                     # <<< THOG pass selected PREMAT matrix into SheetGPTConfig
                     "premat_weight_matrix_target_order": self.premat_weight_matrix_target_order,
@@ -1329,6 +1345,8 @@ class TrainingConfig:
                 "logging": self.premat_logging,
                 "instra": self.premat_instra,
             }
+        if self.premat_materialisation_device == "cpu_and_gpu":
+            identity["premat_cpu"] = cpu_config_dict(self)  # <<< THOG CPU experiments have distinct checkpoint identities
         return identity
 
     # vvv THOG schema-2 checkpoint signatures must stay available after execution-only fields such as max_wall_minutes are added

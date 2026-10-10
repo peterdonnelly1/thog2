@@ -275,7 +275,7 @@
   },
   "--dropout": {
     "category": "GPT-2 Hyperparameters",
-    "default": 0.0,
+    "default": 0,
     "help": "model dropout probability",
     "kind": "dimension",
     "type": "float"
@@ -393,7 +393,7 @@
   },
   "--grad-clip": {
     "category": "GPT-2 Hyperparameters",
-    "default": 1.0,
+    "default": 1,
     "help": "gradient-norm clipping threshold",
     "kind": "dimension",
     "type": "float"
@@ -495,7 +495,7 @@
   },
   "--hyperblock-loop-decay": {
     "category": "Geometry",
-    "default": 1.0,
+    "default": 1,
     "help": "recurrent update decay in (0,1]",
     "kind": "dimension",
     "type": "float"
@@ -536,7 +536,7 @@
       "linear"
     ],
     "default": null,
-    "help": "absolute-layer observational \u0394loss heatmap; absent means disabled",
+    "help": "absolute-layer observational Δloss heatmap; absent means disabled",
     "kind": "dimension",
     "type": "string"
   },
@@ -768,7 +768,7 @@
   },
   "--min-lr": {
     "category": "GPT-2 Hyperparameters",
-    "default": 6e-05,
+    "default": 0.00006,
     "help": "direct floating-point minimum LR",
     "kind": "dimension",
     "short": "-f",
@@ -1120,7 +1120,7 @@
   },
   "--plastic__layer_count_cost_weight": {
     "category": "Variable Depth",
-    "default": 0.0,
+    "default": 0,
     "help": "layer-cost penalty weight",
     "kind": "dimension",
     "type": "float"
@@ -1161,7 +1161,7 @@
   },
   "--plastic__layer_count_probe_noise_lambda": {
     "category": "Variable Depth",
-    "default": 3.0,
+    "default": 3,
     "help": "directional_coherence robust significance threshold; ignored by Sen/Kendall and jump modes",
     "kind": "dimension",
     "type": "float"
@@ -1309,7 +1309,7 @@
   },
   "--premat_diagnostic_layer_delay_ms": {
     "category": "Premat",
-    "default": 0.0,
+    "default": 0,
     "help": "Diagnostic host-dispatch delay after each non-final layer; default 0",
     "kind": "fixed",
     "type": "float"
@@ -1330,7 +1330,7 @@
   },
   "--premat_gpu_memory_buffer_gb": {
     "category": "Premat",
-    "default": 1.0,
+    "default": 1,
     "help": "global CUDA reserve shared with memory_budget",
     "kind": "dimension",
     "type": "float"
@@ -1759,5 +1759,106 @@
     "kind": "dimension",
     "options_help": "integers from 2 through D (--n-embd), including 512 and 1024 when D=1024",
     "type": "int"
+  },
+  "--premat_materialisation_device": {
+    "category": "Premat",
+    "kind": "dimension",
+    "type": "string",
+    "default": "gpu",
+    "help": "Select existing GPU PREMAT or CPU preparation with mandatory non-waiting ordinary GPU fallback.",
+    "options_help": "Select existing GPU PREMAT or CPU preparation with mandatory non-waiting ordinary GPU fallback.",
+    "choices": [
+      "gpu",
+      "cpu_and_gpu"
+    ]
+  },
+  "--premat_cpu_preparation": {
+    "category": "Premat",
+    "kind": "dimension",
+    "type": "string",
+    "default": "eager",
+    "help": "Choose CPU preparation trigger independently of upload timing and layer batch.",
+    "options_help": "Choose CPU preparation trigger independently of upload timing and layer batch.",
+    "choices": [
+      "eager",
+      "scheduled",
+      "demand_driven"
+    ],
+    "cpu_only": true
+  },
+  "--premat_cpu_layer_batch_size": {
+    "category": "Premat",
+    "kind": "dimension",
+    "type": "string",
+    "default": "single_layer",
+    "help": "single_layer, all_layers (every physical layer 1..L for selected families), or integer >= 2.",
+    "options_help": "single_layer, all_layers (every physical layer 1..L for selected families), or integer >= 2.",
+    "cpu_only": true
+  },
+  "--premat_cpu_workers": {
+    "category": "Premat",
+    "kind": "dimension",
+    "type": "int",
+    "default": 1,
+    "help": "Separate spawned CPU workers with shared snapshots and matrix banks; no CUDA contexts.",
+    "options_help": "Separate spawned CPU workers with shared snapshots and matrix banks; no CUDA contexts.",
+    "cpu_only": true
+  },
+  "--premat_cpu_threads_per_worker": {
+    "category": "Premat",
+    "kind": "dimension",
+    "type": "int",
+    "default": 0,
+    "help": "Native computation threads per worker. 0 resolves from CPU affinity and reserves a training core.",
+    "options_help": "Native computation threads per worker. 0 resolves from CPU affinity and reserves a training core.",
+    "cpu_only": true
+  },
+  "--premat_cpu_transfer_timing": {
+    "category": "Premat",
+    "kind": "dimension",
+    "type": "string",
+    "default": "as_the_code_flies",
+    "help": "Choose GPU upload timing. Completed copies alone qualify as FULL HIT; predicted mode is approximate.",
+    "options_help": "Choose GPU upload timing. Completed copies alone qualify as FULL HIT; predicted mode is approximate.",
+    "choices": [
+      "as_the_code_flies",
+      "previous_gemm_leading_edge",
+      "as_soon_as_ready",
+      "demand_driven",
+      "predicted_gemm_start"
+    ],
+    "cpu_only": true
+  },
+  "--premat_cpu_transfer_lead_ms": {
+    "category": "Premat",
+    "kind": "dimension",
+    "type": "float",
+    "default": 0,
+    "help": "Non-negative intended availability lead before predicted GEMM. Applies only to predicted_gemm_start.",
+    "options_help": "Non-negative intended availability lead before predicted GEMM. Applies only to predicted_gemm_start.",
+    "cpu_only": true,
+    "predicted_only": true
+  },
+  "--premat_cpu_staging_limit_mb": {
+    "category": "Premat",
+    "kind": "dimension",
+    "type": "float",
+    "default": 0,
+    "help": "GPU storage cap in MiB, including pending destinations, copies and autograd retention. 0 resolves to two selected layer sets.",
+    "options_help": "GPU storage cap in MiB, including pending destinations, copies and autograd retention. 0 resolves to two selected layer sets.",
+    "cpu_only": true
+  },
+  "--premat_cpu_checkpoint_replay": {
+    "category": "Premat",
+    "kind": "dimension",
+    "type": "string",
+    "default": "disabled",
+    "help": "Permit CPU matrices only for actual checkpoint replay segments; preserve checkpoint size, RNG and early stop.",
+    "options_help": "Permit CPU matrices only for actual checkpoint replay segments; preserve checkpoint size, RNG and early stop.",
+    "choices": [
+      "disabled",
+      "enabled"
+    ],
+    "cpu_only": true
   }
 }
