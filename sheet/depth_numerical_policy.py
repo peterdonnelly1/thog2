@@ -25,8 +25,9 @@ def dtype_name(dtype):
 def effective_depth_policy(trajectory, *, qualify_cpu=True):
     coefficient = next(iter(trajectory.coefficients.values()))
     backend = "matmul" if getattr(trajectory, "depth_materialisation_matmul", False) else "einsum"
-    mixed = torch.is_autocast_enabled("cuda") and backend == "einsum"
-    working = torch.get_autocast_dtype("cuda") if mixed else coefficient.dtype
+    device_type = coefficient.device.type
+    mixed = torch.is_autocast_enabled(device_type) and backend == "einsum" and coefficient.shape[-1] > 1
+    working = torch.get_autocast_dtype(device_type) if mixed else coefficient.dtype
     if qualify_cpu:
         if coefficient.dtype not in (torch.float32, torch.float16, torch.bfloat16) or working not in (torch.float32, torch.float16, torch.bfloat16):
             raise ValueError("unqualified DEPTH numerical policy")
@@ -43,7 +44,7 @@ def materialize_cpu(coefficient, depth_row, policy):
     # Conversion precedes arithmetic: a post-hoc BF16 cast of FP32 operands is not CUDA autocast.
     coefficient = coefficient.to(dtype=working).float()
     depth_row = depth_row.to(dtype=working).float()
-    with torch.no_grad():
+    with torch.no_grad(), torch.autocast(coefficient.device.type, enabled=False):
         if policy.backend == "matmul":
             output = coefficient.reshape(-1, coefficient.shape[-1]).matmul(depth_row)
             output = output.reshape(coefficient.shape[:2])
@@ -66,43 +67,4 @@ class CpuDepthBinding:
         from .depth_trajectory import _PrematerializedDepthBundle
         return _PrematerializedDepthBundle.apply(cached, binding, *pairs)
 
-
-def prematerialized_policy_forward(ctx, cached, binding, *pairs):
-    ctx.binding = binding
-    dtype = getattr(torch, binding.policy.operand_dtype)
-    saved, specs = [], []
-    for i in range(0, len(pairs), 2):
-        coefficient, row = pairs[i:i + 2]
-        learn_c, learn_b = coefficient.requires_grad, row.requires_grad
-        # Native mm/bmm saves its left operand first when both dependencies differentiate.
-        if learn_b:
-            c = coefficient.to(dtype=dtype).reshape(-1, coefficient.shape[-1])
-            saved.append(c if binding.policy.backend == "matmul" else c.t().reshape(1, coefficient.shape[-1], -1))
-        if learn_c:
-            b = row.to(dtype=dtype)
-            saved.append(b if binding.policy.backend == "matmul" else b.reshape(1, 1, -1))
-        specs.append((coefficient.shape, coefficient.dtype, row.dtype, learn_c, learn_b))
-    ctx.save_for_backward(*saved)
-    ctx.specs = specs
-    return cached.view_as(cached)
-
-def prematerialized_policy_backward(ctx, gradient):
-    values = iter(ctx.saved_tensors)
-    result, offset = [None, None], 0
-    for shape, c_dtype, b_dtype, learn_c, learn_b in ctx.specs:
-        coefficient = next(values) if learn_b else None
-        if coefficient is not None:
-            coefficient = coefficient.reshape(-1, shape[-1]) if ctx.binding.policy.backend == "matmul" else coefficient.reshape(shape[-1], -1).t()
-        row = next(values).reshape(-1) if learn_c else None
-        g = gradient[offset:offset + shape[0]].reshape(-1)
-        with torch.autocast(device_type=gradient.device.type, enabled=False):
-            if ctx.binding.policy.backend == "matmul":
-                gc = g[:, None].matmul(row[None, :]).reshape(shape).to(c_dtype) if learn_c else None
-                gb = coefficient.t().matmul(g).to(b_dtype) if learn_b else None
-            else:
-                gc = torch.bmm(g.reshape(1, -1, 1), row.reshape(1, 1, -1)).reshape(shape).to(c_dtype) if learn_c else None
-                gb = torch.bmm(coefficient.t().reshape(1, shape[-1], -1), g.reshape(1, -1, 1)).reshape(-1).to(b_dtype) if learn_b else None
-        result.extend((gc, gb))
-        offset += shape[0]
-    return tuple(result)
 # ^^^ THOG

@@ -149,9 +149,10 @@ def test_actual_cuda_whole_trainer_all_providers_match_with_dropout_and_rotated_
     atol, rtol = (3e-5, 3e-4) if dtype == "float32" else (4e-4, 0.02) if dtype == "float16" else (3e-3, 0.06)
     for repeat, modes in enumerate((("off", "gpu", "cpu_and_gpu"), ("cpu_and_gpu", "off", "gpu"))):
         results = {mode: field.run(options, mode, repeat) for mode in modes}
-        for mode in ("gpu", "cpu_and_gpu"):
-            rows = field.compare_run_results(results["off"], results[mode], repeat=repeat, mode=mode, atol=atol, rtol=rtol)
-            assert all(row["passed"] for row in rows), rows
+        rows = [row for mode in ("gpu", "cpu_and_gpu") for row in field.compare_run_results(results["off"], results[mode], repeat=repeat, mode=mode, atol=atol, rtol=rtol)]
+        failed = [row for row in rows if not row["passed"]]
+        if failed:
+            pytest.fail(json.dumps({"backend": backend, "dtype": dtype, "repeat": repeat, "failed_comparisons": failed}, indent=2), pytrace=False)
 
 
 def test_empty_gradient_comparison_cannot_pass():
@@ -173,7 +174,8 @@ def test_actual_cuda_30_updates_with_warmup_match_all_providers(monkeypatch, iso
     isolated_materializer.install_depth_materialisation_runtime()
     for repeat, modes in enumerate((("off", "gpu", "cpu_and_gpu"), ("gpu", "cpu_and_gpu", "off"), ("cpu_and_gpu", "off", "gpu"))):
         results = {mode: field.run(options, mode, repeat) for mode in modes}
-        for mode in ("gpu", "cpu_and_gpu"):
-            rows = field.compare_run_results(results["off"], results[mode], repeat=repeat, mode=mode, atol=3e-5, rtol=3e-4)
-            assert all(row["passed"] for row in rows), rows
+        rows = [row for mode in ("gpu", "cpu_and_gpu") for row in field.compare_run_results(results["off"], results[mode], repeat=repeat, mode=mode, atol=3e-5, rtol=3e-4)]
+        failed = [row for row in rows if not row["passed"]]
+        if failed:
+            pytest.fail(json.dumps({"backend": backend, "dtype": "float32", "repeat": repeat, "failed_comparisons": failed}, indent=2), pytrace=False)
 # ^^^ THOG

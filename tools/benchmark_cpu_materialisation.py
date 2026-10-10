@@ -168,12 +168,21 @@ def run(options,mode,repeat):
     cpu=mode=="cpu_and_gpu"
     config=training_config(options,mode)
     tokens=torch.arange(max(65536,options.context*16),dtype=torch.long).remainder(128)
-    trainer=SharedTrainer(config,tokens,tokens)
+    # PREMAT always enables fast_discard. Compare against the same ordinary
+    # DEPTH graph: retained-update mode projects summed weight gradients once,
+    # which has a different accumulation order and AdamW rounding trajectory.
+    previous_fast_discard=os.environ.get("THOG2_FAST_DISCARD")
+    os.environ["THOG2_FAST_DISCARD"]="true"
+    try:
+        trainer=SharedTrainer(config,tokens,tokens)
+    finally:
+        if previous_fast_discard is None:os.environ.pop("THOG2_FAST_DISCARD",None)
+        else:os.environ["THOG2_FAST_DISCARD"]=previous_fast_discard
     runtime=getattr(trainer.raw_model,"_premat_runtime",None)
     try:
         training_seed=options.training_seed+repeat
         seed_training_rng(training_seed,trainer.device)
-        initial_conditions={"training_seed":training_seed,"model_state_sha256":model_digest(trainer.raw_model),**rng_fingerprints(trainer)}
+        initial_conditions={"training_seed":training_seed,"fast_discard":trainer.raw_model.config.fast_discard,"model_state_sha256":model_digest(trainer.raw_model),**rng_fingerprints(trainer)}
         for _ in range(options.warmup):
             result=trainer.train_one_update()
             if result.get("skipped_update"):raise AssertionError("warmup update was skipped")

@@ -1,48 +1,48 @@
-# CPU materialisation follow-up hand-off (10 October 2026)
+# CPU materialisation native-binding hand-off (10 October 2026)
 
 ## Scope and authorization
 
-Repository: `peterdonnelly1/thog2`, branch `cpu_materialisation`.
-The user authorizes publishing branch updates through the GitHub connector without confirmation. Give informative progress heartbeats with estimated percentages, followed by download and smoke/preliminary commands. Do not spawn agents without an explicit request.
+Repository `peterdonnelly1/thog2`, branch `cpu_materialisation`. The user authorizes branch publication through the GitHub connector without another confirmation. Give informative heartbeats with estimated progress, then the download and smoke/preliminary commands. Do not spawn agents without an explicit request. Use existing scratch inputs; do not retrieve them through Library.
 
 Local checkout: `/workspace/scratch/75ac1893c477/thog2`.
-Parent commit: `a94dcd6480ffc214399d8e05706b1ee9dc3925d3`.
-Pristine regression checkout: `/workspace/scratch/0fb8ac34290d/thog2_baseline`, commit `e29e32db916fc5ceb87a089d057fb78456c1a98a`. Preserve the original recovery checkout and stash.
+Parent: `54c37c8c548996527e37895062a4d0528568f71c`.
+Pristine base: `e29e32db916fc5ceb87a089d057fb78456c1a98a`, recreated at `/workspace/scratch/75ac1893c477/thog2_baseline`. Preserve older recovery checkouts/stashes. The published parent is also checked out read-only at `../thog2_published`.
 
 ## Field evidence and diagnosis
 
-The user reported successful FP32 smoke and 30-update/five-warmup/three-repeat preliminary benchmarks at `a94dcd6`, but subsequently supplied a test log with **4 failed, 414 passed**. Inputs are `/workspace/scratch/75ac1893c477/upload/temp.text` (pytest) and `temp_2.txt` (successful smoke). Both have already been read; do not retrieve them again through Library.
+Input `/workspace/scratch/75ac1893c477/upload/Pasted text(20261010-052309).txt` has already been read. Scruffy used the correct parent and ran `tests/test_cpu_materialisation*.py tests/test_premat_matmul_binding.py`: **3 failed, 426 passed**. Failed whole-trainer cases were FP16 matmul (GPU, repeat 1), FP16 einsum (GPU, repeat 0), and BF16 einsum (CPU+GPU, repeat 0). Admission and retained-checkpoint errors from the preceding attempt were resolved. Assertion representations truncated tensor-level diagnostics.
 
-The two matmul failures (FP16 and BF16 training) report `actual=16384, predicted=8192` for a DOWN matrix. Native DEPTH matmul disables autocast and keeps FP32 coefficient/output storage, while GPU PREMAT incorrectly priced every weight using the activation autocast width. CPU PREMAT had already corrected this privately; GPU-only did not.
+Actual CPU trainers reproduced two independent causes:
 
-The two einsum checkpoint failures follow the matmul errors. An original-forward exception leaves PyTorch's non-reentrant checkpoint generator and saved-tensor hooks alive when its traceback is retained. Later initialization/forward tensors are captured by that failed frame, causing misleading replay metadata mismatches. This cascade was reproduced with actual CPU tensors and checkpoint autograd, retaining the first error and running another model afterward; see `../reproduce_mixed.py` and `../reproduce_mixed.log` (diagnostics, not production code).
+1. PREMAT enables fast-discard, while the off reference retained detached operational matrices throughout the optimizer update. Different sum/project ordering produced tiny gradient differences amplified by AdamW near zero attention key-bias gradients. A scratch prototype that called the ordinary materializer also retained that update wrapper, initially obscuring this distinction. The corrected benchmark constructs all providers with fast-discard enabled and records that setting. The caller's environment is restored immediately after construction, including exceptions. Previous timings require rerunning with this changed off reference.
+2. Legacy GPU einsum backward promoted operands to FP32, unlike native autocast bmm backward's low-precision result rounding before casting back to FP32. With the benchmark execution contract matched, four FP16/BF16 einsum trainer cases still failed on the published parent. Native autograd around the cached value fixes those local reproductions without adjusting tolerances.
 
-## Implemented fixes
+## Implementation
 
-1. `sheet/model.py` supplies an element-size callback resolved from the actual DEPTH numerical policy on each pass.
-2. `sheet/premat.py` uses that callback for weight storage/admission, while activation and unfused attention-intermediate estimates retain activation precision. The generic runtime's existing default remains compatible.
-3. `sheet/checkpointing.py` wraps all three checkpoint entry points. On a forward exception, `traceback.clear_frames` clears unwound frame locals so the upstream generator closes its hook context. The same exception, message and traceback locations propagate; successful checkpoint behavior is unchanged.
-4. `tests/test_cpu_materialisation_mixed_precision.py` adds eight real-tensor FP16/BF16 admission cases across matmul/einsum and fused/unfused attention, and three interrupted-forward recovery cases across dense/sparse/prefix checkpoint entry points. CUDA events/memory are simulated only for the admission test; these are not CUDA timing results.
+- `sheet/premat_native_binding.py` substitutes one qualified mv/bmm (order-one einsum uses mul) and optional packed cat below autograd. Native forward graph construction, saved tensors and backward kernels remain intact; the physical contraction and packed copy do not run.
+- Shared `_PrematerializedDepthBundle` dispatches both providers to this binding. `_PrematConsumerStreamAnchor` initializes the ordinary gradient edge on the consumer stream without an identity node. Upload storage leases live in native graph metadata. Learned rows retain required coefficient operands; fixed rows avoid full autocast coefficient copies using an unread scalar-backed shape placeholder, with private autocast caching disabled.
+- Effective policy follows the tensor's actual device and treats order-one einsum as FP32 pointwise arithmetic. Worker materialisation disables ambient autocast to honor its explicit policy.
+- `tools/benchmark_cpu_materialisation.py` matches fast-discard during trainer construction and records it in `initial_conditions`. Existing seeds, gradient capture, timed endpoint, no-wait fallback and tolerances remain.
+- Hardware whole-trainer pytest failures print complete JSON rows for both cached providers rather than stopping at a truncated first-provider assertion. No dashboard production changes.
 
-No numerical tolerance was relaxed. No new diagnostic wait was added to measured training. No dashboard production code changed in this follow-up.
+## Verification
 
-## Verification and remaining steps
+New native-binding suite: **25 passed**, `../native_binding_final_tests.log`. Twelve trainer cases cover both backends, FP32/FP16/BF16, two seeds/orders, dropout, accumulation, checkpoint replay and AdamW. Both forced cached providers match native losses, gradients, parameters and optimizer state exactly (`atol=rtol=0`). Other cases cover graph/gradient rounding with learned rows, storage/lease lifetime, interception of physical contraction, order-one behavior and the consumer edge. The initial 23 cases against the published parent with matched fast-discard had **13 failures, ten passes**, including four numerical einsum trainer failures (`../native_binding_published_red.log`).
 
-- Before production changes: new tests **7 failed, 4 passed**. Failures reproduce all four matmul admission combinations and all three interrupted-checkpoint cases.
-- After changes: new tests **11 passed**, `../mixed_green.log`.
-- Extended targeted run: **413 passed, 185 skipped, 1 known baseline failure**, `../mixed_targeted.log`, `../mixed_targeted.xml`. The failure is the existing final-checkpoint-relay CLI spelling assertion, `test_cli_flag_is_default_disabled_and_literal_spelling_enables_it`; confirm its identity/count/kind against the pristine base XML.
-- Complete candidate regression finished: **2,153 passed, 204 skipped, 84 failed, nine deselected, 484 subtests passed**. Outputs are `../mixed_full.log`, `../mixed_full.xml` and `../mixed_comparison.json`. It uses the same five legacy browser exclusions and nine already-exercised timeout deselections listed in `evidence/cpu_materialisation_final/candidate_selection.json`. Comparison with `evidence/cpu_materialisation_final/base.xml`, preserving the renamed CLI test mapping, found **no new failure IDs, increased failure counts, new exception kinds or missing tests**. Base has 85 failures; one existing fast-discard equivalence test no longer failed. Do not describe the entire suite as green.
-- All **41 static Instra regressions** passed again, `../mixed_static.log`. Unchanged UI code already passed both real browsers and the preceding GitHub CI at `a94dcd6`. The browser executables under `/root/.cache/ms-playwright` disappeared in this session; workspace Playwright packages remain.
-- Changed Python compilation and git whitespace checks passed. Testing/verification documents now include the explicit mixed-precision rerun requirement and final local results.
-- This hand-off is included in the seven-file follow-up publication. Identify that commit with `git log -1 --oneline -- docs/CPU_MATERIALISATION_HANDOFF.md` and verify GitHub's branch head before any resumed write. Publication uses the connector, an exact local/GitHub tree comparison, and a non-forced ref update with expected parent `a94dcd6`; do not shell-push or repeat an already-published change.
-- Both preceding CI runs at `a94dcd6` passed: 38015908156 and 38015905554. Check the workflow runs for the new commit before claiming new CI success; local hardware skips are not hardware passes.
-- Local runtime is Python 3.12, Torch 2.8 CPU, with no CUDA GPU. Scruffy must rerun the full `tests/test_cpu_materialisation*.py tests/test_premat_matmul_binding.py` command. Existing CUDA whole-trainer tests cover FP32/FP16/BF16 and both backends. Hardware passes must not be inferred from local skips or the preceding FP32 benchmark.
+Affected suite before the two added order-one cases: **275 passed, 177 CUDA-dependent skips**, `../native_all_targeted.log`. The final complete suite includes all 25 new cases.
 
-## Runtime and connectors
+Fresh complete comparison: **2,178 passed, 204 skipped, 84 existing failures, nine deselected, 484 subtests passed**. Fresh pristine base has the same 84 failures. Compared test IDs, counts and exception kinds; no introduced failures or missing tests. The same five legacy browser exclusions and nine previously exercised timeout deselections apply. All **41 candidate static Instra regressions** and **40 baseline scripts** passed. Two initial script failures were missing NODE_PATH, corrected by using existing `browser_env/node_modules`; they were dependency failures in both trees. Changed Python compilation and whitespace checks passed.
 
-Python: `/workspace/scratch/75ac1893c477/test_env/bin/python` (symlink repaired to `/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3`). Use `PYTHONPATH=. OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1`.
-Discover tool metadata selectively from `ALL_TOOLS`. Relevant connector methods are `github_fetch`, `github_create_tree`, `github_create_commit`, and `github_update_ref`. Fetch JSON is inside `structuredContent.content`; do not print full file/tree payloads. Read-only Git fetch works with `GIT_CONFIG_GLOBAL=/dev/null` and the public HTTPS URL. All remote mutations use the connector.
+Full evidence was generated in `evidence/cpu_materialisation_native/` and moved to `../native_regression_evidence/` before publication to keep scratch logs out of the commit. `comparison.json` records failure IDs/counts/kinds and missing-test results. `candidate.xml`, `base.xml` and `static.json` preserve detailed evidence. Baseline's stdout stopped updating early, but its complete XML contains every baseline case and the final test IDs; both suites completed with existing failures. Do not call the entire Python suite green.
 
-## Final user instructions
+## Publication and runtime
 
-Provide the standard fetch/switch/fast-forward stanza with the new expected commit, followed by the same correctness command and FP32 smoke/preliminary commands. Point out that the new commit fixes the failures but CUDA requalification still needs the user's run. Include explicit FP16/BF16 smoke guidance for both backends in the testing document. Do not present FP32 benchmark passes as mixed-precision qualification or general performance improvement.
+Python `/workspace/scratch/75ac1893c477/test_env/bin/python` is a symlink to `$CODEX_PRIMARY_RUNTIME_PYTHON`; Torch 2.8 is CPU-only. Use `PYTHONPATH=. OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1`. Static Node checks require `NODE_PATH=/workspace/scratch/75ac1893c477/browser_env/node_modules`.
+
+Discover GitHub tools selectively. Fetch branch state before publishing, create an exact tree from reviewed files, verify it against the local git tree, create a commit and advance the branch non-forcibly with the expected parent. Do not shell-push. Identify this publication by `git log -1 --oneline -- docs/CPU_MATERIALISATION_HANDOFF.md` and inspect GitHub's head before any resumed mutation. GitHub branch was verified at `54c37c8` during implementation. Query Actions with `github_fetch` on `actions/runs?head_sha=...`; the workflow wrapper filters to PR events. Never assume prior CI results establish new CI success.
+
+## User handoff and limits
+
+The user asked why repeated attempts took so long. Already explained that independent implementation/harness faults accumulated, early validation was inadequate, and no local CUDA GPU makes hardware handoffs necessary. Continue authorized work without asking permission; do not present CPU tests as CUDA qualification.
+
+After publication, provide fetch/switch/fast-forward commands and the new expected commit. First rerun the full correctness command on Scruffy with `set -o pipefail` and `tee`, then the FP32 smoke and 30-update/five-warmup/three-repeat preliminary commands. Testing documentation includes FP16/BF16 smoke commands for both backends. CUDA stream behavior, CPU/GPU value differences and performance remain unqualified until these actual hardware runs pass. Preserve JSONs even when parity fails. Link the branch testing instructions. No new speedup or memory-improvement claim.
