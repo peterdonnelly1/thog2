@@ -1,5 +1,8 @@
 name: CPU materialisation regression
 on:
+  push:
+    branches:
+      - cpu_materialisation
   pull_request:
     paths:
       - 'sheet/**'
@@ -31,7 +34,7 @@ jobs:
           bash -n train_OWT_core.sh
           node --check sheet/local_dashboard_assets/dashboard_runner.js
       - name: CPU arithmetic, checkpoint and lifecycle regressions
-        run: PYTHONPATH=. python -m pytest -q tests/test_cpu_materialisation*.py tests/test_premat.py tests/test_run_thog2_owt_startup_report.py tests/test_stage3b_model_semantic_attention.py
+        run: PYTHONPATH=. python -m pytest -q tests/test_cpu_materialisation*.py tests/test_premat_matmul_binding.py tests/test_premat.py tests/test_run_thog2_owt_startup_report.py tests/test_stage3b_model_semantic_attention.py
 
   regression:
     runs-on: ubuntu-latest

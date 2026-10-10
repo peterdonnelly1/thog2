@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import atexit
 import ctypes
+import math
 from collections import OrderedDict, deque
 from dataclasses import dataclass, field
 import multiprocessing as mp
@@ -321,7 +322,7 @@ class CpuPreparationProvider:
 
 class GemmPredictor:
     def __init__(self, limit=2048):
-        self.limit, self.samples, self.uploads = limit, OrderedDict(), deque(maxlen=8)
+        self.limit, self.samples, self.uploads = limit, OrderedDict(), OrderedDict()
         self.reset_reason = "cold_start"
 
     def reset(self, reason):
@@ -330,19 +331,30 @@ class GemmPredictor:
         self.reset_reason = reason
 
     def observe(self, context, offset_ms, uncertainty_ms):
-        if uncertainty_ms is None or uncertainty_ms > 5 or offset_ms < 0:
+        if uncertainty_ms is None or not 0 <= uncertainty_ms <= 5 or not math.isfinite(offset_ms) or offset_ms < 0:
             return
         self.samples.setdefault(context, deque(maxlen=8)).append(float(offset_ms))
         self.samples.move_to_end(context)
         if len(self.samples) > self.limit:
             self.samples.popitem(last=False)
 
+    def observe_upload(self, context, duration_ms):
+        if not math.isfinite(duration_ms) or duration_ms <= 0:
+            return
+        self.uploads.setdefault(context, deque(maxlen=8)).append(float(duration_ms))
+        self.uploads.move_to_end(context)
+        if len(self.uploads) > self.limit:
+            self.uploads.popitem(last=False)
+
     def predict(self, context, origin_ns, lead_ms, uncertainty_ms):
         samples = self.samples.get(context, ())
-        if len(samples) < 3 or uncertainty_ms is None or uncertainty_ms > 5:
+        upload_samples = self.uploads.get(context, ())
+        if len(samples) < 3 or uncertainty_ms is None or not 0 <= uncertainty_ms <= 5:
             return {"prediction_available": False, "prediction_fallback_reason": self.reset_reason if not samples else "insufficient_qualified_observations", "effective_fallback_trigger": "as_the_code_flies"}
+        if not upload_samples:
+            return {"prediction_available": False, "prediction_fallback_reason": "upload_duration_unavailable", "effective_fallback_trigger": "as_the_code_flies"}
         predicted = origin_ns + int(statistics.median(samples) * 1e6)
         availability = predicted - int(lead_ms * 1e6)
-        cost = statistics.median(self.uploads) if self.uploads else 0.0
+        cost = statistics.median(upload_samples)
         return {"prediction_available": True, "predicted_gemm_start_ns": predicted, "intended_gpu_available_ns": availability, "intended_upload_submission_ns": availability - int(cost * 1e6), "transfer_lead_ms": lead_ms, "prediction_uncertainty_ms": uncertainty_ms, "estimated_upload_ms": cost, "qualified_observation_count": len(samples)}
 # ^^^ THOG

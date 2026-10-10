@@ -23,7 +23,7 @@
     const s=payload.cpu_summary||{},m=payload.cpu_runtime||{};
     const rows=[
       ["Eligible matrix uses",s.eligible_matrix_uses],["Full hits",s.full_hits],["Complete misses",s.complete_misses],["Not targeted",s.not_targeted_uses],
-      ["Unique CPU matrices",s.unique_cpu_matrices],["CPU task service",value(s.cpu_service_ms," ms")],
+      ["Completed CPU matrices / jobs",`${s.unique_cpu_matrices??"unknown"} / ${s.unique_cpu_jobs??"unknown"}`],["Unfinished CPU matrices",s.incomplete_cpu_matrices],["CPU task service",value(s.cpu_service_ms," ms")],
       ["H2D / D2H busy",value(s.h2d_busy_us," μs")+" / "+value(s.d2h_busy_us," μs")],
       ["CUDA copy coverage",s.cuda_copy_coverage||"unknown"],["Late uploads / bytes",`${s.late_upload_count??"unknown"} / ${s.late_upload_bytes??"unknown"}`],
       ["H2D bytes / copy versus Main overlap",`${s.h2d_bytes??"unknown"} / ${value(s.copy_main_overlap_us," μs")}`],
@@ -60,11 +60,18 @@
     const traces=old_phases(entries);
     entries.forEach((entry,lane)=>{
       const overlay=entry.timing?.cpu_overlay;if(!overlay?.available)return;
-      const tasks=(overlay.tasks||[]).filter(row=>row.host_start_ms!==null&&row.host_end_ms!==null&&row.host_end_ms>=0);
-      if(tasks.length)traces.push({type:"bar",orientation:"h",name:"CPU tasks (overlay)",x:tasks.map(row=>row.host_end_ms-Math.max(0,row.host_start_ms)),base:tasks.map(row=>Math.max(0,row.host_start_ms)),y:tasks.map(()=>lane+0.23),width:0.10,marker:{color:"#328b69"},hovertext:tasks.map(row=>processing_escape(`${row.cpu_matrix_id} · CPU work counted once; nonadditive`)),hoverinfo:"text"});
+      const tasks=(overlay.tasks||[]).filter(row=>Number.isFinite(row.host_start_ms)&&Number.isFinite(row.host_end_ms)&&row.host_end_ms>=0);
+      if(tasks.length)traces.push({type:"bar",orientation:"h",name:"CPU tasks (overlay)",x:tasks.map(row=>row.host_end_ms-Math.max(0,row.host_start_ms)),base:tasks.map(row=>Math.max(0,row.host_start_ms)),y:tasks.map(()=>lane+0.23),width:0.10,marker:{color:"#328b69"},hovertext:tasks.map(row=>processing_escape(`${row.cpu_matrix_id} · CPU work counted once; nonadditive${row.right_censored?" · right-censored": ""}`)),hoverinfo:"text"});
       const origin=entry.timing.host_update_start_ns;
       const boundaries=(overlay.lifecycle||[]).filter(row=>["upload_submitted","matrix_use","gpu_storage_released"].includes(row.event)&&row.host_time_ns>=origin);
       if(origin&&boundaries.length)traces.push({type:"scatter",mode:"markers",name:"COPY / readiness boundaries (host)",x:boundaries.map(row=>(row.host_time_ns-origin)/1e6),y:boundaries.map(()=>lane-0.23),marker:{symbol:"line-ns",size:10,color:"#427ba8"},hovertext:boundaries.map(row=>processing_escape(`${row.event} · ${row.upload_id||row.matrix_use_id||"unknown identity"} · host boundary; DMA duration requires CUDA evidence`)),hoverinfo:"text"});
+      if(origin){
+        const predictive_fields=[["predicted_gemm_start_ns","Estimated GEMM start","diamond-open"],["intended_gpu_available_ns","Intended upload availability","triangle-up-open"],["actual_gpu_available_ns","Observed upload availability","circle"],["readiness_check_ns","Readiness check","x"]];
+        for(const [field,label,symbol] of predictive_fields){
+          const points=[...new Map((overlay.lifecycle||[]).filter(row=>Number.isFinite(row[field])).map(row=>[`${row.matrix_use_id||row.upload_id}:${row[field]}`,row])).values()];
+          if(points.length)traces.push({type:"scatter",mode:"markers",name:label,x:points.map(row=>(row[field]-origin)/1e6),y:points.map(()=>lane-0.35),marker:{symbol,size:9,color:entry.colour||entry.color||"#427ba8"},hovertext:points.map(row=>processing_escape(`${label} · ${row.matrix_use_id||row.upload_id||"unknown identity"}${row.prediction_uncertainty_ms===undefined?"":` · uncertainty ${value(row.prediction_uncertainty_ms," ms")}`}`)),hoverinfo:"text"});
+        }
+      }
     });
     return traces;
   };

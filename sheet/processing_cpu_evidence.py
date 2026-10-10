@@ -74,20 +74,22 @@ def cpu_task_rows(events, capture_metadata, gpu_start, gpu_end):
     rows = []
     for identity,event in tasks.items():
         start, end = event.get('start_ns'), event.get('end_ns')
-        known = origin is not None and start is not None and end is not None
-        start_us = max(start-origin,0)/1000 if known else None
-        end_us = min(end-origin,duration_ns)/1000 if known else None
-        before = known and end <= origin
-        after = known and start >= origin+duration_ns
+        known = origin is not None and start is not None
+        complete = start is not None and end is not None and end >= start
+        valid = known and (end is None or complete)
+        before = valid and end is not None and end <= origin
+        after = valid and start >= origin+duration_ns
+        start_us = max(start-origin,0)/1000 if valid else None
+        end_us = min((end if end is not None else origin+duration_ns)-origin,duration_ns)/1000 if valid else None
         rows.append({**{key:value for key,value in event.items() if key not in ('event','tensor')},
             'cpu_matrix_id':identity, 'clock_alignment_known':known, 'clock_uncertainty_ms':uncertainty,
             'start_us':None if before or after else start_us, 'end_us':None if before or after else end_us,
-            'duration_us':None if not known or before or after else max(0,end_us-start_us),
-            'cpu_service_us':None if start is None or end is None else (end-start)/1000,
+            'duration_us':None if not valid or before or after else max(0,end_us-start_us),
+            'completed':complete, 'cpu_service_us':(end-start)/1000 if complete else None,
             'precursor':bool(before), 'outside_capture':bool(before or after),
-            'left_censored':bool(known and start < origin < end),
-            'right_censored':bool(known and start < origin+duration_ns < end) if end is not None else True,
-            'within_capture':bool(known and not before and not after),
+            'left_censored':bool(valid and start < origin and not before),
+            'right_censored':end is None or bool(valid and start < origin+duration_ns < end),
+            'within_capture':bool(valid and not before and not after),
             'phase':'cpu_preparation',
         })
     return rows
@@ -145,7 +147,7 @@ def extend_processing(data, output_directory, prefix, report, copies, copies_sup
     late={event.get('upload_id'):event for event in relevant if event.get('event')=='late_copy'}
     released=[event for event in relevant if event.get('event')=='gpu_storage_released']
     release_lags=[(event['host_time_ns']-event['release_submitted_ns'])/1e6 for event in released if event.get('release_submitted_ns') is not None]
-    predictions=[event for event in uses if event.get('prediction_available') is not None]
+    predictions=[event for event in targeted if event.get('prediction_available') is not None]
     errors=[event.get('prediction_error_ms') for event in relevant if event.get('prediction_error_ms') is not None]
     arrival_errors=[event.get('availability_error_ms') for event in relevant if event.get('availability_error_ms') is not None]
 
@@ -157,21 +159,24 @@ def extend_processing(data, output_directory, prefix, report, copies, copies_sup
         'not_targeted_uses':len(uses)-len(targeted) if report is not None else None,
         'full_hits':outcomes['FULL HIT'] if report is not None else None,
         'complete_misses':outcomes['COMPLETE MISS'] if report is not None else None,
-        'fallback_reasons':dict(fallback), 'unique_cpu_matrices':len(tasks) if report is not None else None,
-        'cpu_service_ms':sum(row['cpu_service_us'] or 0 for row in tasks)/1000 if report is not None else None,
+        'fallback_reasons':dict(fallback), 'unique_cpu_matrices':sum(row['completed'] for row in tasks) if report is not None else None,
+        'unique_cpu_jobs':len({row.get('cpu_task_id') for row in tasks if row.get('cpu_task_id')}) if report is not None else None,
+        'incomplete_cpu_matrices':sum(not row['completed'] for row in tasks) if report is not None else None,
+        'cpu_service_ms':sum(row['cpu_service_us'] for row in tasks)/1000 if report is not None and all(row['cpu_service_us'] is not None for row in tasks) else None,
+        'known_cpu_service_ms':sum(row['cpu_service_us'] for row in tasks if row['cpu_service_us'] is not None)/1000 if report is not None else None,
         'cpu_matrix_use_counts':dict(reused), 'phase_counts':dict(Counter(event.get('phase','unknown') for event in uses)),
         'h2d_busy_us':union_duration((row['start_us'],row['end_us']) for row in copies if row['direction']=='H2D') if copies_supported else None,
         'd2h_busy_us':union_duration((row['start_us'],row['end_us']) for row in copies if row['direction']=='D2H') if copies_supported else None,
-        'late_upload_count':len({event.get('upload_id') for event in relevant if event.get('event')=='late_copy'}),
-        'late_upload_bytes':sum(event.get('bytes') or 0 for event in late.values()),
-        'phase_family':phase_family,'cpu_cache_reuse_count':sum(max(0,count-1) for count in reused.values()),
+        'late_upload_count':len({event.get('upload_id') for event in relevant if event.get('event')=='late_copy'}) if report is not None else None,
+        'late_upload_bytes':sum(event.get('bytes') or 0 for event in late.values()) if report is not None else None,
+        'phase_family':phase_family,'cpu_cache_reuse_count':sum(max(0,count-1) for count in reused.values()) if report is not None else None,
         'h2d_bytes':sum(event.get('bytes') or 0 for event in copies if event['direction']=='H2D') if copies_supported else None,
         'd2h_bytes':sum(event.get('bytes') or 0 for event in copies if event['direction']=='D2H') if copies_supported else None,
         'copy_main_overlap_us':union_duration((max(a,item['start_us']),min(b,item['end_us'])) for a,b in main for item in copies if min(b,item['end_us'])>max(a,item['start_us'])) if copies_supported else None,
-        'release_lag_ms':release_lags,'prediction_qualified_uses':sum(bool(event['prediction_available']) for event in predictions),
-        'prediction_unavailable_uses':sum(not event['prediction_available'] for event in predictions),
+        'release_lag_ms':release_lags,'prediction_qualified_uses':sum(bool(event['prediction_available']) for event in predictions) if report is not None else None,
+        'prediction_unavailable_uses':sum(not event['prediction_available'] for event in predictions) if report is not None else None,
         'prediction_error_ms':errors,'arrival_error_ms':arrival_errors,
-        'lifecycle_dropped_events':(report or {}).get('cpu_lifecycle_dropped_events',0),
+        'lifecycle_dropped_events':report.get('cpu_lifecycle_dropped_events',0) if report is not None else None,
         'gpu_co_residency':'N/A: CPU materialisation', 'accounting':'CPU and COPY are overlays; device metrics and exclusive update phase totals are unchanged',
     }
     metadata.update(schema_version=5, materialisation_device='cpu_and_gpu', gpu_co_residency='N/A: CPU materialisation', copy_coverage=data['cpu_summary']['cuda_copy_coverage'])
@@ -191,19 +196,26 @@ def extend_processing(data, output_directory, prefix, report, copies, copies_sup
     return data
 
 
-def update_timing_overlay(runtime, optimizer_update, host_origin_ns):
+def update_timing_overlay(runtime, optimizer_update, host_origin_ns, host_end_ns=None):
     if runtime is None:
         return {'cpu_overlay':{'available':False,'reason':'CPU runtime unavailable','additive':False}}
     report=runtime.report()
-    events=[event for event in report.get('cpu_lifecycle',()) if event.get('optimizer_step')==optimizer_update]
+    all_events = list(report.get('cpu_lifecycle', ()))
+    current_events = [event for event in all_events if event.get('optimizer_step') == optimizer_update]
+    snapshots = {event.get('snapshot_id') for event in current_events if event.get('event') == 'matrix_use' and event.get('snapshot_id') is not None}
+    events = [event for event in all_events if event.get('optimizer_step') == optimizer_update or event.get('snapshot_id') in snapshots]
     tasks={}
     for event in events:
-        if event.get('cpu_matrix_id') and event.get('event')=='cpu_matrix_ready':
-            tasks[event['cpu_matrix_id']]=event
+        if event.get('cpu_matrix_id') and event.get('event') in ('cpu_task_start', 'cpu_matrix_ready'):
+            tasks.setdefault(event['cpu_matrix_id'], {}).update(event)
     rows=[]
     for event in tasks.values():
-        rows.append({**event,'host_start_ms':None if host_origin_ns is None else (event['start_ns']-host_origin_ns)/1e6,
-                     'host_end_ms':None if host_origin_ns is None else (event['end_ns']-host_origin_ns)/1e6})
+        start_ns, end_ns = event.get('start_ns'), event.get('end_ns')
+        observed_end_ns = end_ns if end_ns is not None else host_end_ns
+        rows.append({**event, 'completed':end_ns is not None, 'right_censored':end_ns is None or (host_end_ns is not None and end_ns > host_end_ns),
+                     'precursor':host_origin_ns is not None and end_ns is not None and end_ns <= host_origin_ns,
+                     'host_start_ms':None if host_origin_ns is None or start_ns is None else (start_ns-host_origin_ns)/1e6,
+                     'host_end_ms':None if host_origin_ns is None or observed_end_ns is None else (observed_end_ns-host_origin_ns)/1e6})
     return {'cpu_overlay':{'available':True,'additive':False,'tasks':rows,'lifecycle':events,
             'cpu_runtime':report.get('cpu_runtime',{}),'description':'CPU tasks and transfer/readiness boundaries overlay the exclusive host phases; they are not additional phase time'}}
 # ^^^ THOG

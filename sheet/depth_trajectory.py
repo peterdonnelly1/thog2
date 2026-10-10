@@ -32,7 +32,15 @@ from .plastic_depth_gauge import (
 from .geometry import SheetGeometryConfig
 from .semantic_materializer import ATTENTION_KEY_WEIGHT, ATTENTION_OUTPUT_WEIGHT, ATTENTION_QUERY_WEIGHT, ATTENTION_VALUE_WEIGHT, LEGACY_ATTENTION_INPUT_WEIGHT, MLP_CONTRACTION_WEIGHT, MLP_EXPANSION_WEIGHT
 from .trajectory import build_family_metadata
-from .depth_numerical_policy import CpuDepthBinding  # <<< THOG CPU bindings preserve native arithmetic and saved tensors
+# vvv THOG both providers use the existing PREMAT node and consumer-stream anchor
+# from .depth_numerical_policy import CpuDepthBinding
+from .depth_numerical_policy import (
+    PrematBindingContext,
+    effective_depth_policy,
+    prematerialized_policy_forward,
+    prematerialized_policy_backward,
+)
+# ^^^ THOG
 
 
 DEPTH_MATRIX_FAMILIES = (
@@ -65,6 +73,11 @@ class _PrematConsumerStreamAnchor(torch.autograd.Function):
 class _PrematerializedDepthBundle(torch.autograd.Function):
     @staticmethod
     def forward(ctx, cached: Tensor, *coefficient_depth_pairs: Tensor) -> Tensor:
+        # vvv THOG qualify CPU values inside the shared node without changing the legacy GPU binding
+        ctx.numerical_policy_binding = bool(coefficient_depth_pairs) and isinstance(coefficient_depth_pairs[0], PrematBindingContext)
+        if ctx.numerical_policy_binding:
+            return prematerialized_policy_forward(ctx, cached, *coefficient_depth_pairs)
+        # ^^^ THOG
         if not coefficient_depth_pairs or len(coefficient_depth_pairs) % 2:
             raise RuntimeError("prematerialised DEPTH binding requires coefficient/depth-row pairs")
         saved = []
@@ -108,6 +121,10 @@ class _PrematerializedDepthBundle(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, gradient: Tensor):
+        # vvv THOG policy-specific saved tensors retain the same shared autograd engine
+        if ctx.numerical_policy_binding:
+            return prematerialized_policy_backward(ctx, gradient)
+        # ^^^ THOG
         saved = iter(ctx.saved_tensors)
         result = [None]
         row_start = 0
@@ -816,7 +833,7 @@ class DepthTrajectory(nn.Module):
         names: Tuple[str, ...],
         layer_index: int,
         generated: Tensor,
-        *, binding_context=None,                    # <<< THOG GPU callers retain the original binding path
+        *, binding_context=None,                                                                                                                           # <<< THOG optional provider storage lease
     ) -> Tensor:
         if not names:
             raise ValueError("prematerialised DEPTH binding requires at least one family")
@@ -853,8 +870,13 @@ class DepthTrajectory(nn.Module):
                 f"prematerialised DEPTH bundle has shape {tuple(generated.shape)}; "
                 f"expected {expected_shape}"
             )
+        # vvv THOG native matmul replay must save the same operand views for either PREMAT provider
+        if binding_context is None and getattr(self, "depth_materialisation_matmul", False):
+            binding_context = PrematBindingContext(effective_depth_policy(self, qualify_cpu=False))
+        # ^^^ THOG
         if binding_context is not None:
-            return CpuDepthBinding.apply(generated.detach(), binding_context, *pairs)  # <<< THOG retain the actual input-gradient storage lease
+            # return CpuDepthBinding.apply(generated.detach(), binding_context, *pairs)
+            return _PrematerializedDepthBundle.apply(generated.detach(), binding_context, *pairs)                                                          # <<< THOG retain the actual input-gradient storage lease
         return _PrematerializedDepthBundle.apply(generated.detach(), *pairs)
     # ^^^ THOG
 

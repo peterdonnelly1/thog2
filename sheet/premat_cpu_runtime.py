@@ -322,7 +322,9 @@ class CpuPrematRuntime(PrematRuntime):
                 if matrix is None:
                     return
                 if timing == "predicted_gemm_start":
-                    prediction = self.cpu_predictor.predict(self._prediction_key(candidate.family, candidate.layer_index), self.clock.get("host_origin_ns", time.perf_counter_ns()), self.cpu_configuration["premat_cpu_transfer_lead_ms"], self.clock.get("uncertainty_ms"))
+                    prediction_context = self._prediction_key(candidate.family, candidate.layer_index)
+                    candidate.cpu_metadata["prediction_context"] = prediction_context
+                    prediction = self.cpu_predictor.predict(prediction_context, self.clock.get("host_origin_ns", time.perf_counter_ns()), self.cpu_configuration["premat_cpu_transfer_lead_ms"], self.clock.get("uncertainty_ms"))
                     candidate.cpu_metadata.update(prediction)
                     due = prediction.get("intended_upload_submission_ns")
                     if due is not None and due > time.perf_counter_ns():
@@ -355,7 +357,8 @@ class CpuPrematRuntime(PrematRuntime):
                     if reservation.get("tracked"):
                         for key, value in (("allocator_certificate_generation", "generation"), ("allocator_certificate_pool", "pool"), ("allocator_certificate_block_id", "block_id"), ("allocator_certificate_charge_bytes", "charge_bytes")):
                             setattr(candidate, key, reservation[value])
-                self._submit_upload(candidate, matrix, gate_event)
+                candidate_gate = self.leading_opportunities.get((candidate.layer_index, candidate.family), gate_event) if timing == "previous_gemm_leading_edge" else gate_event
+                self._submit_upload(candidate, matrix, candidate_gate)
 
 
     def _shadow_admission(self, trigger, eligible_keys):
@@ -489,7 +492,9 @@ class CpuPrematRuntime(PrematRuntime):
                     self._cpu_record({**self._metadata(upload), "event": "upload_complete_observed", "arrival_time_basis": "host_completion_observation_upper_bound"})
                     if self.cpu_configuration["premat_cpu_transfer_timing"] == "predicted_gemm_start" or self._enable_gpu_timing_diagnostic:
                         upload.metadata["h2d_copy_ms"] = upload.metadata["copy_start_event"].elapsed_time(upload.completion)
-                        self.cpu_predictor.uploads.append(upload.metadata["h2d_copy_ms"])
+                        prediction_context = upload.metadata.get("prediction_context")
+                        if prediction_context is not None:
+                            self.cpu_predictor.observe_upload(tuple(prediction_context), upload.metadata["h2d_copy_ms"])
                         origin, clock = upload.metadata.get("origin_event"), upload.metadata.get("origin_clock", {})
                         if origin is not None and clock.get("uncertainty_ms") is not None and clock["uncertainty_ms"] <= 5 and origin.query():
                             arrival = clock["host_origin_ns"] + int(origin.elapsed_time(upload.completion) * 1e6)
@@ -532,6 +537,10 @@ class CpuPrematRuntime(PrematRuntime):
             upload = self.cpu_uploads.get(getattr(candidate, "cpu_upload_id", None))
             usable = targeted and matrix is not None and candidate.state == CandidateState.AVAILABLE and upload is not None and not upload.late and not upload.failed and upload.completion.query()
             metadata = {**getattr(candidate, "cpu_metadata", {}), "matrix_use_id": self._use_id(candidate), "snapshot_id": None if self.cpu_snapshot is None else self.cpu_snapshot.snapshot_id, "phase": self.cpu_phase, "readiness_check_ns": candidate.deadline_ns}
+            if targeted and self.cpu_configuration["premat_cpu_transfer_timing"] == "predicted_gemm_start" and "prediction_available" not in metadata:
+                prediction_context = self._prediction_key(family, layer_index)
+                metadata.update(self.cpu_predictor.predict(prediction_context, self.clock.get("host_origin_ns", candidate.deadline_ns), self.cpu_configuration["premat_cpu_transfer_lead_ms"], self.clock.get("uncertainty_ms")))
+                metadata["prediction_context"] = prediction_context
             stream = torch.cuda.current_stream(device=self._device)
             if usable:
                 tensor = upload.tensor

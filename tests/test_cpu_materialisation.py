@@ -166,8 +166,11 @@ def test_prediction_requires_qualified_clock_and_warm_history():
     assert not predictor.samples
     for _ in range(3):
         predictor.observe(context, 20, 0.1)
+    assert not predictor.predict(context, 100000000, 2, 0.1)["prediction_available"]
+    predictor.observe_upload(context, 2.1)
     prediction = predictor.predict(context, 100000000, 2, 0.1)
     assert prediction["prediction_available"] and prediction["intended_gpu_available_ns"] == 118000000
+    assert prediction["intended_upload_submission_ns"] == 115900000
     assert not predictor.predict(("checkpoint_recompute",), 100000000, 2, 0.1)["prediction_available"]
     predictor.reset("shape_changed")
     assert not predictor.samples

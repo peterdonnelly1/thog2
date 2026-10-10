@@ -457,7 +457,11 @@ def _publish_payload(
     if getattr(trainer.config, "premat_materialisation_device", "gpu") == "cpu_and_gpu":
         runtime = getattr(getattr(trainer, "raw_model", None), "_premat_runtime", None)
         from .processing_cpu_evidence import update_timing_overlay
-        payload.update(update_timing_overlay(runtime, int(payload["optimizer_update"]), payload.get("host_update_start_ns")))
+        # vvv THOG censor concurrent CPU service at the captured update boundary without waiting for workers
+        host_origin_ns = payload.get("host_update_start_ns")
+        host_end_ns = None if host_origin_ns is None else host_origin_ns + int(payload["captured_update_host_ms"] * 1e6)
+        payload.update(update_timing_overlay(runtime, int(payload["optimizer_update"]), host_origin_ns, host_end_ns))
+        # ^^^ THOG
         payload["schema_version"] = 3
     destination = _write_payload(store, payload)
     world_size = max(1, int(trainer.distributed.world_size))

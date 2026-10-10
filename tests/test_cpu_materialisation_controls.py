@@ -41,7 +41,7 @@ def test_cpu_all_controls_reach_model_identity_and_resolved_limits():
     assert cpu_identity(canonical).upper() in config.artifact_name.upper()
     startup=cpu_startup_text(config)
     assert "premat_cpu_staging_limit_bytes_resolved=524288" in startup
-    assert "premat_generated_dtype_resolved=float32" in startup
+    assert "premat_generated_dtype_resolved="+canonical["premat_generated_dtype_resolved"] in startup
     assert "premat_target_offset_active=False" in startup
 
 

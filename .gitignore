@@ -23,3 +23,8 @@ dense_baseline_snapshots/
 *.log
 *.ckpt
 # ^^^ THOG2
+
+# vvv THOG generated CPU materialisation regression reports are CI artifacts
+/evidence/cpu_materialisation_ci/
+/evidence/cpu_materialisation_final/
+# ^^^ THOG

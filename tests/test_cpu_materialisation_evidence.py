@@ -75,7 +75,8 @@ def test_missing_cpu_report_is_unknown_even_when_copy_export_available(tmp_path)
 def test_update_cpu_overlay_does_not_add_to_exclusive_host_phases():
     runtime=SimpleNamespace(report=report)
     payload=update_timing_overlay(runtime,2,10000)
-    assert payload["cpu_overlay"]["additive"] is False and len(payload["cpu_overlay"]["lifecycle"])==4
+    assert payload["cpu_overlay"]["additive"] is False and len(payload["cpu_overlay"]["lifecycle"])==5
+    assert payload["cpu_overlay"]["tasks"][0]["precursor"]
 
 
 def test_copy_auxiliary_thread_does_not_change_capture_thread_nvtx_depth(monkeypatch):

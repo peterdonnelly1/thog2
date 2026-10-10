@@ -319,9 +319,14 @@ def _runner_operation(state, name, args):
         return {"resolved": True, "gpu_uuid": gpu["uuid"]}
     if name == "runner_reconcile":
         _validate_args(args, set())
+        # vvv THOG CPU preparation estimates require the actual worker affinity budget
+        affinity_cores = sorted(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else list(range(os.cpu_count() or 1))
+        cpu_execution = {"affinity_cores": affinity_cores, "affinity_thread_budget": max(1, len(affinity_cores) - 1)}
+        # ^^^ THOG
         return {"attempts": {key: _attempt_status(value) for key, value in state.get("attempts", {}).items()},
                 "reservations": state.get("reservations", {}), "waiting_grids": state.get("waiting_grids", {}),
-                "protocol": 3, "gpus": _gpu_information()}
+                # "protocol": 3, "gpus": _gpu_information()}
+                "protocol": 3, "gpus": _gpu_information(), "cpu_execution": cpu_execution}                                                                 # <<< THOG additive CPU host evidence preserves the Runner protocol
     if name == "runner_queue":
         _validate_args(args, {"grid_id", "gpu_key", "required_mib", "headroom_mib", "power_cap_w"})
         grid_id, key = args.get("grid_id"), args.get("gpu_key")
@@ -526,7 +531,7 @@ def _operation(name, args):
     with _lock:
         state = _read_state()
         if name.startswith("runner_"):
-            return _runner_operation(state, name, args)                                                                                                      # <<< THOG route only named Runner operations through the Node Agent
+            return _runner_operation(state, name, args)                                                                                                    # <<< THOG route only named Runner operations through the Node Agent
         if name == "grid_identity":
             _validate_args(args, {"occupied", "preferred"})
             occupied = args.get("occupied", [])
@@ -641,7 +646,7 @@ def _operation(name, args):
             run_id = args.get("run_id")
             if not isinstance(run_id, str) or not re.fullmatch(r"[a-zA-Z0-9_-]{1,80}", run_id) or run_id in state.get("runs", {}):
                 raise ValueError("invalid or duplicate run ID")
-            current_gpus = _gpu_information()                                                                                                                # <<< THOG recheck GPU processes immediately before accepting a resolved run
+            current_gpus = _gpu_information()                                                                                                              # <<< THOG recheck GPU processes immediately before accepting a resolved run
             if not current_gpus:
                 raise RuntimeError("No CUDA GPUs are currently available")
             with (STATE_DIR / f"run-{run_id}.log").open("ab") as output:
@@ -685,7 +690,7 @@ def request(name, args=None, timeout=30):
 def _serve_connection(connection):
     with connection:
         try:
-            connection.settimeout(30)                                                                                                                       # <<< THOG bound abandoned socket readers so long-lived agents do not accumulate blocked threads
+            connection.settimeout(30)                                                                                                                      # <<< THOG bound abandoned socket readers so long-lived agents do not accumulate blocked threads
             with connection.makefile("rb") as stream:
                 raw = stream.readline(MAX_MESSAGE + 1)
             if len(raw) > MAX_MESSAGE or not raw.endswith(b"\n"):
@@ -747,7 +752,7 @@ def serve():
         except (OSError, ConnectionError):
             SOCKET_PATH.unlink()
         else:
-            _install_agent_entry()                                                                                                                           # <<< THOG refresh the SSH entry when an existing agent survives a code update
+            _install_agent_entry()                                                                                                                         # <<< THOG refresh the SSH entry when an existing agent survives a code update
             return
     _install_agent_entry()
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:

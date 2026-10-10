@@ -14,13 +14,13 @@ Record the commit and environment for each host.
 
 1. Run the CPU-capable correctness checks. These require PyTorch, pytest and psutil but no GPU:
 
-       PYTHONPATH=. python -m pytest -q tests/test_cpu_materialisation.py tests/test_cpu_materialisation_checkpoint.py tests/test_cpu_materialisation_lifecycle.py tests/test_cpu_materialisation_evidence.py tests/test_cpu_materialisation_controls.py
+       PYTHONPATH=. python -m pytest -q tests/test_cpu_materialisation.py tests/test_cpu_materialisation_checkpoint.py tests/test_cpu_materialisation_lifecycle.py tests/test_cpu_materialisation_evidence.py tests/test_cpu_materialisation_controls.py tests/test_cpu_materialisation_takeover.py tests/test_premat_matmul_binding.py tests/test_instra_duration_workloads.py tests/test_instra_runner_unittest.py
 
-   Expect no failures. This covers arithmetic, all preparation/batch scopes, actual spawned workers, snapshot reuse/invalidation, no-wait deadlines, late-copy isolation, stage caps, backward lifetime, real non-reentrant checkpoint source mixtures and synthetic actual-copy normalization.
+   Expect no failures. This covers arithmetic, all preparation/batch scopes, actual spawned workers, snapshot reuse/invalidation, no-wait deadlines, late-copy isolation, stage caps, the shared PREMAT autograd node, backward lifetime, real non-reentrant checkpoint source mixtures and synthetic actual-copy normalization. Prediction requires qualified GEMM observations and measured upload cost from the same context; cold-start fallback remains normal. Unfinished CPU service remains censored, and duration estimates require matching CPU host and resolved thread budget.
 
 2. On an actual CUDA host, run the hardware suite:
 
-       PYTHONPATH=. python -m pytest -q tests/test_cpu_materialisation_cuda.py
+       PYTHONPATH=. python -m pytest -q tests/test_cpu_materialisation_cuda.py tests/test_premat_matmul_binding.py
 
    CUDA absence skips this suite; a skipped suite does not pass hardware qualification. Unsupported BF16 hardware skips only BF16 cases. Check that the real-worker success-path test runs and passes. It forces a completed upload before readiness outside any measured update, then checks input gradients and lifetime.
 
@@ -49,7 +49,7 @@ Then use your representative dimensions, for example:
 
     python tools/benchmark_cpu_materialisation.py \
       --layers 32 --width 1024 --heads 16 --depth-order 12 \
-      --batch 16 --context 1024 --accumulation 6 --checkpoint 2 \
+      --batch 16 --context 1024 --accumulation 6 --checkpoint 4 \
       --dtype bfloat16 --updates 30 --warmup 5 --repeats 3 \
       --threads 0 --label scruffy --output evidence/scruffy_cpu_representative.json
 
@@ -71,6 +71,8 @@ At a fixed staging cap, change one dimension at a time:
 For prediction, retain cold-start/unavailable counts separately from qualified prediction misses, actual/target availability, prediction/arrival error, stage peak and control host time. A lead sweep can be neutral or slower; report the measured outcome. Compare medians and each repeat, GPU peak, CPU proportional memory and parity. Do not infer hidden cost from overlap alone.
 
 ## Instra and profiler checks
+
+Restart Instra and the NodeAgent on each execution host after updating the branch, then refresh both browsers. This ensures Runner sees the new controls and actual CPU affinity evidence.
 
 Append the canonical CPU fragment to an otherwise known working DEPTH wrapper command:
 
@@ -113,6 +115,8 @@ Automated browser reproduction (in an environment with Node and Playwright):
     /tmp/instra-browser/node_modules/.bin/playwright install --with-deps chromium firefox
     NODE_PATH=/tmp/instra-browser/node_modules PYTHONPATH=. INSTRA_CPU_SOAK_SECONDS=120 \
       python tests/run_instra_oct07_browser.py tests/instra_cpu_materialisation_browser.js
+
+Run `node tests/instra_cpu_evidence_regression.js` for the independent prediction/readiness markers, unknown timestamps and censored overlays. Run `python tools/check_cpu_materialisation_regressions.py /path/to/pristine/e29e32d-checkout` for the full Python/static Instra comparison; its evidence directory records baseline failures separately. GitHub runs these checks automatically when this branch is updated.
 
 ## Acceptance mapping and limits
 
