@@ -173,6 +173,19 @@ class CpuPreparationProvider:
         self.record({"event": "snapshot_created", "snapshot_id": snapshot.snapshot_id, "host_time_ns": time.perf_counter_ns(), "numerical_policy": vars(policy)})
         return snapshot, True
 
+    def invalidate_snapshot(self, reason):
+        with self.lock:
+            if self.snapshot is None:
+                return
+            identity = self.snapshot.snapshot_id
+            self.generation.value += 1
+            self.snapshot = None
+            self.cache.clear()
+            self.requested.clear()
+            self.submitted.clear()
+            self.failures.clear()
+        self.record({"event": "snapshot_invalidated", "snapshot_id": identity, "host_time_ns": time.perf_counter_ns(), "reason": reason})
+
     def publish_source(self, snapshot_id, name, tensor):
         # The full host copy and shared-bank allocation happen on a coordinator, outside dispatch locks.
         bank = shared_tensor(tensor)

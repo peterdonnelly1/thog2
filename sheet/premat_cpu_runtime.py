@@ -221,8 +221,30 @@ class CpuPrematRuntime(PrematRuntime):
                 torch.cuda.current_stream(device=self._device).wait_event(self.source_event)
             self._cpu_record({"event": "snapshot_mutation_guard", "snapshot_id": None if self.cpu_snapshot is None else self.cpu_snapshot.snapshot_id})
 
-    def after_optimizer_step(self):
-        self._cpu_record({"event": "optimizer_boundary", "snapshot_id": None if self.cpu_snapshot is None else self.cpu_snapshot.snapshot_id})
+    def after_optimizer_step(self, optimizer=None):
+        with self.cpu_lock:
+            identity = None if self.cpu_snapshot is None else self.cpu_snapshot.snapshot_id
+            invalidated = False
+            if self.cpu_provider is not None:
+                names = tuple(dict.fromkeys(name for family in self.cpu_provider.families for name in FAMILY_NAMES[family]))
+                sources = tuple(self.trajectory.coefficients[name] for name in names) + (self.trajectory.depth_basis,)
+                source_ids = {id(source) for source in sources}
+                # Fused AdamW can mutate values without incrementing Tensor._version.
+                # Actual optimizer membership and gradients establish which banks can change.
+                if optimizer is None:
+                    invalidated = any(source.requires_grad and source.is_leaf and source.grad is not None for source in sources)
+                else:
+                    invalidated = any(
+                        not (isinstance(group["lr"], (int, float)) and group["lr"] == 0)
+                        and any(id(parameter) in source_ids and parameter.grad is not None for parameter in group["params"])
+                        for group in optimizer.param_groups
+                    )
+                if invalidated:
+                    self.source_paused = True
+                    self.cpu_provider.invalidate_snapshot("optimizer_mutation")
+                    self.cpu_sources.clear()
+                    self.cpu_snapshot = None
+            self._cpu_record({"event": "optimizer_boundary", "snapshot_id": identity, "snapshot_invalidated": invalidated})
 
     def _candidate_envelope(self, family):
         original = super()._candidate_envelope(family)

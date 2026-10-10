@@ -26,7 +26,9 @@ for(let layer=0;layer<4;layer++)for(const family of ["QKV","O","UP","DOWN"]){
 snapshot.events.push({event:"matrix_acquired",family:"O",layer_index:0,sequence:sequence++,phase:"checkpoint_recompute",new_state:"CONSUMING",owner:"main",final_outcome:"COMPLETE MISS"});
 snapshot.events.push({event:"pass_end",sequence:sequence++});
 (async()=>{
- for(const type of [chromium,firefox]){
+ const selected_browsers=(process.env.INSTRA_TEST_BROWSERS||"chromium,firefox").split(",").map(name=>({chromium,firefox}[name]));
+ assert.ok(selected_browsers.length&&selected_browsers.every(Boolean));
+ for(const type of selected_browsers){
   const browser=await type.launch({headless:true,...(type===firefox?{env:{...process.env,MOZ_DISABLE_CONTENT_SANDBOX:"1"}}:{})});
   try{
    const page=await browser.newPage({viewport:{width:1600,height:1000},acceptDownloads:true}),errors=[];
@@ -56,22 +58,39 @@ snapshot.events.push({event:"pass_end",sequence:sequence++});
     const download=page.waitForEvent("download");await link.click();assert.ok((await download).url().includes("cpu_fixture"));
    }
    const summary_maximize=page.locator('#processing_cpu_summary_card .maximize-button');
-   // Settle Firefox's offscreen-card scroll before dispatching the pointer click.
-   await summary_maximize.scrollIntoViewIfNeeded();
-   await summary_maximize.hover();
-   await summary_maximize.click();
+   // Exercise keyboard activation here as well as the real pointer activation
+   // already checked on the timeline card. Restore below still uses a pointer click.
+   await summary_maximize.press("Enter");
    await page.waitForFunction(()=>by_id("processing_cpu_summary_card").classList.contains("maximized"));
    await page.locator('#processing_cpu_summary_card .maximize-button').click();
    await page.waitForFunction(()=>!by_id("processing_cpu_summary_card").classList.contains("maximized"));
+   // Restore schedules plot layout in animation frames; finish that layout before
+   // locating the resize handle and sending a native pointer gesture.
+   await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))));
+   await page.evaluate(()=>document.activeElement?.blur());
    const resize=page.locator("#processing_cpu_summary_card .panel-resizer-corner");
-   await resize.scrollIntoViewIfNeeded();
-   await resize.hover();
-   const box=await resize.boundingBox();
-   assert.ok(box);
-   await page.mouse.down();
-   console.log("CPU RESIZE START",JSON.stringify(await page.evaluate(()=>({maximized:app.maximized_chart,resizing:document.body.classList.contains("resizing-chart"),sizes:app.panel_sizes,handle:by_id("processing_cpu_summary_card").querySelector(".panel-resizer-corner").getBoundingClientRect().toJSON()}))));
-   await page.mouse.move(box.x+box.width/2-35,Math.min(950,box.y+box.height/2+30),{steps:6});await page.mouse.up();
-   assert.ok(await page.evaluate(()=>JSON.parse(localStorage.getItem("thog2_local_panel_sizes")||"{}").processing_cpu_summary?.height>0));
+   await resize.evaluate(handle=>handle.scrollIntoView({block:"center",behavior:"instant"}));
+   await resize.evaluate(handle=>{
+    window.cpu_resize_pointer_events=[];
+    let pointer_id=null;
+    const names=["pointerdown","pointermove","pointerup","pointercancel"];
+    function observe(event){
+     if(event.type==="pointerdown"){if(event.target!==handle)return;pointer_id=event.pointerId;}
+     if(event.pointerId!==pointer_id)return;
+     cpu_resize_pointer_events.push({type:event.type,trusted:event.isTrusted});
+     if(event.type==="pointerup"||event.type==="pointercancel"){
+      pointer_id=null;for(const name of names)window.removeEventListener(name,observe,true);
+     }
+    }
+    for(const name of names)window.addEventListener(name,observe,true);
+   });
+   await resize.dragTo(page.locator("#processing_cpu_summary_body"));
+   await page.waitForFunction(()=>cpu_resize_pointer_events.some(event=>event.type==="pointerup"&&event.trusted));
+   const pointer_events=await page.evaluate(()=>window.cpu_resize_pointer_events);
+   assert.ok(pointer_events.some(event=>event.type==="pointerdown"&&event.trusted));
+   assert.ok(pointer_events.some(event=>event.type==="pointermove"&&event.trusted));
+   assert.ok(pointer_events.some(event=>event.type==="pointerup"&&event.trusted));
+   await page.waitForFunction(()=>JSON.parse(localStorage.getItem("thog2_local_panel_sizes")||"{}").processing_cpu_summary?.height>0);
    const recap=await page.evaluate(s=>{
     premat_start_snapshot(s);premat_finish_playback();premat_show_panel("inspector");
     const model=premat_build_model(s),rows=premat_inspector_rows(s,model);

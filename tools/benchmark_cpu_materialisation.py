@@ -72,7 +72,7 @@ def training_config(options,mode):
     kwargs={}
     if cpu:
         kwargs={"premat_materialisation_device":mode,"premat_cpu_workers":options.workers,"premat_cpu_threads_per_worker":options.threads,"premat_cpu_preparation":options.preparation,"premat_cpu_layer_batch_size":options.layer_batch,"premat_cpu_transfer_timing":options.transfer,"premat_cpu_transfer_lead_ms":options.lead_ms,"premat_cpu_staging_limit_mb":options.staging_mb,"premat_cpu_checkpoint_replay":options.replay}
-    return TrainingConfig(model_type="thog2_sheet",geometry_preset="depth",basis_family="chebyshev",block_size=options.context,vocab_size=128,n_layer=options.layers,n_embd=options.width,n_head=options.heads,depth_order=options.depth_order,base_row_order=1,batch_size=options.batch,gradient_accumulation_steps=options.accumulation,checkpoint_segment_size=options.checkpoint,max_updates=options.warmup+options.updates,learning_rate=1e-3,min_learning_rate=1e-3,decay_learning_rate=False,decay_updates=options.warmup+options.updates,weight_decay=0,grad_clip=0,dropout=0.1,eval_interval=0,checkpoint_interval=0,device=options.device,dtype=options.dtype,model_seed=171,data_seed=272,premat="disabled" if mode=="off" else "enabled",premat_gpu_memory_buffer_gb=0,premat_headroom_stay_below_current_peak=False,premat_headroom_stay_within_global_buffer=True,premat_logging=options.logging,premat_instra="disabled",premat_processing_logging="disabled",nonfinite_update_policy="raise",**kwargs)
+    return TrainingConfig(model_type="thog2_sheet",geometry_preset="depth",basis_family="chebyshev",block_size=options.context,vocab_size=128,n_layer=options.layers,n_embd=options.width,n_head=options.heads,depth_order=options.depth_order,base_row_order=1,batch_size=options.batch,gradient_accumulation_steps=options.accumulation,checkpoint_segment_size=options.checkpoint,max_updates=options.warmup+options.updates+1,learning_rate=1e-3,min_learning_rate=1e-3,decay_learning_rate=False,decay_updates=options.warmup+options.updates,weight_decay=0,grad_clip=0,dropout=0.1,eval_interval=0,checkpoint_interval=0,device=options.device,dtype=options.dtype,model_seed=171,data_seed=272,premat="disabled" if mode=="off" else "enabled",premat_gpu_memory_buffer_gb=0,premat_headroom_stay_below_current_peak=False,premat_headroom_stay_within_global_buffer=True,premat_logging=options.logging,premat_instra="disabled",premat_processing_logging="disabled",nonfinite_update_policy="raise",**kwargs)
 
 
 def optimizer_values(trainer):
@@ -120,9 +120,11 @@ def compare_run_results(reference,candidate,*,repeat,mode,atol,rtol):
     for kind in ("initial_conditions","final_conditions"):
         expected=reference[0][kind];observed=candidate[0][kind]
         rows.append({"repeat":repeat,"mode":mode,"kind":kind,"passed":expected==observed,"reference":expected,"candidate":observed})
-    collections=(("losses",{"updates":torch.tensor(reference[0]["losses"],dtype=torch.float64)},{"updates":torch.tensor(candidate[0]["losses"],dtype=torch.float64)}),*((label,reference[index],candidate[index]) for label,index in (("parameters",1),("gradients",2),("optimizer_state",3))))
+    collections=(("losses",{"updates":torch.tensor(reference[0]["losses"],dtype=torch.float64)},{"updates":torch.tensor(candidate[0]["losses"],dtype=torch.float64)}),("gradient_probe_loss",{"probe":torch.tensor(reference[0]["gradient_validation"]["loss"],dtype=torch.float64)},{"probe":torch.tensor(candidate[0]["gradient_validation"]["loss"],dtype=torch.float64)}),*((label,reference[index],candidate[index]) for label,index in (("parameters",1),("gradients",2),("optimizer_state",3))))
     for kind,expected,observed in collections:
         row={"repeat":repeat,"mode":mode,"kind":kind,"atol":atol,"rtol":rtol,"passed":True,"max_absolute_difference":0.0,"checked_tensors":0,"failed_tensors":0,"errors":[]}
+        if kind=="gradients" and (not expected or not observed):
+            row.update(passed=False,empty_gradients=True)
         if expected.keys()!=observed.keys():
             row.update(passed=False,missing_tensors=sorted(expected.keys()-observed.keys()),extra_tensors=sorted(observed.keys()-expected.keys()))
         for name in sorted(expected.keys()&observed.keys()):
@@ -144,6 +146,22 @@ def write_evidence(path,payload):
     temporary=path.with_suffix(path.suffix+".tmp")
     temporary.write_text(json.dumps(payload,indent=2,allow_nan=False)+"\n")
     temporary.replace(path)
+
+
+def gradient_validation_update(trainer):
+    # SharedTrainer clears gradients after every update. Capture one real update
+    # outside the measured interval, immediately before the optimizer consumes them.
+    gradients={}
+    def capture(optimizer,args,kwargs):
+        gradients.update({name:parameter.grad.detach().cpu().clone() for name,parameter in trainer.raw_model.named_parameters() if parameter.grad is not None})
+    hook=trainer.optimizer.register_step_pre_hook(capture)
+    try:
+        result=trainer.train_one_update()
+        if result.get("skipped_update"):raise AssertionError("gradient-validation update was skipped")
+        if not gradients:raise AssertionError("gradient-validation update captured no gradients")
+    finally:
+        hook.remove()
+    return gradients,{"scope":"one unmeasured update after the timed endpoint","completed_update":trainer.state.completed_updates,"loss":float(result["training_loss"]),"gradient_tensors":len(gradients)}
 
 
 def run(options,mode,repeat):
@@ -181,9 +199,10 @@ def run(options,mode,repeat):
             assert health.get("staging_peak_bytes",0)<=health.get("staging_limit_bytes",0)
             assert not any(worker.get("cuda_initialized") for worker in health.get("worker_health",()))
         values={name:parameter.detach().cpu().clone() for name,parameter in trainer.raw_model.named_parameters()}
-        gradients={name:parameter.grad.detach().cpu().clone() for name,parameter in trainer.raw_model.named_parameters() if parameter.grad is not None}
+        state=optimizer_values(trainer)
         payload={"mode":mode,"repeat":repeat,"completed_updates":trainer.state.completed_updates,"initial_conditions":initial_conditions,"final_conditions":final_conditions,"losses":losses,"elapsed_seconds":elapsed,"milliseconds_per_update":elapsed*1000/options.updates,"tokens_per_second":options.updates*options.batch*options.context*options.accumulation/elapsed,"gpu_peak_allocated_bytes":peak_allocated,"gpu_peak_reserved_bytes":peak_reserved,"cpu_memory_before":before,"cpu_memory_after":after,"runtime":report}
-        return payload,values,gradients,optimizer_values(trainer)
+        gradients,payload["gradient_validation"]=gradient_validation_update(trainer)
+        return payload,values,gradients,state
     finally:
         trainer.close()
         del trainer

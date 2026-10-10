@@ -1072,7 +1072,7 @@ class TrainerStepMixin:
                 cpu_runtime.before_optimizer_step()
             self.scaler.step(self.optimizer)
             if cpu_runtime is not None and hasattr(cpu_runtime, "after_optimizer_step"):
-                cpu_runtime.after_optimizer_step()
+                cpu_runtime.after_optimizer_step(self.optimizer)
         except FloatingPointError:
             if not isinstance(self.optimizer, Thogopt):
                 raise

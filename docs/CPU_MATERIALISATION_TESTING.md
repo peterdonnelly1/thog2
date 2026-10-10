@@ -32,6 +32,8 @@ Record the commit and environment for each host.
 
    The benchmark resets the training/dropout RNG after constructing every trainer. Its default `--training-seed 373` increases by one per repeat and is identical across providers within that repeat. Model seed 171 and data seed 272 remain fixed. JSON verifies identical initial model, training RNG and data RNG fingerprints, then identical final RNG and batch traces. This corrects the unmatched dropout masks in the original field harness; numerical tolerances remain unchanged. Evidence is saved after each provider even if parity fails, identifies the failing provider and component, and has `status: parity_failed` or `runtime_failed`. Timing remains unqualified until `status: passed`.
 
+   The trainer clears gradients after each optimizer update. The benchmark therefore captures real gradients immediately before the optimizer in one extra, unmeasured validation update. `gradient_validation` records its loss, update number and number of gradient tensors. Measured losses, parameters, optimizer state, RNG/batch traces, timing and memory remain those of the requested timed endpoint; gradient capture and its extra update are outside that measurement. Empty gradient sets fail qualification.
+
 4. Smoke-test fallback and replay explicitly:
 
        python tools/benchmark_cpu_materialisation.py --smoke --threads 1 --staging-mb 0.00001 --label scruffy --output evidence/scruffy_cpu_tiny_cap.json
@@ -46,6 +48,12 @@ Use the same configuration on each provider; retain the same batch, context, phy
 A compact preliminary run:
 
     python tools/benchmark_cpu_materialisation.py --updates 30 --warmup 5 --repeats 3 --threads 1 --label scruffy --output evidence/scruffy_cpu_preliminary.json
+
+This longer run is required even when the three-update smoke passes: CPU preparation may produce its first usable cached matrices only after warmup. Optimizer-boundary invalidation now cancels snapshots when an optimizer can update any selected coefficient or the depth basis, including fused AdamW updates that leave tensor version counters unchanged. Accumulation and checkpoint recomputation still reuse a snapshot before the optimizer boundary.
+
+The actual-CUDA whole-trainer regression reproduces this exact warmup/update/repeat configuration for both DEPTH backends:
+
+    PYTHONPATH=. python -m pytest -q tests/test_cpu_materialisation_optimizer.py tests/test_cpu_materialisation_benchmark.py
 
 Then use your representative dimensions, for example:
 

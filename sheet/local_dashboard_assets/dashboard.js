@@ -1833,6 +1833,7 @@ function reset_panel_sizes() {
   requestAnimationFrame(resize_visible_plots);
 }
 
+// vvv THOG keep CPU summary drag events after capture loss; other cards retain handle listeners
 function start_chart_resize(event, handle) {
   const card = handle.closest(".chart-card");
   if (!card || app.maximized_chart) return;
@@ -1846,7 +1847,11 @@ function start_chart_resize(event, handle) {
   handle.setPointerCapture(pointer_id);
   document.body.classList.add("resizing-chart");
 
+  const capture_pointer_events = card.dataset.chart === "processing_cpu_summary";
+  const pointer_events = capture_pointer_events ? window : handle;
+
   const move = pointer_event => {
+    if (capture_pointer_events && pointer_event.pointerId !== pointer_id) return;
     const pane_width = Math.max(260, by_id("charts_scroll").clientWidth - 20);
     const pane_height = Math.max(260, by_id("charts_scroll").clientHeight - 20);
     const minimum_width = card.dataset.chart === "heatmap" ? 300 : 180;
@@ -1856,20 +1861,22 @@ function start_chart_resize(event, handle) {
     if (direction === "south" || direction === "both") card.style.height = `${Math.round(height)}px`;
     resize_plot_in_card(card);
   };
-  const finish = () => {
-    handle.removeEventListener("pointermove", move);
-    handle.removeEventListener("pointerup", finish);
-    handle.removeEventListener("pointercancel", finish);
+  const finish = pointer_event => {
+    if (capture_pointer_events && pointer_event.pointerId !== pointer_id) return;
+    pointer_events.removeEventListener("pointermove", move, capture_pointer_events);
+    pointer_events.removeEventListener("pointerup", finish, capture_pointer_events);
+    pointer_events.removeEventListener("pointercancel", finish, capture_pointer_events);
     document.body.classList.remove("resizing-chart");
     const rect = card.getBoundingClientRect();
     app.panel_sizes[card.dataset.chart] = {width: Math.round(rect.width), height: Math.round(rect.height)};
     save_json("thog2_local_panel_sizes", app.panel_sizes);
     resize_plot_in_card(card);
   };
-  handle.addEventListener("pointermove", move);
-  handle.addEventListener("pointerup", finish);
-  handle.addEventListener("pointercancel", finish);
+  pointer_events.addEventListener("pointermove", move, capture_pointer_events);
+  pointer_events.addEventListener("pointerup", finish, capture_pointer_events);
+  pointer_events.addEventListener("pointercancel", finish, capture_pointer_events);
 }
+// ^^^ THOG
 
 function toggle_maximized_chart(chart_name) {
   if (app.maximized_chart === chart_name) {
