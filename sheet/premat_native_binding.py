@@ -46,12 +46,20 @@ class _CachedDepthContraction(TorchDispatchMode):
             and args[0].numel() == self.coefficient.numel()
             and args[0].untyped_storage().data_ptr() == self.coefficient_storage
             and kwargs.get("dtype") == getattr(torch, self.policy.operand_dtype)
+            and not (
+                torch.is_autocast_cache_enabled()
+                and args[0].dtype == torch.float32
+                and args[0].requires_grad
+                and args[0].is_leaf
+                and not args[0]._is_view()
+            )
         ):
-            # Native autocast creates a coefficient cast before bmm. When only
-            # coefficients differentiate, backward saves only the depth row.
-            # The intercepted contraction never reads this operand, so retain
-            # its native cast edge using a scalar-backed shape, without copying
-            # the complete coefficient tensor. Autocast caching is private here.
+            # An uncacheable cast is unread by this intercepted contraction,
+            # and fixed-row backward only saves the depth row. A scalar-backed
+            # shape preserves its cast edge without copying all coefficients.
+            # A cacheable CUDA einsum leaf cast must contain real values: later
+            # hits and ordinary fallbacks share both its storage and backward
+            # edge, summing their low-precision gradients before the FP32 cast.
             return torch.empty((), device=args[0].device, dtype=kwargs["dtype"]).expand(args[0].shape)
         return function(*args, **kwargs)
 
@@ -104,7 +112,10 @@ def bind_cached_depth(cached, binding, *pairs):
         mode = _CachedDepthContraction(part, coefficient, row, numerical_policy)
         working_dtype = getattr(torch, numerical_policy.operand_dtype)
         mixed = numerical_policy.backend == "einsum" and working_dtype != coefficient.dtype
-        options = {"enabled": mixed, "cache_enabled": False}
+        # Preserve the caller's native cast sharing. CUDA autocasts einsum's
+        # original leaf operands, while CPU autocasts the inner bmm's views.
+        # Making each hit private changes CUDA's gradient accumulation order.
+        options = {"enabled": mixed, "cache_enabled": torch.is_autocast_cache_enabled()}
         if mixed:
             options["dtype"] = working_dtype
         with torch.autocast(coefficient.device.type, **options), mode:

@@ -26,7 +26,9 @@ def effective_depth_policy(trajectory, *, qualify_cpu=True):
     coefficient = next(iter(trajectory.coefficients.values()))
     backend = "matmul" if getattr(trajectory, "depth_materialisation_matmul", False) else "einsum"
     device_type = coefficient.device.type
-    mixed = torch.is_autocast_enabled(device_type) and backend == "einsum" and coefficient.shape[-1] > 1
+    # CUDA casts einsum operands before decomposition, including order-one mul.
+    # CPU only casts the inner bmm; order-one pointwise arithmetic stays FP32.
+    mixed = torch.is_autocast_enabled(device_type) and backend == "einsum" and (device_type == "cuda" or coefficient.shape[-1] > 1)
     working = torch.get_autocast_dtype(device_type) if mixed else coefficient.dtype
     if qualify_cpu:
         if coefficient.dtype not in (torch.float32, torch.float16, torch.bfloat16) or working not in (torch.float32, torch.float16, torch.bfloat16):

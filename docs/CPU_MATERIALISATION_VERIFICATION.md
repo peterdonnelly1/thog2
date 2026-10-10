@@ -1,5 +1,24 @@
 # CPU materialisation v0.3 verification
 
+## CUDA einsum cast-cache correction (10 October 2026)
+
+Scruffy's `c9c1b34a` hardware run has **454 passes and two failures**: the same whole-trainer test for GPU-only FP16 and BF16 einsum. FP16 fails both rotated-order repeats and BF16 fails repeat one. The reported failures are in updated parameters; each fresh ordinary control passes. The preceding storage fix did not resolve these comparisons.
+
+Research of PyTorch 2.8's [autocast implementation](https://github.com/pytorch/pytorch/blob/v2.8.0/aten/src/ATen/autocast_mode.cpp) and [CUDA operator list](https://github.com/pytorch/pytorch/blob/v2.8.0/aten/src/ATen/autocast_mode.h) exposed an omitted graph contract. CUDA autocasts einsum's original FP32 leaf operands and can reuse one cast across layers. CPU only autocasts the inner bmm, after einsum creates non-leaf operand views. The previous binding disabled cast caching, so CUDA cached hits accumulated coefficient gradients through separate casts rather than the shared native edge. Low-precision summation and FP32 conversion therefore occurred in a different order. The original CPU trainer tests did not reproduce CUDA's cast boundary.
+
+The binding now inherits the caller's autocast cache setting. Cacheable leaf casts contain genuine coefficient values because ordinary fallbacks may reuse them; uncacheable fixed-row casts retain the scalar-backed no-copy optimization. The physical cached contraction is still intercepted. Side-stream materialisation keeps its existing private cast policy. Order-one policy is also corrected: CPU pointwise einsum stays FP32, but CUDA casts operands before decomposition, including order-one multiplication.
+
+| Check | Result |
+| --- | --- |
+| New tests on unchanged `c9c1b34a`, emulating CUDA's cast/cache boundary with CPU arithmetic | 16 failed, 6 passed, 14 actual-CUDA cases skipped |
+| Same tests after the correction | 22 passed, 14 actual-CUDA cases skipped |
+| CPU materialisation, native binding, native matmul binding, DEPTH runtime and GPU PREMAT/admission regressions | 397 passed, 201 actual-CUDA cases skipped |
+| Additional layer-norm, checkpoint and weight-relay checks | 43 passed, 14 skipped; one relay CLI spelling test fails identically on unchanged `c9c1b34a` |
+| Static Instra regressions | All 41 passed |
+| Changed Python compilation and whitespace | Passed |
+
+The focused reproduction checks exact gradients and complete trainer losses, parameters and optimizer state, with unchanged zero tolerances. It covers FP16/BF16, both provider orders, accumulation, dropout, checkpoint replay, all hits and mixed hit/fallback order, learned rows and explicitly disabled cast caching. Real CUDA tests additionally check native cast sharing and order-one policy. This is a confirmed graph defect and a locally verified correction, **not yet a hardware-confirmed cure** for Scruffy's failures. No test tolerance was relaxed. Any time or memory cost of preserving CUDA's genuine shared coefficient cast must be measured. Rerun the hardware suite before longer comparative experiments.
+
 The `cpu_materialisation` branch retains the recovered implementation and adds these completion fixes:
 
 - CPU values use the existing `_PrematerializedDepthBundle` autograd node and consumer stream anchor. Each use receives a fresh binding, including fused QKV dependencies and checkpoint replay. GPU PREMAT matmul also uses its native operand views: this corrects an existing mixed-hit/fallback checkpoint metadata mismatch without changing the GPU scheduler or upload controls.
