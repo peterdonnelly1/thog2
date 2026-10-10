@@ -47,16 +47,20 @@ snapshot.events.push({event:"pass_end",sequence:sequence++});
    await page.waitForFunction(()=>!by_id("processing_operations_reset_zoom").disabled);
    await page.locator("#processing_operations_reset_zoom").click();
    assert.equal(await page.locator("#processing_operations_reset_zoom").isDisabled(),true);
-   await page.locator('#processing_timeline_card .maximize-button').click();await page.waitForTimeout(250);
-   assert.ok(await page.locator("#processing_timeline_card").evaluate(n=>n.classList.contains("maximized")));
+   await page.locator('#processing_timeline_card .maximize-button').click();
+   await page.waitForFunction(()=>by_id("processing_timeline_card").classList.contains("maximized"));
    await page.locator('#processing_timeline_card .maximize-button').click();
    await page.waitForFunction(()=>!by_id("processing_timeline_card").classList.contains("maximized"));
    for(const key of ["transfers","cpu_tasks","cpu_memory","cpu_lifecycle"]){
     const link=page.locator('.processing-downloads a[download="'+data.metadata.files[key]+'"]:visible');await link.waitFor({state:"visible"});assert.ok(await link.isVisible(),key);
     const download=page.waitForEvent("download");await link.click();assert.ok((await download).url().includes("cpu_fixture"));
    }
-   await page.locator('#processing_cpu_summary_card .maximize-button').click();
-   assert.ok(await page.locator("#processing_cpu_summary_card").evaluate(n=>n.classList.contains("maximized")));
+   const summary_maximize=page.locator('#processing_cpu_summary_card .maximize-button');
+   // Settle Firefox's offscreen-card scroll before dispatching the pointer click.
+   await summary_maximize.scrollIntoViewIfNeeded();
+   await summary_maximize.hover();
+   await summary_maximize.click();
+   await page.waitForFunction(()=>by_id("processing_cpu_summary_card").classList.contains("maximized"));
    await page.locator('#processing_cpu_summary_card .maximize-button').click();
    await page.waitForFunction(()=>!by_id("processing_cpu_summary_card").classList.contains("maximized"));
    const resize=page.locator("#processing_cpu_summary_card .panel-resizer-corner");

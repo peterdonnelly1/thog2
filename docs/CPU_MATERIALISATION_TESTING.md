@@ -14,7 +14,7 @@ Record the commit and environment for each host.
 
 1. Run the CPU-capable correctness checks. These require PyTorch, pytest and psutil but no GPU:
 
-       PYTHONPATH=. python -m pytest -q tests/test_cpu_materialisation.py tests/test_cpu_materialisation_checkpoint.py tests/test_cpu_materialisation_lifecycle.py tests/test_cpu_materialisation_evidence.py tests/test_cpu_materialisation_controls.py tests/test_cpu_materialisation_takeover.py tests/test_premat_matmul_binding.py tests/test_instra_duration_workloads.py tests/test_instra_runner_unittest.py
+       PYTHONPATH=. python -m pytest -q tests/test_cpu_materialisation*.py tests/test_premat_matmul_binding.py tests/test_instra_duration_workloads.py tests/test_instra_runner_unittest.py
 
    Expect no failures. This covers arithmetic, all preparation/batch scopes, actual spawned workers, snapshot reuse/invalidation, no-wait deadlines, late-copy isolation, stage caps, the shared PREMAT autograd node, backward lifetime, real non-reentrant checkpoint source mixtures and synthetic actual-copy normalization. Prediction requires qualified GEMM observations and measured upload cost from the same context; cold-start fallback remains normal. Unfinished CPU service remains censored, and duration estimates require matching CPU host and resolved thread budget.
 
@@ -29,6 +29,8 @@ Record the commit and environment for each host.
        python tools/benchmark_cpu_materialisation.py --smoke --threads 1 --label scruffy --output evidence/scruffy_cpu_smoke.json
 
    Repeat on dreedle, changing the label and output filename. The final line must say PASS. Losses, coefficient/model gradients, updated parameters and optimizer states must match ordinary DEPTH within recorded dtype tolerances. GPU staging must stay at or below its cap; CPU workers must report no CUDA initialization. Tiny fast runs can legitimately record all CPU misses.
+
+   The benchmark resets the training/dropout RNG after constructing every trainer. Its default `--training-seed 373` increases by one per repeat and is identical across providers within that repeat. Model seed 171 and data seed 272 remain fixed. JSON verifies identical initial model, training RNG and data RNG fingerprints, then identical final RNG and batch traces. This corrects the unmatched dropout masks in the original field harness; numerical tolerances remain unchanged. Evidence is saved after each provider even if parity fails, identifies the failing provider and component, and has `status: parity_failed` or `runtime_failed`. Timing remains unqualified until `status: passed`.
 
 4. Smoke-test fallback and replay explicitly:
 
@@ -53,7 +55,7 @@ Then use your representative dimensions, for example:
       --dtype bfloat16 --updates 30 --warmup 5 --repeats 3 \
       --threads 0 --label scruffy --output evidence/scruffy_cpu_representative.json
 
-Use dimensions that fit that computer. Run the same command on dreedle with its label/output path. The benchmark rotates provider order, uses the same endpoint GPU drains for all providers and never waits for CPU preparation merely to improve a hit rate. The field harness explicitly installs the chosen DEPTH backend for all providers and disables TF32 for FP32 qualification. JSON includes per-repeat losses, parity tolerances/differences, time, tokens/s, GPU allocated/reserved peaks, CPU RSS/PSS, worker health, storage states and control costs.
+Use dimensions that fit that computer. Run the same command on dreedle with its label/output path. The benchmark rotates provider order, uses the same endpoint GPU drains for all providers and never waits for CPU preparation merely to improve a hit rate. The field harness explicitly installs the chosen DEPTH backend for all providers and disables TF32 for FP32 qualification. Initial fingerprints are collected before warmup; final fingerprints and comparisons are collected after the timed endpoint drain. JSON includes per-repeat losses, model/RNG/batch fingerprints, parity tolerances/differences, time, tokens/s, GPU allocated/reserved peaks, CPU RSS/PSS, worker health, storage states and control costs.
 
 At a fixed staging cap, change one dimension at a time:
 
