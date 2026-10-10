@@ -147,12 +147,22 @@ def test_actual_cuda_whole_trainer_all_providers_match_with_dropout_and_rotated_
     from sheet.depth_materialisation_runtime import install_depth_materialisation_runtime
     install_depth_materialisation_runtime()
     atol, rtol = (3e-5, 3e-4) if dtype == "float32" else (4e-4, 0.02) if dtype == "float16" else (3e-3, 0.06)
+    failures = []
     for repeat, modes in enumerate((("off", "gpu", "cpu_and_gpu"), ("cpu_and_gpu", "off", "gpu"))):
         results = {mode: field.run(options, mode, repeat) for mode in modes}
         rows = [row for mode in ("gpu", "cpu_and_gpu") for row in field.compare_run_results(results["off"], results[mode], repeat=repeat, mode=mode, atol=atol, rtol=rtol)]
         failed = [row for row in rows if not row["passed"]]
         if failed:
-            pytest.fail(json.dumps({"backend": backend, "dtype": dtype, "repeat": repeat, "failed_comparisons": failed}, indent=2), pytrace=False)
+            # A fresh ordinary run distinguishes provider drift from CUDA
+            # variation already present without PREMAT. Diagnostic only: the
+            # original provider failure still fails with unchanged tolerances.
+            control = field.run(options, "off", repeat)
+            control_rows = field.compare_run_results(results["off"], control, repeat=repeat, mode="off_repeat", atol=atol, rtol=rtol)
+            control_failed = [row for row in control_rows if not row["passed"]]
+            failures.append({"repeat": repeat, "failed_comparisons": failed,
+                             "ordinary_control_passed": not control_failed, "ordinary_control_failed_comparisons": control_failed})
+    if failures:
+        pytest.fail(json.dumps({"backend": backend, "dtype": dtype, "failed_repeats": failures}, indent=2), pytrace=False)
 
 
 def test_empty_gradient_comparison_cannot_pass():

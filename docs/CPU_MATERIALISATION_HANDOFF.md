@@ -1,11 +1,11 @@
-# CPU materialisation native-binding hand-off (10 October 2026)
+# CPU materialisation CUDA lifetime and diagnostics hand-off (10 October 2026)
 
 ## Scope and authorization
 
 Repository `peterdonnelly1/thog2`, branch `cpu_materialisation`. The user authorizes branch publication through the GitHub connector without another confirmation. Give informative heartbeats with estimated progress, then the download and smoke/preliminary commands. Do not spawn agents without an explicit request. Use existing scratch inputs; do not retrieve them through Library.
 
 Local checkout: `/workspace/scratch/75ac1893c477/thog2`.
-Parent: `54c37c8c548996527e37895062a4d0528568f71c`.
+Current publication parent: `63bd6bea793a9e74440de81f66c111c8fdfac5a1`.
 Pristine base: `e29e32db916fc5ceb87a089d057fb78456c1a98a`, recreated at `/workspace/scratch/75ac1893c477/thog2_baseline`. Preserve older recovery checkouts/stashes. The published parent is also checked out read-only at `../thog2_published`.
 
 ## Field evidence and diagnosis
@@ -46,3 +46,17 @@ Discover GitHub tools selectively. Fetch branch state before publishing, create 
 The user asked why repeated attempts took so long. Already explained that independent implementation/harness faults accumulated, early validation was inadequate, and no local CUDA GPU makes hardware handoffs necessary. Continue authorized work without asking permission; do not present CPU tests as CUDA qualification.
 
 After publication, provide fetch/switch/fast-forward commands and the new expected commit. First rerun the full correctness command on Scruffy with `set -o pipefail` and `tee`, then the FP32 smoke and 30-update/five-warmup/three-repeat preliminary commands. Testing documentation includes FP16/BF16 smoke commands for both backends. CUDA stream behavior, CPU/GPU value differences and performance remain unqualified until these actual hardware runs pass. Preserve JSONs even when parity fails. Link the branch testing instructions. No new speedup or memory-improvement claim.
+
+## Latest Scruffy result and follow-up
+
+Scruffy verified `63bd6bea` and supplied **two failures, 452 passes in 70 seconds**. FP16 matmul passed. The remaining whole-trainer failures were GPU-only FP16 einsum (repeat 0) and GPU-only BF16 einsum (repeat 1), both in updated parameters. FP16 affected attention input bias, attention value weight and MLP contraction weight; BF16 affected attention input bias. Every other comparison reached passed. CPU+GPU has no reported failed comparison, but the FP16 test stopped at repeat 0, so its second repeat was not qualified. The pass increase includes 25 new regressions and one formerly failing test; do not describe it as 26 corrected old failures.
+
+Audit found a separate concrete lifetime gap: the GPU scheduler's release event covers the consuming forward GEMM, while native autograd can save the same low-precision cached storage for input gradients. Its final Python reference can disappear before asynchronous backward finishes. The shared binding now registers the consumer stream for unleased CUDA storage. CPU uploads already register that stream and have an explicit lease. This adds no copy, autograd node, CPU-preparation wait or device synchronization to training. Scheduler comments now distinguish forward ownership from backward protection.
+
+Two new CUDA-only tests queue backward behind a device delay, drop the graph, churn the producer's allocation size and check that the original weight cannot be reused until Main finishes. They also check exact input gradients. These cases are skipped locally and have not been hardware verified. Crucially, the reported trainer failures use checkpoint replay, which normally recomputes weights on Main. The lifetime fix is **not a confirmed explanation or confirmed cure for those two failures**.
+
+The six CUDA whole-trainer cases now finish both rotated-order repeats before reporting numerical failures. For each failed repeat they rerun ordinary DEPTH with the same settings and seed, and report `ordinary_control_passed` plus `ordinary_control_failed_comparisons`. This distinguishes variation already present without PREMAT from provider-specific drift. An ordinary control failure does not waive the original failure; tolerances are unchanged. The control is test-only and does not alter field timing.
+
+Local affected suite: **354 passed, 187 skipped**, `../lifetime_targeted.log`. Full candidate: **2,177 passed, 206 skipped, 85 failed, nine deselected, 484 subtests passed**. Eighty-four failures match the prior complete pristine-base run. The extra fast-discard Stage4 equivalence assertion also fails in isolated runs on both the current candidate and pristine `e29e32d`, with the same MLP expansion weight assertion; it is an existing numerical variation, not a new CUDA-path regression. Preserve the raw comparison showing the difference and the paired isolated JUnit evidence. No baseline tests are missing and the 84 shared failure counts/kinds do not increase. All **41 static Instra scripts** pass again. Evidence is in `../lifetime_regression_evidence/`; the new comparison uses the complete earlier `../native_regression_evidence/base.xml` rather than repeating an unchanged full base suite.
+
+Both Actions runs for parent `63bd6bea` succeeded (runs 38029721225 and 38029718394). Check the new commit's own runs after publication; parent success is not new-commit verification. Next step is the full correctness command on Scruffy, preserving its complete output. If failures remain, use both repeat diagnostics and ordinary controls before proposing another numerical change. Hardware qualification and performance remain open.

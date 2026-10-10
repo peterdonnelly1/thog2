@@ -1695,10 +1695,9 @@ class PrematRuntime:
             self._aggregate["available_hits"] += 1
             self._aggregate["fully_hidden_hits"] += 1
             candidate.final_outcome = "FULL HIT"
-            # Explicit lifetime is stronger than record_stream here: the runtime
-            # retains the tensor until a Main Stream event recorded after its
-            # consuming GEMM completes.  Avoiding record_stream means final
-            # release returns directly to the tensor's Premat allocator stream.
+            # The scheduler retains its forward ownership through the consuming
+            # GEMM event. The shared differentiable binding separately protects
+            # consumer-stream uses when backward saves this cached storage.
             self._transition(
                 candidate,
                 CandidateState.CONSUMING,
@@ -3381,10 +3380,9 @@ class PrematRuntime:
             if not complete:
                 remaining.append(release)
                 continue
-            # The tensor was deliberately kept alive until this Main Stream
-            # event.  PREMAT hits no longer call record_stream(current_stream),
-            # so dropping the last reference now returns the allocation directly
-            # to its original Premat-stream allocator pool.
+            # This event ends the scheduler's forward ownership. Saved autograd
+            # tensors and the binding's consumer-stream registration protect
+            # any later input-gradient reads before allocator reuse.
             release.tensor = None
             self._retained_bytes = max(
                 0,

@@ -162,4 +162,50 @@ def test_native_binding_keeps_storage_and_lease_without_running_the_contraction(
     del output
     gc.collect()
     assert lease_reference() is None
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="actual CUDA allocator/backward lifetime qualification")
+@pytest.mark.parametrize("dtype", (torch.float16, torch.bfloat16))
+def test_gpu_cached_weight_cannot_be_reused_before_queued_input_gradient_finishes(dtype):
+    if dtype == torch.bfloat16 and not torch.cuda.is_bf16_supported():
+        pytest.skip("GPU has no BF16 support")
+    # Delay Main after forward so backward returns with its input-gradient GEMM
+    # still queued. Drop the graph and churn the producer's exact allocation
+    # size. A forward-only release event does not protect this reuse boundary.
+    producer = torch.cuda.Stream()
+    main = torch.cuda.current_stream()
+    coefficient = torch.zeros(512, 512, 3, device="cuda")
+    coefficient[:, :, 0] = 1
+    coefficient.requires_grad_()
+    row = torch.tensor([1., 0., 0.], device="cuda")
+    producer.wait_stream(main)
+    with torch.cuda.stream(producer), torch.no_grad(), torch.autocast("cuda", dtype=dtype, cache_enabled=False):
+        cached = torch.einsum("p,rcp->rc", row, coefficient)
+    main.wait_stream(producer)
+    pointer = cached.untyped_storage().data_ptr()
+    with torch.autocast("cuda", dtype=dtype):
+        weight = CpuDepthBinding.apply(cached, PrematBindingContext(policy("einsum", str(dtype).split(".")[-1])), coefficient, row)
+        value = torch.ones(8, 512, device="cuda", dtype=dtype, requires_grad=True)
+        loss = torch.nn.functional.linear(value, weight).float().sum()
+    del cached, weight
+    torch.cuda._sleep(1_000_000_000)
+    loss.backward()
+    finished = torch.cuda.Event()
+    finished.record(main)
+    del loss
+    gc.collect()
+    probes = []
+    try:
+        assert not finished.query(), "the delayed backward must still be queued during the reuse probe"
+        with torch.cuda.stream(producer):
+            for _ in range(16):
+                probe = torch.empty((512, 512), device="cuda", dtype=dtype)
+                probes.append(probe)
+                assert probe.untyped_storage().data_ptr() != pointer, "producer reused a cached weight while Main still needs it"
+                probe.fill_(float("nan"))
+        torch.cuda.synchronize()
+        torch.testing.assert_close(value.grad, torch.full_like(value, 512), atol=0, rtol=0)
+    finally:
+        # Qualification-only cleanup; no synchronization is added to training.
+        torch.cuda.synchronize()
 # ^^^ THOG

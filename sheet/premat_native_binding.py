@@ -84,6 +84,13 @@ def bind_cached_depth(cached, binding, *pairs):
         raise RuntimeError("cached DEPTH dtype does not match its numerical policy")
     if not torch.is_grad_enabled() or not any(value.requires_grad for value in pairs):
         return cached
+    # GPU-only PREMAT's release event covers the forward projection. Autograd
+    # can save this same low-precision storage for the input-gradient GEMM,
+    # and release its last reference before that asynchronous GEMM completes.
+    # CPU uploads already have a lease and consumer-stream protection. For
+    # unleased CUDA values, register Main so allocator reuse also covers backward.
+    if cached.device.type == "cuda" and binding.storage_lease is None:
+        cached.record_stream(torch.cuda.current_stream(device=cached.device))
     outputs = []
     offset = 0
     for index in range(0, len(pairs), 2):

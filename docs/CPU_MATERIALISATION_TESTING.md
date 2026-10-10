@@ -20,9 +20,12 @@ Record the commit and environment for each host.
 
 2. On an actual CUDA host, run the hardware suite:
 
-       PYTHONPATH=. python -m pytest -q tests/test_cpu_materialisation_cuda.py tests/test_cpu_materialisation_benchmark.py tests/test_premat_matmul_binding.py
+       set -o pipefail
+       PYTHONPATH=. python -m pytest -q tests/test_cpu_materialisation*.py tests/test_premat_matmul_binding.py 2>&1 | tee /tmp/cpu_materialisation_tests.txt
 
    CUDA absence skips this suite; a skipped suite does not pass hardware qualification. Unsupported BF16 hardware skips only BF16 cases. Check that the real-worker success-path test runs and passes. It forces a completed upload before readiness outside any measured update, then checks input gradients and lifetime.
+
+   Include the native-binding file: its two new GPU allocator tests queue input-gradient work and check storage protection after graph release. The whole-trainer tests finish both rotated-order repeats and print complete failed comparisons. Each failed repeat also reports `ordinary_control_passed` and `ordinary_control_failed_comparisons` from a fresh identically seeded PREMAT-off run. Keep the full output even if an ordinary control fails; that does not waive provider parity. At `63bd6bea`, Scruffy still had GPU-only FP16/BF16 einsum parameter failures. The subsequent storage fix has not yet been hardware qualified or established as their cause. Run this correctness command before collecting new performance evidence.
 
 3. Run the tiny whole-trainer smoke test, with two accumulation microsteps, checkpoint segments of two layers and three updates for each provider:
 
