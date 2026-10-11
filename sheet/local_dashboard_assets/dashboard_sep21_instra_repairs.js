@@ -316,6 +316,7 @@ window.addEventListener("load", () => {
           || processing_view.resource_available
           || processing_view.compatibility_available
           || processing_view.timing_available
+          || processing_view.ncu_resources_available
         );
         group.hidden = !(processing_view.charts_tab_visible && capture_available);
       }

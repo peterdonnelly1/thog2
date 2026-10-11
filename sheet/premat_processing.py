@@ -1329,6 +1329,7 @@ def maybe_reexec_under_nsys(arguments: Sequence[str], *, entrypoint: Path) -> Op
     capture_metadata_path = temporary_root / "capture.json"
     environment = dict(os.environ)
     environment[_PROCESSING_CHILD_ENV] = "1"
+    environment["THOG2_PREMAT_PROCESSING_PROFILER"] = profiler
     environment[_PROCESSING_HANDOFF_ENV] = str(handoff_path)
     environment[_PROCESSING_CAPTURE_METADATA_ENV] = str(capture_metadata_path)
     capture_update, rewritten_arguments, cpu_full_capture = resolve_processing_capture(arguments, capture_update, profiler)
@@ -1454,9 +1455,10 @@ def maybe_reexec_under_nsys(arguments: Sequence[str], *, entrypoint: Path) -> Op
         select_representative_kernel_resources,
         write_outputs,
     )
-    resource_rows = normalize_semantic_ncu_exports(raw_csv, semantic_csv)
+    materialisation_device = (handoff.get("config") or {}).get("premat_materialisation_device") or _argv_value(arguments, "--premat_materialisation_device", "gpu")
+    resource_rows = normalize_semantic_ncu_exports(raw_csv, semantic_csv, materialisation_device=materialisation_device)
     representative_rows = select_representative_kernel_resources(resource_rows)
-    paths = write_outputs(representative_rows, processing_directory)
+    paths = write_outputs(representative_rows, processing_directory, materialisation_device=materialisation_device)
     report_destination = processing_directory / f"processing_ncu_trace{report_path.suffix}"
     shutil.copy2(report_path, report_destination)
     shutil.copy2(raw_csv, processing_directory / "processing_ncu_raw.csv")

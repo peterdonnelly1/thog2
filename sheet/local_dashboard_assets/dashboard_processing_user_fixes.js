@@ -233,7 +233,8 @@
       : [];
     if (indices.length) Plotly.restyle(mount, {width}, indices).catch(() => {});
     Plotly.relayout(mount, {
-      "yaxis.range":[0.30, 1.40],
+      "yaxis.range":processing_view.operations_payload?.metadata?.materialisation_device === "cpu_and_gpu"
+        ? window.processing_operations_test_hooks.current_y_range() : [0.30, 1.40],
       "margin.t":8,
       "margin.b":maximized ? 42 : 38,
     }).catch(() => {});

@@ -4,7 +4,7 @@
 (function install_processing_nsys_eye_select() {
   function is_nsys_run(run) {
     const artifact = String(run?.artifact_name || run?.run_name || "").toUpperCase();
-    return artifact.includes("_NSYS_") || artifact.includes("NSYS_PREMAT");
+    return run?.nsight === "NSYS" || artifact.includes("_NSYS_") || artifact.includes("NSYS_PREMAT");
   }
 
   function run_for_selection(run_id) {

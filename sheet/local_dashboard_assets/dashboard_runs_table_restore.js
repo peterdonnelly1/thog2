@@ -145,6 +145,8 @@ window.addEventListener("load", () => {
       },
       learning_rate: {label: "c", title: "maximum learning rate in units of 1e-5", numeric: true, value: run => learning_rate_code(run, "learning_rate")},
       min_learning_rate: {label: "f", title: "minimum learning rate in units of 1e-5", numeric: true, value: run => learning_rate_code(run, "min_learning_rate", "min_lr")},
+      nsight: {label:"NSIGHT", title:"Nsight collector: NSYS temporal capture; NCU kernel-resource capture; - ordinary run", numeric:false,
+        value:run => ["NSYS","NCU"].includes(run?.nsight) ? run.nsight : ["nsys","ncu"].includes(configuration(run).runner?.profiler) ? configuration(run).runner.profiler.toUpperCase() : /_NCU_|NCU_PREMAT/i.test(run?.artifact_name || "") ? "NCU" : /_NSYS_|NSYS_PREMAT/i.test(run?.artifact_name || "") ? "NSYS" : "-"},
       capture_period: {
         label: "C_p", title: "weight-curve capture period in optimizer steps", numeric: true,
         value: run => configured_value(run, "instrumentation__depth_weight_curves__log_every_n_steps")
@@ -178,14 +180,14 @@ window.addEventListener("load", () => {
       "preset", "optimizer", "gb", "layers", "depth_order", "d_model", "width_order", "premat", "parms", "equiv", "warmup",
       "context", "heads", "grad_accum", "activation_checkpointing", "learning_rate",
       "min_learning_rate", "probe_start", "probe_end", "curve_start", "curve_end", "capture_period",
-      "updated",
+      "nsight", "updated",
     ]);
     const widths = Object.freeze({
       select:34, grid_visibility:34, visibility:34, steps:62, duration:72, loss:55, state:88, wandb:0, host:84, gpu:42,
       preset:64, optimizer:70, gb:68, layers:42, depth_order:42, premat:76, parms:58, equiv:58, warmup:42,
       context:64, d_model:64, width_order:42, heads:42, grad_accum:46, activation_checkpointing:42,
       learning_rate:42, min_learning_rate:42, probe_start:50, probe_end:50,
-      curve_start:50, curve_end:64, capture_period:50, updated:92, menu:36,
+      curve_start:50, curve_end:64, capture_period:50, nsight:64, updated:92, menu:36,
     });
 
     const tag = (element, key) => {

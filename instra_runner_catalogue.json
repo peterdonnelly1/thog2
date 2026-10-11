@@ -536,7 +536,7 @@
       "linear"
     ],
     "default": null,
-    "help": "absolute-layer observational Δloss heatmap; absent means disabled",
+    "help": "absolute-layer observational \u0394loss heatmap; absent means disabled",
     "kind": "dimension",
     "type": "string"
   },
@@ -768,7 +768,7 @@
   },
   "--min-lr": {
     "category": "GPT-2 Hyperparameters",
-    "default": 0.00006,
+    "default": 6e-05,
     "help": "direct floating-point minimum LR",
     "kind": "dimension",
     "short": "-f",
@@ -858,7 +858,10 @@
     "default": null,
     "help": "required zero-based absolute layer for NCU capture",
     "kind": "fixed",
-    "type": "int"
+    "type": "int",
+    "extra_categories": [
+      "CPU Premat"
+    ]
   },
   "--no-activation-checkpointing": {
     "alias_for": "--activation-checkpointing",
@@ -1270,7 +1273,10 @@
     "default": "disabled",
     "help": "enable dynamic CUDA-stream pre-materialisation; default disabled",
     "kind": "dimension",
-    "type": "string"
+    "type": "string",
+    "extra_categories": [
+      "CPU Premat"
+    ]
   },
   "--premat_allocator_aware_admission": {
     "category": "Premat",
@@ -1283,7 +1289,10 @@
     "default": "disabled",
     "help": "disabled | cautious | normal | aggressive",
     "kind": "dimension",
-    "type": "string"
+    "type": "string",
+    "extra_categories": [
+      "CPU Premat"
+    ]
   },
   "--premat_attention_mode": {
     "category": "Premat",
@@ -1294,7 +1303,10 @@
     "default": "fused",
     "help": "attention materialisation mode; default fused",
     "kind": "dimension",
-    "type": "string"
+    "type": "string",
+    "extra_categories": [
+      "CPU Premat"
+    ]
   },
   "--premat_cuda_stream_priority": {
     "category": "Premat",
@@ -1305,21 +1317,30 @@
     "default": "normal",
     "help": "Premat CUDA dispatch priority; default normal",
     "kind": "dimension",
-    "type": "string"
+    "type": "string",
+    "extra_categories": [
+      "CPU Premat"
+    ]
   },
   "--premat_diagnostic_layer_delay_ms": {
     "category": "Premat",
     "default": 0,
     "help": "Diagnostic host-dispatch delay after each non-final layer; default 0",
     "kind": "fixed",
-    "type": "float"
+    "type": "float",
+    "extra_categories": [
+      "CPU Premat"
+    ]
   },
   "--premat_enable_gpu_timing_diagnostic": {
     "category": "Premat",
     "default": false,
     "help": "collect expensive CUDA timestamp/classification diagnostics",
     "kind": "fixed",
-    "type": "bool_value"
+    "type": "bool_value",
+    "extra_categories": [
+      "CPU Premat"
+    ]
   },
   "--premat_enable_shadow_mode": {
     "category": "Premat",
@@ -1333,21 +1354,30 @@
     "default": 1,
     "help": "global CUDA reserve shared with memory_budget",
     "kind": "dimension",
-    "type": "float"
+    "type": "float",
+    "extra_categories": [
+      "CPU Premat"
+    ]
   },
   "--premat_headroom_stay_below_current_peak": {
     "category": "Premat",
     "default": null,
     "help": "admit only below the observed CUDA allocation peak",
     "kind": "dimension",
-    "type": "flag"
+    "type": "flag",
+    "extra_categories": [
+      "CPU Premat"
+    ]
   },
   "--premat_headroom_stay_within_global_buffer": {
     "category": "Premat",
     "default": null,
     "help": "admit only within the configured global reserve",
     "kind": "dimension",
-    "type": "flag"
+    "type": "flag",
+    "extra_categories": [
+      "CPU Premat"
+    ]
   },
   "--premat_instra": {
     "category": "Premat",
@@ -1358,7 +1388,10 @@
     "default": "disabled",
     "help": "publish PREMAT data to the local Instra dashboard",
     "kind": "fixed",
-    "type": "string"
+    "type": "string",
+    "extra_categories": [
+      "CPU Premat"
+    ]
   },
   "--premat_logging": {
     "category": "Premat",
@@ -1369,7 +1402,10 @@
     "default": "disabled",
     "help": "write PREMAT scheduler history",
     "kind": "fixed",
-    "type": "string"
+    "type": "string",
+    "extra_categories": [
+      "CPU Premat"
+    ]
   },
   "--premat_processing_logging": {
     "category": "NSIGHT",
@@ -1381,7 +1417,10 @@
     "help": "run bounded Nsight Processing capture",
     "kind": "fixed",
     "options_help": "enabled, disabled",
-    "type": "string"
+    "type": "string",
+    "extra_categories": [
+      "CPU Premat"
+    ]
   },
   "--premat_processing_profiler": {
     "category": "NSIGHT",
@@ -1389,18 +1428,24 @@
       "nsys",
       "ncu"
     ],
-    "default": null,
-    "help": "select temporal NSYS or structural NCU capture",
-    "kind": "automatic",
-    "options_help": "nsys, ncu",
-    "type": "string"
+    "default": "nsys",
+    "help": "Nsight collector: nsys records a temporal trace; ncu replays selected CUDA kernels for structural resource measurements. Profiling mode sets this field automatically. A pair uses nsys for its first run and ncu for its second run.",
+    "kind": "fixed",
+    "options_help": "nsys, ncu; controlled by Profiling mode when NSYS/NCU is selected",
+    "type": "string",
+    "extra_categories": [
+      "CPU Premat"
+    ]
   },
   "--premat_retain_detailed_premat_history": {
     "category": "Premat",
     "default": false,
     "help": "retain per-event PREMAT history",
     "kind": "fixed",
-    "type": "bool_value"
+    "type": "bool_value",
+    "extra_categories": [
+      "CPU Premat"
+    ]
   },
   "--premat_target_layer": {
     "category": "Premat",
@@ -1413,7 +1458,10 @@
     "default": 1,
     "help": "relative target; 10 means ordered +1 then +0 sweep",
     "kind": "dimension",
-    "type": "int"
+    "type": "int",
+    "extra_categories": [
+      "CPU Premat"
+    ]
   },
   "--premat_target_matrix": {
     "category": "Premat",
@@ -1421,7 +1469,10 @@
     "help": "optional comma-separated QKV/O/UP/DOWN selector combination",
     "kind": "list",
     "options_help": "one text value per line",
-    "type": "list"
+    "type": "list",
+    "extra_categories": [
+      "CPU Premat"
+    ]
   },
   "--premat_timing": {
     "category": "Premat",
@@ -1443,7 +1494,10 @@
     "default": "r_to_l",
     "help": "matrix submission order; default r_to_l",
     "kind": "dimension",
-    "type": "string"
+    "type": "string",
+    "extra_categories": [
+      "CPU Premat"
+    ]
   },
   "--print-artifact-name": {
     "category": "Run Control Parameters",
@@ -1770,10 +1824,13 @@
     "choices": [
       "gpu",
       "cpu_and_gpu"
+    ],
+    "extra_categories": [
+      "CPU Premat"
     ]
   },
   "--premat_cpu_preparation": {
-    "category": "Premat",
+    "category": "CPU Premat",
     "kind": "dimension",
     "type": "string",
     "default": "eager",
@@ -1787,7 +1844,7 @@
     "cpu_only": true
   },
   "--premat_cpu_layer_batch_size": {
-    "category": "Premat",
+    "category": "CPU Premat",
     "kind": "dimension",
     "type": "string",
     "default": "single_layer",
@@ -1796,7 +1853,7 @@
     "cpu_only": true
   },
   "--premat_cpu_workers": {
-    "category": "Premat",
+    "category": "CPU Premat",
     "kind": "dimension",
     "type": "int",
     "default": 1,
@@ -1805,7 +1862,7 @@
     "cpu_only": true
   },
   "--premat_cpu_threads_per_worker": {
-    "category": "Premat",
+    "category": "CPU Premat",
     "kind": "dimension",
     "type": "int",
     "default": 0,
@@ -1814,7 +1871,7 @@
     "cpu_only": true
   },
   "--premat_cpu_transfer_timing": {
-    "category": "Premat",
+    "category": "CPU Premat",
     "kind": "dimension",
     "type": "string",
     "default": "as_the_code_flies",
@@ -1830,7 +1887,7 @@
     "cpu_only": true
   },
   "--premat_cpu_transfer_lead_ms": {
-    "category": "Premat",
+    "category": "CPU Premat",
     "kind": "dimension",
     "type": "float",
     "default": 0,
@@ -1840,7 +1897,7 @@
     "predicted_only": true
   },
   "--premat_cpu_staging_limit_mb": {
-    "category": "Premat",
+    "category": "CPU Premat",
     "kind": "dimension",
     "type": "float",
     "default": 0,
@@ -1849,7 +1906,7 @@
     "cpu_only": true
   },
   "--premat_cpu_checkpoint_replay": {
-    "category": "Premat",
+    "category": "CPU Premat",
     "kind": "dimension",
     "type": "string",
     "default": "disabled",
@@ -1860,5 +1917,64 @@
       "enabled"
     ],
     "cpu_only": true
+  },
+  "--premat_instra_microsteps": {
+    "category": "Premat",
+    "kind": "fixed",
+    "type": "string",
+    "choices": [
+      "all",
+      "first"
+    ],
+    "default": "all",
+    "extra_categories": [
+      "CPU Premat"
+    ],
+    "help": "PREMAT Recapitulation, inspector and history capture all original-forward accumulation microsteps by default. first keeps only the first microstep of each sampled optimiser step and reduces capture overhead. The update sampling interval remains --log-interval; use 1 to capture every step."
+  },
+  "--premat_processing_logging_capture_frequency_hz": {
+    "category": "NSIGHT",
+    "kind": "fixed",
+    "type": "int",
+    "default": 10000,
+    "help": "NSYS GPU metric sample frequency in Hz; default 10000. Applies to NSYS; NCU measures kernel resource use rather than a sample timeline.",
+    "extra_categories": [
+      "CPU Premat"
+    ]
+  },
+  "--premat_processing_logging_capture_update": {
+    "category": "NSIGHT",
+    "kind": "fixed",
+    "type": "int",
+    "default": 1,
+    "help": "Positive optimiser step to profile, independent of --log-interval. Profiling mode defaults to step 10 (or the shortest run's final step when fewer than 10). Preserve an explicit step; it must not exceed --max-iters. CPU NSYS with full-step timing captures all forwards, backwards and the optimiser at this step; other processing scopes capture the first forward microstep.",
+    "extra_categories": [
+      "CPU Premat"
+    ]
+  },
+  "--premat_instra__full_step_timing_capture_and_chart": {
+    "category": "NSIGHT",
+    "kind": "fixed",
+    "type": "string",
+    "choices": [
+      "enable",
+      "disable"
+    ],
+    "default": "disable",
+    "help": "Enable bounded full-optimiser-step timing and its Processing charts. Profiling mode defaults this to enable. Includes all accumulation forwards/backwards and the optimiser; NCU kernel replay distorts elapsed timings, so use the NSYS half of a pair for timing comparisons.",
+    "extra_categories": [
+      "CPU Premat"
+    ]
+  },
+  "--premat_instra__full_step_timing_capture_and_chart_capture": {
+    "category": "NSIGHT",
+    "kind": "fixed",
+    "type": "string",
+    "default": null,
+    "help": "Exact full-step timing capture: enter step N, for example step 10. Requires full-step timing enable. Blank uses the final optimiser step. Profiling mode defaults it to the Processing capture step; CPU NSYS requires the two capture steps to agree.",
+    "extra_categories": [
+      "CPU Premat"
+    ],
+    "options_help": "Enter step N, where N is a positive optimiser update within --max-iters. Example: step 10. Profiling supplies the processing capture update by default."
   }
 }

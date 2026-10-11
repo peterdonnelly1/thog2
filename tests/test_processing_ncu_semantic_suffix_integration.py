@@ -9,7 +9,7 @@ def _write_wide(path: Path, *, semantic: bool) -> None:
     headers = [
         "ID", "Process ID", "Kernel Name", "Context", "Stream", "Block Size", "CC",
         "thread Domain:Push/Pop_Range:PL_Type:PL_Value:CLR_Type:Color:Msg_Type:Msg",
-        "gpu__time_duration.sum", "launch__registers_per_thread_allocated",
+        "gpu__time_duration.sum", "launch__registers_per_thread",
         "launch__shared_mem_per_block_allocated", "launch__stream_id",
     ]
     units = ["", "", "", "", "", "", "", "", "ns", "register/thread", "byte/block", ""]

@@ -274,6 +274,9 @@ class OwtRunConfig:
     premat_processing_logging_capture_frequency_hz: int = 10000
     premat_processing_logging_capture_update: int = 1                                                                                                      # <<< THOG exact optimizer update selected for bounded Processing capture
     # ^^^ THOG
+    # vvv THOG PREMAT capture scope is an instrumentation choice, default all microsteps
+    premat_instra_microsteps: str = "all"
+    # ^^^ THOG
     premat_retain_detailed_premat_history: bool = False
     # ^^^ THOG
     # vvv THOG v1.3 sampling-only chaos bump controls
@@ -620,6 +623,8 @@ class OwtRunConfig:
             raise ValueError("plastic__layer_count_cost_weight must be finite and non-negative")
         if self.premat_target_layer == 10:
             object.__setattr__(self, "premat_weight_matrix_target_order", "r_to_l")
+        if self.premat_instra_microsteps not in ("all", "first"):
+            raise ValueError("premat_instra_microsteps must be all or first")
         if not isinstance(self.premat_retain_detailed_premat_history, bool):
             raise ValueError("premat_retain_detailed_premat_history must be bool")
         if not isinstance(self.premat_enable_gpu_timing_diagnostic, bool):
@@ -1597,6 +1602,9 @@ class OwtRunConfig:
             premat_processing_logging=self.premat_processing_logging,
             premat_processing_logging_capture_frequency_hz=self.premat_processing_logging_capture_frequency_hz,
             premat_processing_logging_capture_update=self.premat_processing_logging_capture_update,                                                       # <<< THOG propagate requested Processing capture update into TrainingConfig
+            # vvv THOG transfer the chart sampler without changing model arithmetic
+            premat_instra_microsteps=self.premat_instra_microsteps,
+            # ^^^ THOG
             premat_retain_detailed_premat_history=self.premat_retain_detailed_premat_history,
             plastic__layer_count__cuda_allocator_reserve_gib=float(self.plastic__layer_count__cuda_allocator_reserve_gib),
             plastic__geometry_learning_rate_multiplier=float(self.plastic__geometry_learning_rate_multiplier),

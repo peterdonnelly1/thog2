@@ -1,15 +1,16 @@
 /* vvv THOG completed-microstep Premat playback and outcome inspector */
 .premat-group { padding: 0 18px 20px; }
-.premat-header {
+#premat_chart_group > .premat-header {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 16px;
-  height: 35px;
+  gap: 6px 12px;
+  height: auto;
+  min-height: 35px;
   padding: 0 2px;
 }
 .premat-header strong { font-size: 15px; }
-.premat-header-title { min-width: 0; display: flex; align-items: center; }
+.premat-header-title { min-width: 0; display: flex; align-items: center; flex-wrap: wrap; }
 .premat-step-totals { min-width: 150px; margin-left: 24px; color: #3d4856; font-size: 11px; font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .premat-history-button { justify-self: center; }
 .premat-header-controls, .premat-playback-control {
@@ -17,7 +18,7 @@
   align-items: center;
   gap: 8px;
 }
-.premat-header-controls { min-width: 0; height: 100%; justify-content: flex-end; }
+.premat-header-controls { grid-column: 1 / -1; min-width: 0; height: auto; justify-content: flex-start; flex-wrap: wrap; padding-bottom: 6px; }
 .premat-inspect-button { margin-right: 28px; }
 .premat-playback-control, .premat-mode, .premat-update {
   color: var(--muted-text, #777f8c);

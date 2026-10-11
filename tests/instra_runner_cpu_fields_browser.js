@@ -5,7 +5,7 @@ const address=process.env.INSTRA_TEST_URL || "http://127.0.0.1:8765";
 
 async function check(browser_type) {
   const browser=await browser_type.launch({headless:true,...(browser_type===chromium && process.env.INSTRA_CHROMIUM_PATH ? {
-    executablePath:process.env.INSTRA_CHROMIUM_PATH,args:["--no-sandbox","--disable-dev-shm-usage"],
+    executablePath:process.env.INSTRA_CHROMIUM_PATH,args:["--no-sandbox","--disable-dev-shm-usage","--use-gl=angle","--use-angle=swiftshader","--enable-unsafe-swiftshader"],
   } : {}),...(browser_type===firefox ? {env:{...process.env,MOZ_DISABLE_CONTENT_SANDBOX:"1"}} : {})});
   try {
     const page=await browser.newPage({viewport:{width:1600,height:1000}}),errors=[];
@@ -16,12 +16,15 @@ async function check(browser_type) {
     await page.waitForSelector(".runner-categories");
     const field=key=>page.locator(`input[data-runner-field="${key}"]`);
     const select_category=name=>page.locator(`.runner-categories button[data-runner-category="${name}"]`).click();
-    await select_category("Premat");
+    await select_category("CPU Premat");
 
     const cpu_keys=await page.locator('input[data-runner-field^="--premat_cpu_"]').evaluateAll(nodes=>nodes.map(node=>node.dataset.runnerField));
     assert.ok(cpu_keys.length>=8);
     for(const key of cpu_keys) assert.equal(await field(key).isDisabled(),true,`${key} must start inactive for the default GPU provider`);
+    await select_category("Premat");
     assert.equal(await field("--premat_timing").isEnabled(),true);
+    assert.equal(await page.locator('input[data-runner-field^="--premat_cpu_"]').count(),0,"pure CPU controls must leave Premat");
+    await select_category("CPU Premat");
 
     await field("--premat").pressSequentially("enabled");
     await field("--premat_materialisation_device").pressSequentially("cpu_and_gpu");
@@ -35,7 +38,7 @@ async function check(browser_type) {
     await preparation.pressSequentially("ager");
     assert.equal(await preparation.inputValue(),"eager");
     assert.equal(await preparation.getAttribute("aria-invalid"),"false");
-    assert.equal(await field("--premat_timing").isDisabled(),true);
+    await select_category("Premat");assert.equal(await field("--premat_timing").isDisabled(),true);await select_category("CPU Premat");
     assert.equal(await field("--premat_cpu_transfer_lead_ms").isDisabled(),true);
 
     await field("--premat_cpu_transfer_timing").pressSequentially("predicted_gemm_start");
@@ -50,19 +53,22 @@ async function check(browser_type) {
     await field("--premat_cpu_workers").fill("1");
 
     await select_category("Frequently Used");
-    await select_category("Premat");
+    await select_category("CPU Premat");
     assert.equal(await preparation.inputValue(),"eager, scheduled");
     assert.equal(await preparation.isEnabled(),true);
-    assert.equal(await field("--premat_timing").isDisabled(),true);
+    await select_category("Premat");assert.equal(await field("--premat_timing").isDisabled(),true);await select_category("CPU Premat");
     assert.equal(await field("--premat_cpu_transfer_lead_ms").isEnabled(),true);
 
     await field("--premat_materialisation_device").fill("gpu");
     await select_category("Frequently Used");
-    await select_category("Premat");
+    await select_category("CPU Premat");
     for(const key of cpu_keys) assert.equal(await field(key).isDisabled(),true,`${key} must remain inactive after switching tabs`);
     assert.equal(await preparation.inputValue(),"eager, scheduled","inactive CPU requests must be retained");
     assert.equal(await preparation.getAttribute("aria-invalid"),"false");
+    await select_category("Premat");
     assert.equal(await field("--premat_timing").isEnabled(),true);
+    assert.equal(await page.locator('input[data-runner-field^="--premat_cpu_"]').count(),0,"pure CPU controls must leave Premat");
+    await select_category("CPU Premat");
 
     const search=page.locator("#runner_parameter_search");
     await search.fill("cpu_preparation");
@@ -73,7 +79,7 @@ async function check(browser_type) {
     await field("--premat_cpu_transfer_timing").fill("as_the_code_flies");
     assert.equal(await field("--premat_cpu_transfer_lead_ms").isDisabled(),true);
     await select_category("Frequently Used");
-    await select_category("Premat");
+    await select_category("CPU Premat");
     assert.equal(await field("--premat_cpu_transfer_lead_ms").isDisabled(),true);
     assert.equal(await field("--premat_cpu_transfer_lead_ms").inputValue(),"3.5");
 

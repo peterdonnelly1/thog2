@@ -13,21 +13,22 @@ def _write_wide_ncu(path: Path) -> None:
         "ID", "Process ID", "Kernel Name", "Context", "Stream", "Block Size", "CC",
         "thread Domain:Push/Pop_Range:PL_Type:PL_Value:CLR_Type:Color:Msg_Type:Msg",
         "gpu__time_duration.sum",
+        "launch__registers_per_thread",
         "launch__registers_per_thread_allocated",
         "launch__shared_mem_per_block_allocated",
         "launch__stream_id",
     ]
-    units = ["", "", "", "", "", "", "", "", "ns", "register/thread", "byte/block", ""]
+    units = ["", "", "", "", "", "", "", "", "ns", "register/thread", "register/block", "byte/block", ""]
     rows = [
         [
             "0", "111", "main_gemm", "1", "7", "(128, 1, 1)", "8.9",
             "THOG2_PROCESSING|owner=MAIN|operation=consume|family=DOWN|layer=8",
-            "5,472", "32", "16,384", "7",
+            "5,472", "32", "4,096", "16,384", "7",
         ],
         [
             "1", "111", "premat_gemm", "1", "13", "(128, 1, 1)", "8.9",
             "THOG2_PROCESSING|owner=PREMAT|operation=materialize|family=DOWN|layer=8",
-            "8,192", "40", "8,192", "13",
+            "8,192", "40", "5,120", "8,192", "13",
         ],
     ]
     with path.open("w", newline="") as handle:

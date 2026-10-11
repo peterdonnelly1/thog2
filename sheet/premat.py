@@ -664,6 +664,10 @@ class PrematRuntime:
         self._sequence = 0
         self._event_sequence = 0
         self._advance_sequence = 0
+        # vvv THOG training supplies identities before each original forward; deferred reports retain them
+        self.optimizer_step = 0
+        self.micro_step = 0
+        # ^^^ THOG
         self._pass_sequence = 0
         self._events: List[Dict[str, object]] = []
         # vvv THOG Instra receives bounded transition snapshots on the training
@@ -3756,6 +3760,10 @@ class PrematRuntime:
         # report() is non-blocking; unresolved CUDA timings remain in
         # _pending_timings and this snapshot is held privately until they resolve.
         snapshot = self.report()
+        # vvv THOG capture identity now, before delayed CUDA diagnostics can advance to another microstep
+        snapshot["optimizer_update"] = self.optimizer_step
+        snapshot["micro_step"] = self.micro_step
+        # ^^^ THOG
         self._pending_completed_live_reports[self._pass_sequence] = snapshot
         self._publish_completed_live_reports_if_ready()
 
@@ -3835,7 +3843,9 @@ class PrematRuntime:
         )
         for pass_sequence in sorted(tuple(self._pending_completed_live_reports)):
             if pass_sequence in pending_passes:
-                continue
+                # Keep the live (update, microstep) cursor ordered even when an
+                # earlier pass is still waiting for its CUDA event timings.
+                break
             snapshot = self._pending_completed_live_reports.pop(pass_sequence)
             self._refresh_report_derived_aggregates(snapshot)
             try:

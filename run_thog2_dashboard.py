@@ -195,7 +195,7 @@ def _prepare_runtime_assets() -> tempfile.TemporaryDirectory[str]:
     import re
     index_html = re.sub(r'(/assets/[A-Za-z0-9_.-]+)(?:\?[^"\s]*)?(?=")',
                         # r'\1?v=20261005-demand-runtime', index_html)
-                        r'\1?v=20261006-residual-width', index_html)  # THOG refresh browser assets for the new charts
+                        r'\1?v=20261011-microsteps-nsight', index_html)  # THOG refresh browser assets for the new charts
     # ^^^ THOG
     index_path.write_text(index_html, encoding="utf-8")
 

@@ -8,7 +8,7 @@ const data={
  intervals:[{start_us:0,end_us:2000,owner:"MAIN",layer:0,family:"O",operation:"consume",kernel_name:"mm"},{start_us:5000,end_us:8000,owner:"MAIN",layer:1,family:"O",operation:"consume",kernel_name:"mm"}],
  cpu_tasks:[{start_us:300,end_us:1700,clock_alignment_known:true,clock_uncertainty_ms:0.01,cpu_matrix_id:"snapshot:O:0",cpu_task_id:"task",snapshot_id:"snapshot",family:"O",layer_index:0,start_ns:1300000,end_ns:2700000},{start_us:null,end_us:null,clock_alignment_known:false,cpu_matrix_id:"precursor",start_ns:500,end_ns:700}],
  transfers:[{start_us:1700,end_us:1900,direction:"H2D",bytes:256,upload_id:"upload",snapshot_id:"snapshot",raw_start_ns:1700000,raw_end_ns:1900000,left_censored:false,right_censored:false}],
- samples:[],stream_resources:[],main_idle_intervals:[],summary:[],matrix_summary:{},operation_resource_stats:[],attribution_resource_stats:[],metric_audit:[],throughput:[],
+ samples:[],stream_resources:[{time_us:500,sample_start_us:0,sample_end_us:1000,attribution_state:"MAIN_ONLY",sm_active_pct:50,sm_occupancy_pct:40,main_coverage_pct:100,premat_coverage_pct:0}],main_idle_intervals:[],summary:[],matrix_summary:{},operation_resource_stats:[],attribution_resource_stats:[],metric_audit:[],throughput:[],
  cpu_summary:{eligible_matrix_uses:4,full_hits:1,complete_misses:3,not_targeted_uses:12,unique_cpu_matrices:1,cpu_service_ms:1.4,h2d_busy_us:200,d2h_busy_us:null,cuda_copy_coverage:"available",late_upload_count:1,fallback_reasons:{upload_not_complete:3}},cpu_runtime:runtime,
 };
 const snapshot={schema_version:5,optimizer_update:2,pass_complete:true,pass_sequence:4,materialisation_device:"cpu_and_gpu",phase:"original_forward",attention_mode:"fused",target_matrix:2,target_layer:0,layer_indices:[0,1,2,3],n_layer:4,cpu_runtime:runtime,events:[],cpu_lifecycle:[{event:"cpu_matrix_ready",phase:"cpu_preparation",cpu_matrix_id:"snapshot:O:0",cpu_task_id:"task",snapshot_id:"snapshot",start_ns:1300000,end_ns:2700000},{event:"matrix_use",phase:"checkpoint_recompute",matrix_use_id:"replay-use",cpu_matrix_id:"snapshot:O:0",cpu_task_id:"task",snapshot_id:"snapshot"}]};
@@ -29,7 +29,7 @@ snapshot.events.push({event:"pass_end",sequence:sequence++});
  const selected_browsers=(process.env.INSTRA_TEST_BROWSERS||"chromium,firefox").split(",").map(name=>({chromium,firefox}[name]));
  assert.ok(selected_browsers.length&&selected_browsers.every(Boolean));
  for(const type of selected_browsers){
-  const browser=await type.launch({headless:true,...(type===firefox?{env:{...process.env,MOZ_DISABLE_CONTENT_SANDBOX:"1"}}:{})});
+  const browser=await type.launch({headless:true,...(type===chromium&&process.env.INSTRA_CHROMIUM_PATH?{executablePath:process.env.INSTRA_CHROMIUM_PATH,args:["--no-sandbox","--disable-dev-shm-usage","--use-gl=angle","--use-angle=swiftshader","--enable-unsafe-swiftshader"]}:{}),...(type===firefox?{env:{...process.env,MOZ_DISABLE_CONTENT_SANDBOX:"1"}}:{})});
   try{
    const page=await browser.newPage({viewport:{width:1600,height:1000},acceptDownloads:true}),errors=[];
    page.setDefaultTimeout(25000);page.on("pageerror",e=>{errors.push(e.message);console.error("CPU BROWSER PAGE ERROR",e.stack);});
@@ -37,7 +37,7 @@ snapshot.events.push({event:"pass_end",sequence:sequence++});
    await page.route(/\/api\/local-file\?.*processing.*csv/,route=>route.fulfill({status:200,headers:{"Content-Type":"text/csv","Content-Disposition":"attachment"},body:"snapshot_id,cpu_task_id\nsnapshot,task\n"}));
    await page.goto(address+"/runs/fixture_00");
    await page.waitForFunction(()=>window.processing_cpu_test_hooks&&app.runs.length===12);
-   await page.evaluate(async payload=>{local_set_detail_tab("charts");processing_view.charts_tab_visible=true;await processing_render(payload,true);},data);
+   await page.evaluate(async payload=>{local_set_detail_tab("charts");app.instra_loss_autofocused=true;app.instra_focus_loss=false;restore_maximized_chart();processing_view.charts_tab_visible=true;await processing_render(payload,true);},data);
    await page.waitForFunction(()=>by_id("processing_timeline_plot")?.data?.some(trace=>trace.meta?.operations_owner==="CPU"));
    const lanes=await page.locator("#processing_timeline_plot").evaluate(node=>node.layout.yaxis.ticktext);
    assert.deepEqual(lanes,["CPU","COPY D2H","COPY H2D","PREMAT","MAIN"]);
@@ -51,8 +51,21 @@ snapshot.events.push({event:"pass_end",sequence:sequence++});
    assert.equal(await page.locator("#processing_operations_reset_zoom").isDisabled(),true);
    await page.locator('#processing_timeline_card .maximize-button').click();
    await page.waitForFunction(()=>by_id("processing_timeline_card").classList.contains("maximized"));
+   await page.waitForTimeout(400);
+   const range=await page.locator("#processing_timeline_plot").evaluate(node=>node.layout.yaxis.range);
+   assert.ok(range[0]<=-0.55,"COPY D2H and CPU lanes must survive the delayed maximise relayout");
+   assert.equal(range[1],1.4);
    await page.locator('#processing_timeline_card .maximize-button').click();
    await page.waitForFunction(()=>!by_id("processing_timeline_card").classList.contains("maximized"));
+   await page.locator('#processing_resource_card .maximize-button').click();
+   await page.waitForFunction(()=>by_id("processing_resource_card").classList.contains("maximized"));
+   await page.evaluate(async payload=>{local_set_detail_tab("charts");await processing_render(payload,true);},data);
+   await page.waitForTimeout(700);
+   assert.equal(await page.evaluate(()=>app.maximized_chart),"processing_resource","refresh must keep resource contention maximised");
+   const geometry=await page.evaluate(()=>({card:by_id("processing_resource_card").getBoundingClientRect().height,pane:by_id("charts_scroll").clientHeight}));
+   assert.ok(geometry.card>geometry.pane*.70,"maximised resource card fills the pane");
+   await page.locator('#processing_resource_card .maximize-button').click();
+   await page.waitForFunction(()=>!by_id("processing_resource_card").classList.contains("maximized"));
    for(const key of ["transfers","cpu_tasks","cpu_memory","cpu_lifecycle"]){
     const link=page.locator('.processing-downloads a[download="'+data.metadata.files[key]+'"]:visible');await link.waitFor({state:"visible"});assert.ok(await link.isVisible(),key);
     const download=page.waitForEvent("download");await link.click();assert.ok((await download).url().includes("cpu_fixture"));
@@ -107,11 +120,15 @@ snapshot.events.push({event:"pass_end",sequence:sequence++});
    }));assert.deepEqual(conditional,{inactive:false,active:true,lead:true,gpu:false});
    await page.locator("#runs_nav").click();
    await page.evaluate(()=>local_set_detail_tab("charts"));
-   const before=await page.evaluate(()=>({dom:document.querySelectorAll("*").length,trace:by_id("processing_timeline_plot").data.length}));
+   // Finish the normal metadata polls and lazy Plotly construction before
+   // measuring growth; the soak then detects repeated additions, not first paint.
+   await page.waitForTimeout(5000);
+   const count_nodes=()=>({dom:document.querySelectorAll("*").length,trace:by_id("processing_timeline_plot").data.length,areas:Object.fromEntries([...document.querySelectorAll(".chart-card")].map(card=>[card.id||card.dataset.chart,card.querySelectorAll("*").length]))});
+   const before=await page.evaluate(count_nodes);
    const stop=Date.now()+Number(process.env.INSTRA_CPU_SOAK_SECONDS||60)*1000;
    let iterations=0;
    while(Date.now()<stop){await page.evaluate(async payload=>{await processing_render(payload,true);},data);iterations++;await page.waitForTimeout(400);}
-   const after=await page.evaluate(()=>({dom:document.querySelectorAll("*").length,trace:by_id("processing_timeline_plot").data.length}));
+   const after=await page.evaluate(count_nodes);
    assert.equal(after.trace,before.trace);assert.ok(after.dom<=before.dom+60,JSON.stringify({before,after}));assert.deepEqual(errors,[]);
    await page.unrouteAll({behavior:"wait"});
    console.log(JSON.stringify({browser:type.name(),cpu_evidence:true,recap:true,downloads:4,zoom:true,maximize:true,legend:true,runner:true,soak_seconds:Number(process.env.INSTRA_CPU_SOAK_SECONDS||60),iterations,before,after,page_errors:errors}));

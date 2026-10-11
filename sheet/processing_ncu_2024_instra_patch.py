@@ -208,6 +208,7 @@ def maybe_reexec_under_nsys(
     capture_metadata_path = temporary_root / "capture.json"
     environment = dict(os.environ)
     environment[_processing._PROCESSING_CHILD_ENV] = "1"
+    environment["THOG2_PREMAT_PROCESSING_PROFILER"] = profiler
     environment[_processing._PROCESSING_HANDOFF_ENV] = str(handoff_path)
     environment[_processing._PROCESSING_CAPTURE_METADATA_ENV] = str(capture_metadata_path)
 
@@ -368,9 +369,12 @@ def maybe_reexec_under_nsys(
     )
     _postrun_progress(5, total, "semantic NCU CSV export complete; normalizing dominant MAIN kernels and every PREMAT stage")
 
-    resource_rows = _compat.normalize_semantic_ncu_exports(raw_csv, semantic_csv)
+    # vvv THOG CPU preparation has no PREMAT CUDA materialisation kernels
+    materialisation_device = (handoff.get("config") or {}).get("premat_materialisation_device") or _processing._argv_value(arguments, "--premat_materialisation_device", "gpu")
+    resource_rows = _compat.normalize_semantic_ncu_exports(raw_csv, semantic_csv, materialisation_device=materialisation_device)
+    # ^^^ THOG
     representative_rows = _compat.select_representative_kernel_resources(resource_rows)
-    paths = _compat.write_outputs(representative_rows, processing_directory)
+    paths = _compat.write_outputs(representative_rows, processing_directory, materialisation_device=materialisation_device)
     _postrun_progress(6, total, "NCU resources normalized and MAIN/PREMAT compatibility data written")
 
     report_destination = processing_directory / f"processing_ncu_trace{report_path.suffix}"

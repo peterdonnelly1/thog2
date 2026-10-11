@@ -100,8 +100,8 @@ def full_step_timing_capture_update() -> Optional[int]:
 
 def _publish_cli_state(parser: argparse.ArgumentParser, namespace: argparse.Namespace) -> None:
     global _FULL_STEP_TIMING_ENABLED, _FULL_STEP_TIMING_CAPTURE_UPDATE
-    parsed_enabled = str(getattr(namespace, _ENABLED_DESTINATION, "disable")).strip().lower()
-    parsed_capture = getattr(namespace, _CAPTURE_DESTINATION, None)
+    parsed_enabled = str(vars(namespace).get(_ENABLED_DESTINATION, "disable")).strip().lower()
+    parsed_capture = vars(namespace).get(_CAPTURE_DESTINATION)
     enabled = _EXPLICIT_ENABLED if _EXPLICIT_ENABLED is not None else parsed_enabled
     capture_update = _EXPLICIT_CAPTURE_UPDATE if _EXPLICIT_CAPTURE_UPDATE is not None else parsed_capture
     if capture_update is not None and enabled != "enable":

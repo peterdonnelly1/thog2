@@ -173,6 +173,7 @@ def _local_run_configuration(artifact_name: str) -> Dict[str, Any]:
     return dict(payload) if isinstance(payload, Mapping) else {}
 # ^^^ THOG
 _OPERATIONAL_CONFIG_DESTINATIONS = {
+    "premat_instra_microsteps",  # <<< THOG capture scope can change on resume/fork without changing the model
     "instrumentation__optimizer_histories__full_matrix_every_n_steps",
     "max_wall_minutes",
     "eval_interval",
@@ -197,6 +198,7 @@ _OPERATIONAL_CONFIG_DESTINATIONS = {
     "instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes",
 }
 _ARGUMENT_TO_CONFIG = {
+    "premat_instra_microsteps": "premat_instra_microsteps",
     "model_type": "model_type",
     "host_label": "host_label",
     "run_name": "run_name",
@@ -601,6 +603,7 @@ def _run_config_from_training_config(
         premat_diagnostic_layer_delay_ms=training_config.premat_diagnostic_layer_delay_ms,
         premat_logging=training_config.premat_logging,
         premat_instra=training_config.premat_instra,
+        premat_instra_microsteps=training_config.premat_instra_microsteps,
         plastic__layer_count__cuda_allocator_reserve_gib=training_config.plastic__layer_count__cuda_allocator_reserve_gib,
         plastic__geometry_learning_rate_multiplier=training_config.plastic__geometry_learning_rate_multiplier,
         plastic__freeze_geometry_during_warmup=training_config.plastic__freeze_geometry_during_warmup,
@@ -886,6 +889,7 @@ def _training_config_for_lifecycle(
             "checkpoint_segment_size": int(config.checkpoint_segment_size) if config.activation_checkpointing else 0,
             "out_dir": str(out_dir),
             "log_interval": int(config.log_interval),
+            "premat_instra_microsteps": config.premat_instra_microsteps,
             "nonfinite_update_policy": config.nonfinite_update_policy,
             "max_nonfinite_update_skips": int(config.max_nonfinite_update_skips),
             "device": config.device,

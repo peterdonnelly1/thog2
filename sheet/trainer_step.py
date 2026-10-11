@@ -884,7 +884,7 @@ class TrainerStepMixin:
         try:
             for micro_step in range(accumulation_steps):
                 cpu_runtime = getattr(self.raw_model, "_premat_runtime", None)  # <<< THOG matrix uses retain optimizer and accumulation identities
-                if cpu_runtime is not None and hasattr(cpu_runtime, "cpu_configuration"):
+                if cpu_runtime is not None:  # <<< THOG GPU and CPU PREMAT share the same optimiser/microstep chart identity
                     cpu_runtime.optimizer_step = int(self.state.completed_updates) + 1
                     cpu_runtime.micro_step = micro_step
                 # batch = self.batch_source.get_batch("train", device=self.device)

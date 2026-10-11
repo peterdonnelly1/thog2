@@ -2,6 +2,7 @@
 "use strict";
 (function install_cpu_processing() {
   const cpu = payload => payload?.metadata?.materialisation_device === "cpu_and_gpu";
+  const has_cpu_summary = payload => cpu(payload) && Boolean(payload.cpu_summary);
   const value = (number, suffix="") => number === null || number === undefined ? "unknown" : Number.isFinite(Number(number)) ? Number(number).toFixed(3)+suffix : "unknown";
   function ensure_summary() {
     let card=by_id("processing_cpu_summary_card");
@@ -18,8 +19,8 @@
   }
   function summary(payload) {
     const card=ensure_summary();if(!card)return;
-    card.hidden=!(cpu(payload)&&processing_view.charts_tab_visible);
-    const body=by_id("processing_cpu_summary_body");if(!cpu(payload)||!body)return;
+    card.hidden=!(has_cpu_summary(payload)&&processing_view.charts_tab_visible);
+    const body=by_id("processing_cpu_summary_body");if(!has_cpu_summary(payload)||!body)return;
     const s=payload.cpu_summary||{},m=payload.cpu_runtime||{};
     const rows=[
       ["Eligible matrix uses",s.eligible_matrix_uses],["Full hits",s.full_hits],["Complete misses",s.complete_misses],["Not targeted",s.not_targeted_uses],
@@ -44,17 +45,37 @@
   processing_set_downloads=function(metadata) {
     old_downloads(metadata);
     const parent=document.querySelector(".processing-downloads");if(!parent)return;
-    for(const [key,label] of [["transfers","COPY CSV"],["cpu_tasks","CPU CSV"],["cpu_memory","Memory CSV"],["cpu_lifecycle","Lifecycle CSV"]]){
+    for(const [key,label] of [["transfers","COPY CSV"],["cpu_tasks","CPU CSV"],["cpu_memory","Memory CSV"],["cpu_lifecycle","Lifecycle CSV"],["ncu_kernel_resources","NCU kernel CSV"]]){
       let a=by_id("processing_download_"+key);
       if(!a){a=document.createElement("a");a.id="processing_download_"+key;a.className="processing-download";a.textContent=label;parent.appendChild(a);}
       const filename=metadata?.files?.[key];a.hidden=!filename;
       if(filename){a.href=processing_download_url(filename);a.download=filename;}
     }
   };
+  function ncu_resources(payload) {
+    const rows=payload.ncu_kernel_resources || payload.merged_ncu_kernel_resources || [];
+    processing_view.ncu_resources_available=cpu(payload)&&rows.length>0;
+    let card=by_id("processing_ncu_main_resources_card");
+    if(!card && processing_view.ncu_resources_available) {
+      card=document.createElement("article");card.id="processing_ncu_main_resources_card";
+      card.className="processing-card chart-card";card.dataset.chart="processing_ncu_main_resources";
+      chart_titles.processing_ncu_main_resources="NCU MAIN kernel resources";
+      card.innerHTML='<div class="chart-card-header"><div class="chart-heading-copy"><h2>NCU MAIN kernel resources</h2><p>PREMAT co-residency: N/A: CPU materialisation</p></div><div class="chart-card-actions"><button class="maximize-button" data-maximize="processing_ncu_main_resources" type="button" title="Maximize chart">'+chart_size_icon(false)+'</button></div></div><div class="processing-ncu-main-body" style="padding:12px;overflow:auto;flex:1;min-height:0"></div>';
+      ensure_summary()?.insertAdjacentElement("afterend",card);
+    }
+    if(!card)return;
+    card.hidden=!(processing_view.ncu_resources_available&&processing_view.charts_tab_visible);
+    const columns=[["family","Matrix"],["layer","Layer (zero based)"],["kernel_name","Kernel"],["duration_ns","Duration (ns)"],["registers_per_block","Registers / block"],["static_shared_mem_bytes","Static shared (bytes)"],["dynamic_shared_mem_bytes","Dynamic shared (bytes)"]];
+    card.querySelector(".processing-ncu-main-body").innerHTML='<table class="processing-summary"><thead><tr>'+columns.map(([,label])=>`<th>${processing_escape(label)}</th>`).join("")+'</tr></thead><tbody>'+rows.map(row=>'<tr>'+columns.map(([key])=>`<td>${processing_escape(row[key]??"unknown")}</td>`).join("")+'</tr>').join("")+'</tbody></table>';
+  }
   const old_render=processing_render;
-  processing_render=async function(payload,trace_available){await old_render(payload,trace_available);summary(payload);};
+  processing_render=async function(payload,trace_available){await old_render(payload,trace_available);summary(payload);ncu_resources(payload);processing_sync_visibility();};
   const old_visibility=processing_sync_visibility;
-  processing_sync_visibility=function(){old_visibility();const card=by_id("processing_cpu_summary_card");if(card)card.hidden=!(cpu(processing_view.operations_payload)&&processing_view.charts_tab_visible);};
+  processing_sync_visibility=function(){
+    old_visibility();const card=by_id("processing_cpu_summary_card");if(card)card.hidden=!(has_cpu_summary(processing_view.operations_payload)&&processing_view.charts_tab_visible);
+    const ncu=by_id("processing_ncu_main_resources_card");if(ncu)ncu.hidden=!(processing_view.ncu_resources_available&&processing_view.charts_tab_visible);
+    if(processing_view.ncu_resources_available&&processing_view.charts_tab_visible)by_id("processing_chart_group").hidden=false;
+  };
   const old_phases=processing_update_timing_phase_traces;
   processing_update_timing_phase_traces=function(entries){
     const traces=old_phases(entries);

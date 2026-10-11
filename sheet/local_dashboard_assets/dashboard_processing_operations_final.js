@@ -58,8 +58,8 @@
         inset:100px 0 0 0 !important;
       }
       #processing_timeline_card:not(.maximized) {
-        min-height:300px !important;
-        height:300px !important;
+        min-height:var(--processing-operations-height,300px) !important;
+        height:var(--processing-operations-height,300px) !important;
       }
       #processing_timeline_card:not(.maximized) .processing-plot-shell {
         min-height:160px !important;
@@ -1062,6 +1062,11 @@
     ensure_show_all_button();
     ensure_ancillary_button();
     processing_view.operations_payload = payload;
+    // vvv THOG additional CPU worker/copy lanes need real plot height, not a clipped GPU-only card
+    const card = by_id("processing_timeline_card");
+    const cpu_workers = new Set((payload.cpu_tasks || []).map(row => row.worker_pid ?? "unknown")).size;
+    card?.style.setProperty("--processing-operations-height", `${payload.metadata?.materialisation_device === "cpu_and_gpu" ? Math.max(420, 300 + (3 + cpu_workers) * 46) : 300}px`);
+    // ^^^ THOG
     const intervals = Array.isArray(payload.intervals) ? payload.intervals : [];
     const cpu_mode = payload.metadata?.materialisation_device === "cpu_and_gpu";
     const overlay = cpu_mode ? [
@@ -1291,6 +1296,7 @@
   });
 
   window.processing_operations_test_hooks = Object.freeze({
+    current_y_range,
     layer_guides,
     layer_zoom_range,
     layer_scroll_metrics,

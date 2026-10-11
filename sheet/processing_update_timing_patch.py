@@ -356,7 +356,7 @@ def _capture_train_one_update(
     runtime = getattr(getattr(trainer, "raw_model", None), "_premat_runtime", None)
     cpu = getattr(trainer.config, "premat_materialisation_device", "gpu") == "cpu_and_gpu"
     from .premat_processing import processing_capture_scope
-    full_capture = processing_capture_scope(enabled=cpu and str(trainer.config.premat_processing_logging) == "enabled" and os.environ.get("THOG2_PREMAT_PROCESSING_UNDER_NSYS") == "1", completed_updates=optimizer_update-1, max_updates=trainer.config.max_updates, log_interval=trainer.config.log_interval, capture_update=optimizer_update, micro_step=0, device=trainer.device, runtime=runtime, full_update=True, already_drained=True) if cpu else nullcontext()
+    full_capture = processing_capture_scope(enabled=cpu and str(trainer.config.premat_processing_logging) == "enabled" and os.environ.get("THOG2_PREMAT_PROCESSING_UNDER_NSYS") == "1" and os.environ.get("THOG2_PREMAT_PROCESSING_PROFILER", "nsys") == "nsys", completed_updates=optimizer_update-1, max_updates=trainer.config.max_updates, log_interval=trainer.config.log_interval, capture_update=optimizer_update, micro_step=0, device=trainer.device, runtime=runtime, full_update=True, already_drained=True) if cpu else nullcontext()
     full_capture.__enter__()
     recorder = _UpdateTimingRecorder(trainer, optimizer_update, run_label=run_label)
     forward_open: list[Dict[str, Any]] = []

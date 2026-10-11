@@ -344,7 +344,7 @@ assert.match(source,/\.processing-download-dock \{[\s\S]*?height:auto/,
   "the download dock still clips rows of grouped links");
 
 assert.match(operations_source, /const lane_width = 0\.30/);
-assert.match(operations_source, /#processing_timeline_card:not\(\.maximized\)[\s\S]*?height:300px !important/,
+assert.match(operations_source, /#processing_timeline_card:not\(\.maximized\)[\s\S]*?height:var\(--processing-operations-height,300px\) !important/,
   "the normal Operations card does not leave room for the outer layer guides");
 assert.match(operations_source, /captureevents:true/);
 assert.match(operations_source, /plotly_clickannotation/);

@@ -36,6 +36,16 @@ def _run_status_with_configuration(self):
         configuration = {}
     enriched = dict(status)
     enriched["configuration"] = configuration
+    # vvv THOG explicit profiler status feeds the Runs NSIGHT column and eye classification
+    runner = configuration.get("runner") or {}
+    profiler = str(runner.get("profiler", metadata.get("nsight_profiler", configuration.get("premat_processing_profiler", "")))).lower()
+    artifact = str(metadata.get("artifact_name", metadata.get("run_name", ""))).upper()
+    if profiler not in ("nsys", "ncu"):
+        profiler = "ncu" if "_NCU_" in artifact or "NCU_PREMAT" in artifact else "nsys" if "_NSYS_" in artifact or "NSYS_PREMAT" in artifact else ""
+    if not profiler and configuration.get("premat_processing_logging") == "enabled":
+        profiler = "ncu" if (self.database_path.parent / "processing" / "processing_ncu_kernel_resources.csv").is_file() else "nsys"
+    enriched["nsight"] = profiler.upper() if profiler else "-"
+    # ^^^ THOG
     enriched["command"] = metadata.get("command", configuration.get("command", ""))
     if isinstance(configuration.get("runner"), dict):
         enriched["runner_grid_tag"] = configuration["runner"].get("grid_tag")
@@ -80,6 +90,11 @@ def _processing_pair_key(state: Any) -> tuple[str, str] | None:
     except json.JSONDecodeError:
         configuration = {}
     artifact = _state_artifact_name(state)
+    # vvv THOG Runner's explicit pair identity survives profiler-specific names and encoded metadata
+    runner = configuration.get("runner") or {}
+    if runner.get("pairing_id"):
+        return str(configuration.get("host_label", "")).strip(), "runner:" + str(runner.get("grid_owner_host_id", "")) + ":" + str(runner.get("grid_id", "")) + ":" + str(runner["pairing_id"])
+    # ^^^ THOG
     _prefix, separator, encoded = artifact.partition("___")
     if not separator or not encoded:
         return None
@@ -123,6 +138,20 @@ def _compatibility_file_has_rows(path: Path) -> bool:
     return isinstance(rows, list) and bool(rows)
 
 
+# vvv THOG CPU NCU is valid MAIN evidence even though GPU PREMAT co-residency is inapplicable
+def _ncu_evidence_available(path: Path) -> bool:
+    if _compatibility_file_has_rows(path):
+        return True
+    try:
+        payload = json.loads(path.read_text())
+        if not isinstance(payload, dict) or payload.get("materialisation_device") != "cpu_and_gpu" or payload.get("reason") != "N/A: CPU materialisation":
+            return False
+        with path.with_name("processing_ncu_kernel_resources.csv").open(newline="") as handle:
+            return any(row.get("role", "").upper() == "MAIN" and float(row.get("duration_ns") or 0) > 0 for row in csv.DictReader(handle))
+    except (OSError, ValueError, csv.Error):
+        return False
+# ^^^ THOG
+
 def _matching_ncu_companion(
     state: Any,
     *,
@@ -148,15 +177,16 @@ def _matching_ncu_companion(
         return cached[2]
 
     selected_artifact = _state_artifact_name(state)
-    if _is_ncu_artifact(selected_artifact):
-        state._instra_ncu_companion_cache = (now, selection_key, None)
-        state._instra_ncu_companion_diagnostics = {}
-        return None
     selected_fallback = state.database_path.stat().st_mtime if state.database_path.exists() else 0.0
     try:
         selected_status = state.status()
     except Exception:
         selected_status = {}
+    # THOG profiler metadata also identifies runs with custom artifact names.
+    if selected_status.get("nsight") == "NCU" or _is_ncu_artifact(selected_artifact):
+        state._instra_ncu_companion_cache = (now, selection_key, None)
+        state._instra_ncu_companion_diagnostics = {}
+        return None
     selected_time = _status_timestamp_seconds(selected_status, selected_artifact, selected_fallback)
 
     _host, encoded = pair_key
@@ -172,8 +202,6 @@ def _matching_ncu_companion(
             continue
         candidate = catalog._state_for_path(path)
         candidate_artifact = _state_artifact_name(candidate)
-        if not _is_ncu_artifact(candidate_artifact):
-            continue
         if _processing_pair_key(candidate) != pair_key:
             continue
 
@@ -181,6 +209,8 @@ def _matching_ncu_companion(
             status = candidate.status()
         except Exception:
             status = {}
+        if status.get("nsight") != "NCU" and not _is_ncu_artifact(candidate_artifact):
+            continue
         candidate_fallback = path.stat().st_mtime if path.exists() else 0.0
         candidate_time = _status_timestamp_seconds(status, candidate_artifact, candidate_fallback)
         # NCU is the second half of a pair: never consume an older capture.
@@ -192,7 +222,7 @@ def _matching_ncu_companion(
             / "processing"
             / "processing_premat_compatibility.json"
         )
-        if not compatibility_path.is_file() or not _compatibility_file_has_rows(compatibility_path):
+        if not compatibility_path.is_file() or not _ncu_evidence_available(compatibility_path):
             invalid.append((distance, -candidate_time, candidate_artifact))
             continue
 
@@ -669,7 +699,15 @@ def _processing_capture_snapshot(state: Any, data: dict[str, Any]) -> dict[str, 
     if target_update:
         matching = [row for row in snapshots if _safe_int(row.get("optimizer_update")) == target_update]
         if matching:
-            return dict(matching[-1])
+            # vvv THOG match the captured forward microstep rather than a later accumulation pass
+            if capture.get("full_update"):
+                combined = dict(matching[0])
+                combined["events"] = [event for row in matching for event in row.get("events", [])]
+                return combined
+            target_micro = max(0, (_safe_int(capture.get("micro_step")) or 1) - 1)
+            exact = [row for row in matching if (_safe_int(row.get("micro_step")) or 0) == target_micro]
+            return dict((exact or matching)[0])
+            # ^^^ THOG
     return dict(snapshots[-1])
 
 
@@ -1004,10 +1042,10 @@ def _processing_payload_with_ncu_companion(
     data = payload.get("data")
     if not isinstance(data, dict):
         return payload
-    if data.get("metadata", {}).get("materialisation_device") == "cpu_and_gpu" or data.get("metadata", {}).get("run", {}).get("config", {}).get("premat_materialisation_device") == "cpu_and_gpu":
+    metadata = data.get("metadata") or {}
+    cpu_mode = metadata.get("materialisation_device") == "cpu_and_gpu" or ((metadata.get("run") or {}).get("config") or {}).get("premat_materialisation_device") == "cpu_and_gpu"
+    if cpu_mode:
         data["premat_compatibility"] = {"available": False, "reason": "N/A: CPU materialisation", "rows": []}
-        data.pop("premat_compatibility_source", None)
-        return payload
 
     companion = _matching_ncu_companion(
         self,
@@ -1055,6 +1093,7 @@ def _processing_payload_with_ncu_companion(
         data.get("intervals", []),
     )
     merged_data["premat_compatibility"] = compatibility
+    merged_data["ncu_kernel_resources"] = list(companion_data.get("ncu_kernel_resources") or [])
     merged_data["processing_contention_intervals"] = _processing_contention_intervals(
         data, compatibility
     )

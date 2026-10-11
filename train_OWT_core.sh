@@ -335,6 +335,7 @@ Dynamic pre-materialisation:
   --premat_enable_shadow_mode true|false=${PREMAT_ENABLE_SHADOW_MODE}  schedule/admit normally but suppress side-stream weight materialisation; default false
   --premat_logging enabled|disabled=${PREMAT_LOGGING}
   --premat_instra enabled|disabled=${PREMAT_INSTRA}
+  --premat_instra_microsteps all|first=all  all microsteps, or first-only, at each --log-interval
 
 Sampling-only chaos bump:
   --chaos_bump__sampling__enabled | --no-chaos_bump__sampling__enabled
@@ -420,12 +421,12 @@ while (( $# > 0 )); do
   fi
   case "$1" in
     # vvv THOG consume CPU controls before getopts in either canonical value spelling
-    --premat_materialisation_device|--premat_cpu_preparation|--premat_cpu_layer_batch_size|--premat_cpu_workers|--premat_cpu_threads_per_worker|--premat_cpu_transfer_timing|--premat_cpu_transfer_lead_ms|--premat_cpu_staging_limit_mb|--premat_cpu_checkpoint_replay)
+    --premat_instra_microsteps|--premat_materialisation_device|--premat_cpu_preparation|--premat_cpu_layer_batch_size|--premat_cpu_workers|--premat_cpu_threads_per_worker|--premat_cpu_transfer_timing|--premat_cpu_transfer_lead_ms|--premat_cpu_staging_limit_mb|--premat_cpu_checkpoint_replay)
       (( $# >= 2 )) || { echo "$1 requires a value" >&2; exit 2; }
       CPU_PREMAT_EXTRA_ARGS+=("$1" "$2")
       shift 2
       ;;
-    --premat_materialisation_device=*|--premat_cpu_preparation=*|--premat_cpu_layer_batch_size=*|--premat_cpu_workers=*|--premat_cpu_threads_per_worker=*|--premat_cpu_transfer_timing=*|--premat_cpu_transfer_lead_ms=*|--premat_cpu_staging_limit_mb=*|--premat_cpu_checkpoint_replay=*)
+    --premat_instra_microsteps=*|--premat_materialisation_device=*|--premat_cpu_preparation=*|--premat_cpu_layer_batch_size=*|--premat_cpu_workers=*|--premat_cpu_threads_per_worker=*|--premat_cpu_transfer_timing=*|--premat_cpu_transfer_lead_ms=*|--premat_cpu_staging_limit_mb=*|--premat_cpu_checkpoint_replay=*)
       CPU_PREMAT_EXTRA_ARGS+=("$1")
       shift
       ;;

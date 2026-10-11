@@ -843,7 +843,9 @@ function local_apply_detail_tab() {
 
 function local_set_detail_tab(tab_name) {
   if (!local_detail_tabs.includes(tab_name)) return;
-  if (app.maximized_chart) restore_maximized_chart();
+  // vvv THOG reapplying Charts during refresh must preserve the user's maximized Processing chart
+  if (tab_name !== local_active_detail_tab && app.maximized_chart) restore_maximized_chart();
+  // ^^^ THOG
   local_active_detail_tab = tab_name; local_apply_detail_tab();
   if (tab_name === "files") refresh_files();
   if (tab_name === "premat" && typeof window.premat_refresh === "function") window.premat_refresh();

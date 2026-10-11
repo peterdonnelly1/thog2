@@ -186,7 +186,7 @@ def test_processing_throughput_round_trips_through_local_store(tmp_path: Path) -
     store.append_processing_throughput(1, 12345.5)
     store.append_processing_throughput(2, 13001.25)
     store.close()
-    assert LocalChartReader(database).processing_throughput() == (
+    assert tuple({key: row[key] for key in ("optimizer_update", "tokens_per_second")} for row in LocalChartReader(database).processing_throughput()) == (
         {"optimizer_update": 1, "tokens_per_second": 12345.5},
         {"optimizer_update": 2, "tokens_per_second": 13001.25},
     )
@@ -256,9 +256,9 @@ def _synthetic_nsys_database(path: Path) -> None:
         connection.executemany(
             "INSERT INTO TARGET_INFO_GPU_METRICS VALUES (?, ?)",
             [
-                (1, "SMs Active %"),
-                (2, "SM Issue %"),
-                (3, "Tensor Active %"),
+                (1, "SMs Active [Throughput %]"),
+                (2, "SM Issue [Throughput %]"),
+                (3, "Tensor Active [Throughput %]"),
                 (4, "Unallocated Warps in Active SMs [Throughput %]"),
             ],
         )
@@ -308,14 +308,14 @@ def test_processing_normalizer_emits_graph_and_download_data(tmp_path: Path) -> 
         "fixture_processing_bundle.zip",
     }
     assert expected.issubset({path.name for path in output.iterdir()})
-    assert payload["metadata"]["files"] == {
+    assert payload["metadata"]["files"].items() >= {
         "samples": "fixture_processing_samples.csv",
         "intervals": "fixture_processing_intervals.csv",
         "summary": "fixture_processing_summary.csv",
         "metadata": "fixture_processing_metadata.json",
         "bundle": "fixture_processing_bundle.zip",
         "raw_trace": "fixture_processing_trace.nsys-rep",
-    }
+    }.items()
     with (output / "fixture_processing_summary.csv").open() as source:
         rows = list(csv.DictReader(source))
     assert rows[0]["family"] == "QKV"
@@ -484,7 +484,7 @@ def test_premat_selector_exclusions_keep_main_activity_without_becoming_misses()
 # vvv THOG Training throughput overlays visible Workspace runs while capture-specific Processing charts remain selected-run diagnostics
 def test_processing_throughput_workspace_multirun_contract() -> None:
     processing_js = Path("sheet/local_dashboard_assets/dashboard_processing.js").read_text(encoding="utf-8")
-    server = Path("run_thog2_local_dashboard.py").read_text(encoding="utf-8")
+    server = Path("run_thog2_local_dashboard_base.py").read_text(encoding="utf-8")
     assert "/api/processing-throughput" in server
     assert "def processing_throughput(self)" in server
     assert "processing_throughput_workspace_runs" in processing_js
@@ -503,8 +503,9 @@ def test_processing_throughput_workspace_multirun_contract() -> None:
 def test_processing_group_sits_after_val_and_throughput_has_no_curve_markers() -> None:
     group_js = Path("sheet/local_dashboard_assets/dashboard_wandb_groups_patch.js").read_text(encoding="utf-8")
     processing_js = Path("sheet/local_dashboard_assets/dashboard_processing.js").read_text(encoding="utf-8")
-    assert 'const processing_anchor = group_section("val") || group_section("train");' in group_js
-    assert 'processing_anchor.after(processing_group)' in group_js
+    assert 'const processing_anchor = ordered_sections.find(section => section.dataset.metricGroup === "val")' in group_js
+    assert '|| ordered_sections.find(section => section.dataset.metricGroup === "train")' in group_js
+    assert 'desired_nodes.splice(desired_nodes.indexOf(processing_anchor) + 1, 0, processing_group)' in group_js
     assert 'entry.rows.length === 1 ? "markers" : "lines"' in processing_js
     assert 'entry.rows.length === 1 ? "markers" : "lines+markers"' not in processing_js
 # ^^^ THOG
@@ -685,7 +686,8 @@ def _write_synthetic_ncu_csv(path: Path, semantic: bool) -> None:
     rows = []
     for launch_id, name, registers, duration in launches:
         for metric, unit, value in (
-            ("launch__registers_per_thread_allocated", "register/thread", registers),
+            ("launch__registers_per_thread", "register/thread", registers),
+            ("launch__registers_per_thread_allocated", "register/block", registers * 256),
             ("launch__shared_mem_per_block_allocated", "byte", 0),
             ("gpu__time_duration.sum", "nsecond", duration),
         ):

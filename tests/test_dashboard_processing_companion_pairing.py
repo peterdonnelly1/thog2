@@ -394,3 +394,48 @@ def test_lifecycle_rows_reconstruct_capture_time_from_host_clock() -> None:
     assert rows[0]["capture_time_ms"] == 4.25
     assert rows[0]["timing_basis"] == "capture_relative_host"
 # ^^^ THOG
+
+# vvv THOG CPU pairs have MAIN NCU evidence and an explicit N/A compatibility record
+
+def test_cpu_runner_pair_uses_identity_and_accepts_main_only_ncu(tmp_path):
+    from sheet.local_chart_store import LocalChartStore
+    paths=[]
+    states={}
+    for mode,minute in [('NSYS','1200'),('NCU','1201')]:
+        path=tmp_path/mode/'charts.sqlite3';path.parent.mkdir()
+        store=LocalChartStore(path,run_name=f'261011-{minute}_custom___different_suffix_{mode.lower()}',config={
+            'host_label':'scruffy','premat_materialisation_device':'cpu_and_gpu','premat_processing_logging':'enabled',
+            'runner':{'pairing_id':'cpu-pair','grid_id':'grid','owner_host_id':'scruffy','profiler':mode.lower()},
+        })
+        store.close()
+        state=dashboard.RunDashboardState(path)
+        paths.append(path);states[path]=state
+    processing=paths[1].parent/'processing';processing.mkdir()
+    (processing/'processing_premat_compatibility.json').write_text(json.dumps({'materialisation_device':'cpu_and_gpu','reason':'N/A: CPU materialisation','rows':[]}))
+    (processing/'processing_ncu_kernel_resources.csv').write_text('role,family,layer,kernel_name,duration_ns\nMAIN,O,0,main_gemm,1000\n')
+    selected=states[paths[0]]
+    selected._instra_dashboard_catalog=_Catalog(tmp_path,states)
+    assert dashboard._processing_pair_key(selected)==dashboard._processing_pair_key(states[paths[1]])
+    match=dashboard._matching_ncu_companion(selected)
+    assert match is not None and match[2] is states[paths[1]]
+    assert selected.status()['nsight']=='NSYS'
+    assert states[paths[1]].status()['nsight']=='NCU'
+    direct=states[paths[1]].processing()
+    assert direct['data']['ncu_kernel_resources'][0]['kernel_name']=='main_gemm'
+    assert direct['data']['premat_compatibility']['reason']=='N/A: CPU materialisation'
+    nsys_processing=paths[0].parent/'processing';nsys_processing.mkdir()
+    (nsys_processing/'processing_data.json').write_text(json.dumps({
+        'metadata':{'materialisation_device':'cpu_and_gpu','files':{},'capture':{}},
+        'samples':[],'intervals':[],'summary':[],
+    }))
+    paired=selected.processing()['data']
+    assert paired['ncu_kernel_resources'][0]['kernel_name']=='main_gemm'
+    assert paired['premat_compatibility']['reason']=='N/A: CPU materialisation'
+    assert paired['premat_compatibility_source']['dashboard_run_id']==states[paths[1]].status()['dashboard_run_id']
+    assert paired['paired_processing_downloads']['ncu']['files']['ncu_kernel_resources']=='processing_ncu_kernel_resources.csv'
+    with zipfile.ZipFile(nsys_processing/'processing_everything.zip') as archive:
+        assert 'ncu/processing_ncu_kernel_resources.csv' in archive.namelist()
+    (processing/'processing_ncu_kernel_resources.csv').write_text('role,duration_ns\n')
+    selected._instra_ncu_companion_cache = None
+    assert dashboard._matching_ncu_companion(selected) is None
+# ^^^ THOG

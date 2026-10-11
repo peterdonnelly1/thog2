@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import math
 import mimetypes
@@ -353,9 +354,15 @@ class RunDashboardState:
         self,
         *,
         after_update: Optional[int] = None,
+        after_micro_step: Optional[int] = None,
         include_history: bool = False,
     ) -> Dict[str, Any]:
-        snapshots = self.reader.premat_snapshots() if include_history else ()
+        # vvv THOG a microstep cursor returns the bounded new window for complete playback
+        snapshots = self.reader.premat_snapshots() if include_history else (
+            self.reader.premat_snapshots(after_update=after_update, after_micro_step=after_micro_step)
+            if after_micro_step is not None else ()
+        )
+        # ^^^ THOG
         snapshot = (
             snapshots[-1]
             if snapshots
@@ -370,12 +377,15 @@ class RunDashboardState:
             not include_history
             and latest_update is not None
             and after_update is not None
-            and latest_update <= int(after_update)
+            and (latest_update < int(after_update) or latest_update == int(after_update) and
+                 (after_micro_step is None or int(snapshot.get("micro_step", 0)) <= after_micro_step))
         )
         status = self.reader.status()
         return {
             "latest": None if unchanged else snapshot,
             "latest_update": latest_update,
+            "latest_micro_step": None if snapshot is None else int(snapshot.get("micro_step", 0)),
+            "snapshots": list(snapshots) if after_micro_step is not None and not include_history else None,
             "unchanged": unchanged,
             "snapshot_count": int(status["premat_snapshot_count"]),
             "history": list(snapshots) if include_history else None,
@@ -411,7 +421,7 @@ class RunDashboardState:
             data = json.loads(path.read_text())
             trace_revision = f"{stat_result.st_mtime_ns}:{stat_result.st_size}"
         else:
-            data = {"metadata": None, "samples": [], "intervals": [], "summary": []}
+            data = {"metadata": {"materialisation_device": configuration.get("premat_materialisation_device", "gpu"), "files": {}}, "samples": [], "intervals": [], "summary": []}
             trace_revision = "pending"
         data["throughput"] = list(throughput)
         if trace_available:
@@ -440,6 +450,13 @@ class RunDashboardState:
                 f"csv:{stat_result.st_mtime_ns}:{stat_result.st_size}"
             )
         if kernel_resources_csv.is_file():
+            # vvv THOG retain measured MAIN resources for CPU-mode NCU and paired NSYS views
+            with kernel_resources_csv.open(newline="") as handle:
+                data["ncu_kernel_resources"] = list(csv.DictReader(handle))
+            data["metadata"] = data.get("metadata") or {}
+            data["metadata"]["source_profiler"] = "ncu" if not trace_available else "nsys"
+            data["metadata"].setdefault("files", {})["ncu_kernel_resources"] = kernel_resources_csv.name
+            # ^^^ THOG
             compatibility_files["kernel_resources"] = kernel_resources_csv.name
             stat_result = kernel_resources_csv.stat()
             compatibility_revision_parts.append(
@@ -1147,6 +1164,7 @@ def _handler_for(catalog: DashboardCatalog):
                         include_history = query.get("history", ["0"])[0] == "1"
                         value = state.premat(
                             after_update=after_update,
+                            after_micro_step=int(query["after_micro"][0]) if "after_micro" in query else None,
                             include_history=include_history,
                         )
                     self._send_json(value)
