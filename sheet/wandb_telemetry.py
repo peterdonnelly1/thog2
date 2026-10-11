@@ -101,6 +101,10 @@ def _premat_snapshot_for_storage(
     payload["history_detail_level"] = (
         "detailed" if retain_detailed_history else "recap_only"
     )
+    if snapshot.get("materialisation_device") == "cpu_and_gpu":
+        payload["events"] = [dict(event) for event in snapshot.get("events", ()) if isinstance(event, Mapping) and event.get("phase", "original_forward") == "original_forward"]
+        # Tensor-free CPU precursor/copy/replay records remain independently inspectable.
+        return payload
     if retain_detailed_history:
         return payload
     payload.pop("candidates", None)
@@ -133,7 +137,7 @@ class _PrematLiveSink:
     ) -> None:
         self._database_path = Path(database_path)
         self._retain_detailed_history = bool(retain_detailed_history)
-        self._queue: queue.Queue[object] = queue.Queue(maxsize=1)
+        self._queue: queue.Queue[object] = queue.Queue(maxsize=128)  # <<< THOG retain a bounded microstep window rather than dropping siblings from one update
         self._closed = False
         self._error: Optional[BaseException] = None
         self._thread = threading.Thread(
@@ -537,6 +541,10 @@ class WandbTelemetry:
         self.group = group
         self.job_type = job_type
         self.config = dict(config)
+        # vvv THOG retain the actual wrapper mode for standalone NSYS/NCU Runs status
+        if self.config.get("premat_processing_logging") == "enabled":
+            self.config["premat_processing_profiler"] = os.environ.get("THOG2_PREMAT_PROCESSING_PROFILER", "nsys")
+        # ^^^ THOG
         # vvv THOG record GPU affinity in every DENSE and THOG W&B/local configuration
         self.config.setdefault("gpu_index", selected_gpu_index())
         self.config.setdefault("cuda_visible_devices", str(os.environ.get("CUDA_VISIBLE_DEVICES", "")))
@@ -669,7 +677,7 @@ class WandbTelemetry:
             optimizer_update = int(payload.get("completed_updates", 0))
             local_store = ensure_local_chart_store(self)
             local_store.update_premat_aggregate(optimizer_update, premat_snapshot)
-            if str(self.config.get("premat_instra", "disabled")) == "enabled":
+            if str(self.config.get("premat_instra", "disabled")) == "enabled" and "_thog_premat_live_sink" not in vars(self):
                 local_store.append_premat_snapshot(
                     optimizer_update,
                     premat_snapshot,
@@ -961,8 +969,7 @@ def attach_telemetry(trainer: Any, telemetry: WandbTelemetry) -> None:
         )
     # ^^^ THOG
 
-    # vvv THOG detailed Premat Instra captures exactly the first accumulation
-    # microstep's completed forward pass at each established update interval.
+    # vvv THOG capture all original-forward microsteps at each established update interval; first-only remains opt-in
     premat_reporter_setter = getattr(
         getattr(trainer, "raw_model", None),
         "set_premat_live_reporter",
@@ -989,15 +996,24 @@ def attach_telemetry(trainer: Any, telemetry: WandbTelemetry) -> None:
         captured_pass_updates: Dict[int, int] = {}
 
         def publish_premat(snapshot: Mapping[str, Any]) -> None:
+            if snapshot.get("phase") == "checkpoint_recompute":
+                return
             pass_sequence = int(snapshot.get("pass_sequence", 0))
             update = captured_pass_updates.pop(
                 pass_sequence,
                 max(1, int(trainer.state.completed_updates) + 1),
             )
-            live_sink.publish(update, snapshot)
+            captured_snapshot = dict(snapshot)
+            captured_snapshot["optimizer_update"] = update
+            captured_snapshot["capture_microsteps"] = vars(trainer.config).get("premat_instra_microsteps", "all")
+            captured_snapshot["playback_mode"] = vars(trainer.config).get("premat_instra_playback", "complete_step")
+            live_sink.publish(update, captured_snapshot)
 
         def capture_premat_update(pass_sequence: int) -> bool:
             nonlocal captured_update, captured_pass_sequence
+            runtime = getattr(getattr(trainer, "raw_model", None), "_premat_runtime", None)
+            if getattr(runtime, "cpu_phase", None) == "checkpoint_recompute":
+                return False
             update = max(1, int(trainer.state.completed_updates) + 1)
             interval = max(1, int(trainer.config.log_interval))
             sampled = (
@@ -1010,7 +1026,7 @@ def attach_telemetry(trainer: Any, telemetry: WandbTelemetry) -> None:
             if captured_update != update:
                 captured_update = update
                 captured_pass_sequence = int(pass_sequence)
-            selected = int(pass_sequence) == captured_pass_sequence
+            selected = vars(trainer.config).get("premat_instra_microsteps", "all") == "all" or int(pass_sequence) == captured_pass_sequence
             if selected:
                 captured_pass_updates[int(pass_sequence)] = update
             return selected

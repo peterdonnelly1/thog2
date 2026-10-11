@@ -277,7 +277,8 @@
         if(context!==context_key())return;
         processing_view.trace_available=statuses.some(status=>status?.trace_available);
         processing_view.timing_available=statuses.some(status=>status?.timing_available);
-        processing_view.available=processing_view.trace_available || processing_view.timing_available;
+        processing_view.ncu_resources_available=statuses.some(status=>status?.ncu_resources_available);
+        processing_view.available=processing_view.trace_available || processing_view.timing_available || processing_view.ncu_resources_available;
         processing_sync_visibility();
       }catch(error){if(error.name!=="AbortError")console.warn("Processing discovery failed",error);}
       finally{clearTimeout(deadline);if(probe_owner===controller)probe_owner=null;}

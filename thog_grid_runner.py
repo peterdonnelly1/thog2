@@ -26,7 +26,7 @@ WIDTH_PRESETS = {"width", "width-type-I"}
 DENSE_GEOMETRY_OPTIONS = {"--geometry-preset", "--residual-init-policy", "--residual-init-depth-source",
                           "--residual-init-depth-value", "--explain-geometry"}
 for _name, _item in CATALOGUE.items():
-    _item["dense_compatible"] = (_item["category"] in {"GPT-2 Hyperparameters", "Run Control Parameters", "Resume and Fork"}
+    _item["dense_compatible"] = (_item["category"] in {"GPT-2 Hyperparameters", "Run Control Parameters", "Resume and Fork", "NSIGHT"}
                                 or _name in DENSE_GEOMETRY_OPTIONS or _name.startswith("--wandb")
                                 or _name == "--no-wandb")
 
@@ -52,6 +52,13 @@ MANUAL_SHORT = {"-q", "-g", "-G", "-I", "-F", "-N", "-U", "-V", "-P", "-E", "-T"
 
 def _scalar(name, value):
     item = CATALOGUE[name]
+    if name == "--premat_instra__full_step_timing_capture_and_chart_capture":
+        if not isinstance(value, str) or not re.fullmatch(r"step [1-9][0-9]*", value.strip()):
+            raise ValueError(f"{name} requires step <positive integer>")
+        return value.strip()
+    if name == "--premat_cpu_layer_batch_size":
+        from sheet.premat_cpu_config import normalize_cpu_batch
+        return normalize_cpu_batch(value)
     if isinstance(value, (dict, list)) or value is None:
         raise ValueError(f"{name} requires a scalar value")
     kind = item["type"]
@@ -151,6 +158,42 @@ def validate_recipe(recipe):
     return choices
 
 
+# vvv THOG one effective profiling policy covers Runner launches, Preview and exported CLI scripts
+def profiling_parameters(values, profiler):
+    result = values.copy()
+    if profiler == "none":
+        return result
+    result["--premat_processing_logging"] = "enabled"
+    result["--premat_processing_profiler"] = profiler
+    result.setdefault("--premat_processing_logging_capture_frequency_hz", 10000)
+    capture = result.setdefault("--premat_processing_logging_capture_update", min(10, int(result.get("--max-iters", 50))))
+    result.setdefault("--premat_instra__full_step_timing_capture_and_chart", "enable")
+    if result["--premat_instra__full_step_timing_capture_and_chart"] == "enable":
+        result.setdefault("--premat_instra__full_step_timing_capture_and_chart_capture", f"step {capture}")
+    if profiler == "ncu":
+        result.setdefault("--ncu-probe-layer", 0)
+    if result.get("--premat", "disabled") == "enabled":
+        result.setdefault("--premat_instra", "enabled")
+        result.setdefault("--premat_logging", "enabled")
+        result.setdefault("--premat_retain_detailed_premat_history", "true")
+        result.setdefault("--premat_instra_microsteps", "all")
+    maximum = int(result.get("--max-iters", 50))
+    if not 1 <= int(capture) <= maximum:
+        raise ValueError("Processing capture step must be positive and must not exceed --max-iters")
+    full_capture = result.get("--premat_instra__full_step_timing_capture_and_chart_capture")
+    if full_capture is not None:
+        full_update = int(_scalar("--premat_instra__full_step_timing_capture_and_chart_capture", full_capture).split()[1])
+        if result["--premat_instra__full_step_timing_capture_and_chart"] != "enable":
+            raise ValueError("Full-step capture step requires full-step timing enable")
+        if full_update > maximum:
+            raise ValueError("Full-step capture step must not exceed --max-iters")
+        if profiler == "nsys" and result.get("--premat_materialisation_device") == "cpu_and_gpu" and full_update != int(capture):
+            raise ValueError("CPU NSYS requires matching Processing and full-step timing capture steps")
+    if profiler == "ncu" and int(result.get("--ncu-probe-layer", 0)) >= int(result.get("--n-layer", 16)):
+        raise ValueError("NCU probe layer must be below --n-layer")
+    return result
+# ^^^ THOG
+
 def expand(recipe, *, stable_preview=False):
     choices = validate_recipe(recipe)
     # vvv THOG inherited DEPTH fields are dormant when WIDTH is the only selected axis
@@ -221,6 +264,24 @@ def expand(recipe, *, stable_preview=False):
             config_from_arguments(arguments, geometry_plan=geometry_plan_from_arguments(arguments))
             # ^^^ THOG
         # ^^^ THOG
+
+        # vvv THOG inactive CPU dimensions collapse GPU trials while saved Recipes retain requests
+        provider = values.get("--premat_materialisation_device", "gpu")
+        if provider == "gpu":
+            values = {name: value for name, value in values.items() if not name.startswith("--premat_cpu_") and name != "--premat_materialisation_device"}
+        else:
+            from sheet.premat_cpu_config import CPU_DEFAULTS, validate_cpu_configuration
+            controls = {name: values.get("--" + name, default) for name, default in CPU_DEFAULTS.items()}
+            if controls["premat_cpu_transfer_timing"] != "predicted_gemm_start":
+                if float(values.get("--premat_cpu_transfer_lead_ms", 0)):
+                    raise ValueError("premat_cpu_transfer_lead_ms requires predicted_gemm_start")
+                values.pop("--premat_cpu_transfer_lead_ms", None)
+            if "--premat_timing" in values and values["--premat_timing"] != controls["premat_cpu_transfer_timing"]:
+                raise ValueError("inactive premat_timing conflicts with CPU transfer timing")
+            values.pop("--premat_timing", None)
+            validate_cpu_configuration({**controls, "premat": values.get("--premat", "disabled"), "geometry_preset": values.get("--geometry-preset", "depth"), "model_type": values.get("--model-type", "sheet"), "device": "cuda", "premat_attention_mode": values.get("--premat_attention_mode", "fused"), "plastic__enabled": values.get("--plastic__enabled", False), "hyperblock": values.get("--hyperblock", False), "n_layer": values.get("--n-layer", 12), "layer_dropout_stratum_size": values.get("--layer-dropout-stratum-size"), "layer_dropout_active_per_stratum": values.get("--layer-dropout-active-per-stratum")})
+        # ^^^ THOG
+
         identity = json.dumps(values, sort_keys=True, separators=(",", ":"))
         if identity in seen:
             continue
@@ -231,13 +292,13 @@ def expand(recipe, *, stable_preview=False):
             run_id = (uuid.uuid5(uuid.NAMESPACE_URL, f"thog2-preview-run:{seed}:{identity}:{profiler}").hex
                       if stable_preview else uuid.uuid4().hex)
             trials.append({"run_id": run_id, "pairing_id": pairing_id,
-                           "profiler": profiler, "parameters": values.copy()})
+                           "profiler": profiler, "parameters": profiling_parameters(values, profiler)})
     return trials
 
 
 def command_for(run, gpu, *, python="python", entry="run_thog2_owt", host_label=None):
     """No shell input reaches subprocess; the script renderer quotes every argument."""
-    values = run["parameters"]
+    values = profiling_parameters(run["parameters"], run["profiler"])
     args = [python, "-m", entry]
     if host_label is not None:
         args += ["--host-label", host_label]
@@ -261,6 +322,10 @@ def command_for(run, gpu, *, python="python", entry="run_thog2_owt", host_label=
             and "--plastic__enabled" not in values and "--no-plastic__enabled" not in values):
         args.append("--plastic__enabled")
     for name, value in values.items():
+        if name.startswith("--premat_cpu_") and values.get("--premat_materialisation_device", "gpu") != "cpu_and_gpu":
+            continue  # <<< THOG direct exports never forward dormant CPU fields
+        if name == "--premat_cpu_transfer_lead_ms" and values.get("--premat_cpu_transfer_timing") != "predicted_gemm_start":
+            continue
         # vvv THOG dormant depth defaults do not silently activate or invalidate width-only runs
         if name == "--select-depth" or width_selected and (name == "--select-width" or name.startswith("DEPTH.") and not depth_selected):
             continue
@@ -274,6 +339,8 @@ def command_for(run, gpu, *, python="python", entry="run_thog2_owt", host_label=
             args += ["--option", f"DEPTH.order={value}"]
         elif name in {"--model-type", "--experiment-prefix", "--cuda-expandable-segment", *WRAPPER_ENV_OPTIONS} or (name == "--geometry-preset" and value == "dense"):
             continue
+        elif name == "--premat_instra__full_step_timing_capture_and_chart_capture":
+            args += [name, *_scalar(name, value).split()]
         elif CATALOGUE[name]["kind"] == "list":
             for entry in value:
                 args += [name, str(entry)]
@@ -289,10 +356,6 @@ def command_for(run, gpu, *, python="python", entry="run_thog2_owt", host_label=
     run_label = f"{run['grid_tag']}_{run['run_id'][:12]}_{run['profiler'].upper()}"
     prefix = values.get("--experiment-prefix", "")
     args += ["--run-name", run_label, "--experiment-prefix", f"{prefix}_{run_label}" if prefix else run_label]
-    if run["profiler"] != "none":
-        args += ["--premat_processing_logging", "enabled", "--premat_processing_profiler", run["profiler"]]
-        if run["profiler"] == "ncu" and "--ncu-probe-layer" not in values:
-            args += ["--ncu-probe-layer", "0"]
     return args
 
 

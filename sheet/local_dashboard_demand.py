@@ -42,9 +42,11 @@ def install(dashboard):
                         directory = state.database_path.parent / "processing"
                         from sheet.local_dashboard_responsiveness import file_signature
                         files = {name: file_signature(directory / name) for name in
-                                 ("processing_data.json", "update_timing.json", "processing_premat_compatibility.json")}
+                                 ("processing_data.json", "update_timing.json", "processing_premat_compatibility.json", "processing_ncu_kernel_resources.csv")}
+                        ncu_available = files["processing_ncu_kernel_resources.csv"] is not None
                         return self._send_json({"trace_available": files["processing_data.json"] is not None,
                                                 "timing_available": files["update_timing.json"] is not None,
+                                                "ncu_resources_available": ncu_available,
                                                 "revision": files})
                     chart_name = query.get("chart", [""])[0]
                     if not run_id or chart_name not in dashboard.depth_curves._CHART_FAMILIES:

@@ -17,7 +17,7 @@ from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
 
 CHART_DESTINATIONS = ("wandb", "local", "none")
 LOCAL_CHART_DATABASE_NAME = "charts.sqlite3"
-LOCAL_CHART_SCHEMA_VERSION = 6  # Local optimizer losses are stored independently of W&B and train.log.
+LOCAL_CHART_SCHEMA_VERSION = 7  # THOG PREMAT snapshots are keyed by optimiser update and microstep.
 LOCAL_CHART_ACTIVE_STATES = frozenset(("preparing", "recording", "monitoring", "running"))
 LOCAL_CHART_TERMINAL_STATES = frozenset(("finished", "stopped"))
 
@@ -153,19 +153,30 @@ def _store_premat_snapshot_if_mutable(
     optimizer_update: int,
     payload: Mapping[str, Any],
 ) -> bool:
-    """Store until the first complete pass for an optimizer update, then freeze it."""
+    """Freeze each completed (optimizer update, microstep) independently."""
     connection.execute("BEGIN IMMEDIATE")
+    # vvv THOG migrate old single-update keys atomically under the writer lock
+    columns = {row["name"] for row in connection.execute("PRAGMA table_info(premat_snapshots)")}
+    if "micro_step" not in columns:
+        connection.execute("ALTER TABLE premat_snapshots RENAME TO premat_snapshots_legacy")
+        connection.execute("CREATE TABLE premat_snapshots (optimizer_update INTEGER NOT NULL, micro_step INTEGER NOT NULL, payload BLOB NOT NULL, PRIMARY KEY (optimizer_update, micro_step))")
+        connection.execute("INSERT INTO premat_snapshots SELECT optimizer_update, 0, payload FROM premat_snapshots_legacy")
+        connection.execute("DROP TABLE premat_snapshots_legacy")
+    micro_step = int(payload.get("micro_step", 0))
+    if micro_step < 0:
+        raise ValueError("PREMAT micro_step must be non-negative")
     existing_row = connection.execute(
-        "SELECT payload FROM premat_snapshots WHERE optimizer_update = ?",
-        (int(optimizer_update),),
+        "SELECT payload FROM premat_snapshots WHERE optimizer_update = ? AND micro_step = ?",
+        (int(optimizer_update), micro_step),
     ).fetchone()
+    # ^^^ THOG
     if existing_row is not None:
         existing = _decode_payload(existing_row["payload"])
         if _premat_snapshot_complete(existing):
             return False
     connection.execute(
-        "INSERT OR REPLACE INTO premat_snapshots(optimizer_update, payload) VALUES (?, ?)",
-        (int(optimizer_update), _encode_payload(payload)),
+        "INSERT OR REPLACE INTO premat_snapshots(optimizer_update, micro_step, payload) VALUES (?, ?, ?)",
+        (int(optimizer_update), micro_step, _encode_payload(payload)),
     )
     return True
 
@@ -248,8 +259,10 @@ class LocalChartStore:
                 payload BLOB NOT NULL
             );
             CREATE TABLE IF NOT EXISTS premat_snapshots (
-                optimizer_update INTEGER PRIMARY KEY,
-                payload BLOB NOT NULL
+                optimizer_update INTEGER NOT NULL,
+                micro_step INTEGER NOT NULL DEFAULT 0,
+                payload BLOB NOT NULL,
+                PRIMARY KEY (optimizer_update, micro_step)
             );
             CREATE TABLE IF NOT EXISTS processing_throughput (
                 optimizer_update INTEGER PRIMARY KEY,
@@ -570,9 +583,9 @@ class LocalChartStore:
         self.connection.execute(
             """
             DELETE FROM premat_snapshots
-            WHERE optimizer_update NOT IN (
-                SELECT optimizer_update FROM premat_snapshots
-                ORDER BY optimizer_update DESC LIMIT ?
+            WHERE (optimizer_update, micro_step) NOT IN (
+                SELECT optimizer_update, micro_step FROM premat_snapshots
+                ORDER BY optimizer_update DESC, micro_step DESC LIMIT ?
             )
             """,
             (max(1, int(history_length)),),
@@ -706,8 +719,10 @@ class LocalPrematLiveWriter:
             self.connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS premat_snapshots (
-                    optimizer_update INTEGER PRIMARY KEY,
-                    payload BLOB NOT NULL
+                    optimizer_update INTEGER NOT NULL,
+                    micro_step INTEGER NOT NULL DEFAULT 0,
+                    payload BLOB NOT NULL,
+                    PRIMARY KEY (optimizer_update, micro_step)
                 )
                 """
             )
@@ -725,9 +740,9 @@ class LocalPrematLiveWriter:
         self.connection.execute(
             """
             DELETE FROM premat_snapshots
-            WHERE optimizer_update NOT IN (
-                SELECT optimizer_update FROM premat_snapshots
-                ORDER BY optimizer_update DESC LIMIT ?
+            WHERE (optimizer_update, micro_step) NOT IN (
+                SELECT optimizer_update, micro_step FROM premat_snapshots
+                ORDER BY optimizer_update DESC, micro_step DESC LIMIT ?
             )
             """,
             (max(1, int(history_length)),),
@@ -985,18 +1000,25 @@ class LocalChartReader:
             connection.close()
         return tuple(_decode_payload(row["payload"]) for row in rows)
 
-    def premat_snapshots(self) -> Tuple[Dict[str, Any], ...]:
+    def premat_snapshots(self, *, after_update: Optional[int] = None, after_micro_step: int = -1) -> Tuple[Dict[str, Any], ...]:
         connection = self._connection()
         try:
             try:
+                # vvv THOG incremental polling reads only new microsteps; legacy histories imply microstep zero
+                columns = {row["name"] for row in connection.execute("PRAGMA table_info(premat_snapshots)")}
+                micro_column = "micro_step" if "micro_step" in columns else "0"
+                where = "" if after_update is None else f" WHERE (optimizer_update, {micro_column}) > (?, ?)"
+                arguments = () if after_update is None else (int(after_update), int(after_micro_step))
                 rows = connection.execute(
-                    "SELECT payload FROM premat_snapshots ORDER BY optimizer_update"
+                    f"SELECT payload FROM premat_snapshots{where} ORDER BY optimizer_update, {micro_column if micro_column != '0' else 'optimizer_update'}",
+                    arguments,
                 ).fetchall()
+                # ^^^ THOG
             except sqlite3.OperationalError:
                 rows = ()
         finally:
             connection.close()
-        return tuple(_decode_payload(row["payload"]) for row in rows)
+        return tuple({"micro_step": 0, **_decode_payload(row["payload"])} for row in rows)  # THOG legacy captures represent the first microstep
 
     # vvv THOG old databases remain readable; time axes appear only where genuine timing was retained
     def processing_throughput(self) -> Tuple[Dict[str, Any], ...]:
@@ -1064,14 +1086,14 @@ class LocalChartReader:
         connection = self._connection()
         try:
             try:
-                row = connection.execute(
-                    "SELECT payload FROM premat_snapshots ORDER BY optimizer_update DESC LIMIT 1"
-                ).fetchone()
+                columns = {row["name"] for row in connection.execute("PRAGMA table_info(premat_snapshots)")}
+                order = "optimizer_update DESC, micro_step DESC" if "micro_step" in columns else "optimizer_update DESC"
+                row = connection.execute(f"SELECT payload FROM premat_snapshots ORDER BY {order} LIMIT 1").fetchone()
             except sqlite3.OperationalError:
                 row = None
         finally:
             connection.close()
-        return None if row is None else _decode_payload(row["payload"])
+        return None if row is None else {"micro_step": 0, **_decode_payload(row["payload"])}
 
 
 def ensure_local_chart_store(telemetry: Any) -> LocalChartStore:

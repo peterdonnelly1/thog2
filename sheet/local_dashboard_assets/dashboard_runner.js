@@ -6,12 +6,12 @@
   if (!view) return;
   const list = by_id("runner_list"), detail = by_id("runner_detail"), message = by_id("runner_message");
   const multiview = by_id("runner_multiview_panel");
-  const categories = ["GPT-2 Hyperparameters", "Resume and Fork", "Run Control Parameters", "Geometry", "Width Activation Curves", "Premat", "NSIGHT",
+  const categories = ["GPT-2 Hyperparameters", "Resume and Fork", "Run Control Parameters", "Geometry", "Width Activation Curves", "Premat", "CPU Premat", "NSIGHT",
     "Coarse", "Layer Spacing", "Variable Depth", "Chaos Bumps", "Instrumentation"];
   const main_table_order = ["--geometry-preset", "--optimizer", "--n-layer", "DEPTH.order", "WIDTH.order", "--warmup-iters",
     "--block-size", "--n-embd", "--n-head", "--gradient-accumulation-steps", "--checkpoint-segment-size",
     "--learning-rate", "--min-lr", "--max-iters", "--batch-size", "--log-interval", "--eval-iters", "--eval-interval"];
-  const category_first_fields = {"Coarse":["--plastic__coarse_phase"],
+  const category_first_fields = {"CPU Premat":["--premat", "--premat_materialisation_device", "--premat_cpu_preparation", "--premat_cpu_layer_batch_size", "--premat_cpu_workers", "--premat_cpu_threads_per_worker", "--premat_cpu_transfer_timing", "--premat_cpu_transfer_lead_ms", "--premat_cpu_staging_limit_mb", "--premat_cpu_checkpoint_replay"], "NSIGHT":["--premat_processing_logging", "--premat_processing_profiler", "--premat_processing_logging_capture_update", "--premat_processing_logging_capture_frequency_hz", "--premat_instra__full_step_timing_capture_and_chart", "--premat_instra__full_step_timing_capture_and_chart_capture", "--ncu-probe-layer"], "Coarse":["--plastic__coarse_phase"],
     "Variable Depth":["--plastic__do_learn_layer_count","--no-plastic__do_learn_layer_count"],
     "Chaos Bumps":["--chaos_bump__sampling__enabled","--no-chaos_bump__sampling__enabled"]};
   const required_parameters = ["--geometry-preset", "--optimizer", "--n-layer", "--warmup-iters", "--block-size",
@@ -103,7 +103,7 @@
   }
   // ^^^ THOG
   function current_recipe() {
-    if (draft) return apply_width_selection(draft);
+    if (draft) return apply_profiling_defaults(apply_width_selection(draft));
     const defaults = saved_defaults();
     const power_caps = {};
     for (const host of network?.hosts || []) if (/^dreedle$/i.test(host.display_name || ""))
@@ -171,8 +171,43 @@
       errors.push("DEPTH.order must not exceed --n-layer");
     if (parameters["--min-lr"] !== undefined && scalar("--min-lr") > scalar("--learning-rate"))
       errors.push("--min-lr must not exceed --learning-rate");
+    const minimum=(key,fallback)=>Math.min(...(Array.isArray(parameters[key])?parameters[key]:[parameters[key]??fallback]).map(Number));
+    const maximum=minimum("--max-iters",50),capture=Number(parameters["--premat_processing_logging_capture_update"]??Math.min(10,maximum));
+    const profilers=recipe.profilers || ["none"];
+    if(profilers.some(mode=>mode!=="none") && (!Number.isInteger(capture)||capture<1||capture>maximum))
+      errors.push("Processing capture step must be positive and must not exceed --max-iters");
+    const full_capture=parameters["--premat_instra__full_step_timing_capture_and_chart_capture"];
+    if(full_capture!==undefined){
+      const match=/^step ([1-9][0-9]*)$/.exec(String(full_capture));
+      if(!match)errors.push("Full-step capture syntax is step <positive integer>");
+      else {
+        if(parameters["--premat_instra__full_step_timing_capture_and_chart"]!=="enable")errors.push("Full-step capture step requires full-step timing enable; clear the capture field when disabling timing");
+        if(Number(match[1])>maximum)errors.push("Full-step capture step must not exceed --max-iters");
+        const providers=parameters["--premat_materialisation_device"];
+        if(profilers.includes("nsys") && (Array.isArray(providers)?providers:[providers]).includes("cpu_and_gpu") && Number(match[1])!==capture)
+          errors.push("CPU NSYS requires matching Processing and full-step timing capture steps");
+      }
+    }
+    if(profilers.includes("ncu") && Number(parameters["--ncu-probe-layer"]??0)>=minimum("--n-layer",16))
+      errors.push("NCU probe layer must be below --n-layer");
     return errors;
   }
+
+  // vvv THOG CPU controls are conditional dimensions; saved values remain in the Recipe
+  function cpu_field_active(key, parameters) {
+    const providers=parameters["--premat_materialisation_device"];
+    const cpu=(Array.isArray(providers)?providers:[providers]).includes("cpu_and_gpu");
+    if (key==="--premat_timing") return !cpu;
+    if (!key.startsWith("--premat_cpu_")) return true;
+    if (!cpu) return false;
+    if (key==="--premat_cpu_transfer_lead_ms") {
+      const modes=parameters["--premat_cpu_transfer_timing"];
+      return (Array.isArray(modes)?modes:[modes]).includes("predicted_gemm_start");
+    }
+    return true;
+  }
+  // ^^^ THOG
+
   function check_recipe(require_gpu=true) {
     const errors = recipe_problems(current_recipe(), network?.hosts, require_gpu);
     // vvv THOG update the visible selector immediately when the preset changes
@@ -199,8 +234,14 @@
       current_recipe().parameters?.["--model-type"]==="dense";
     for (const field of detail.querySelectorAll("input[data-runner-field]")) {
       const key=field.dataset.runnerField,spec=snapshot?.catalogue[key];
-      if (spec) field.setAttribute("aria-invalid",String(Boolean(invalid_field_value(key,field.value,spec) ||
-        dense_only && spec.dense_compatible===false && field.value.trim())));
+      const active=cpu_field_active(key,current_recipe().parameters || {});
+      const automatic=["--premat_processing_profiler","--premat_processing_logging"].includes(key) && (current_recipe().profilers || []).some(mode=>mode!=="none");
+      field.disabled=!active;field.readOnly=automatic;field.dataset.inactive=String(!active);
+      const picker=field.parentElement.querySelector(".runner-choice-picker");
+      if (picker) picker.disabled=!active || automatic || field.readOnly;
+      field.title=field_help(spec || {})+(!active ? " Inactive for the selected materialisation provider or transfer timing; saved request retained." : "");
+      if (spec) field.setAttribute("aria-invalid",String(Boolean(active && (invalid_field_value(key,field.value,spec) ||
+        dense_only && spec.dense_compatible===false && field.value.trim()))));
     }
     for (const field of detail.querySelectorAll('input[aria-invalid="true"]')) errors.push(`${field.dataset.runnerField} has invalid syntax`);
     const notice = by_id("runner_required_fields");
@@ -264,10 +305,12 @@
     return completed && completed === grid.runs.length ? "complete" : completed ? "partial" : "none";
   }
   function field_help(spec) {
-    const options = spec.options_help || (spec.choices?.length ? spec.choices.join(", ") :
-      ["flag","bool_value"].includes(spec.type) ? "true, false" :
+    const choices = spec.choices?.length ? spec.choices.join(", ") : "";
+    const typed_options = ["flag","bool_value"].includes(spec.type) ? "true, false" :
       spec.type === "int" ? "nonnegative whole numbers" : spec.type === "float" ? "finite numbers" :
-      spec.kind === "list" ? "one text value per line" : "text values");
+      spec.kind === "list" ? "one text value per line" : "text values";
+    const options = choices ? choices + (spec.options_help && spec.options_help !== choices ? "; " + spec.options_help : "") :
+      spec.options_help || typed_options;
     return `${spec.help || ""}\nAvailable options: ${options}.${spec.kind === "dimension" ? " Use commas for a sweep." : ""}`;
   }
   function invalid_field_value(key, raw, spec) {
@@ -276,8 +319,11 @@
       spec.kind === "list" ? raw.split("\n") : [raw.trim()];
     if (parts.some(part=>!part)) return true;
     if (spec.kind === "dimension" && (parts.length>64 || new Set(parts).size !== parts.length)) return true;
+    if(key==="--premat_instra__full_step_timing_capture_and_chart_capture")return !/^step [1-9][0-9]*$/.test(raw.trim());
     return parts.some(part => {
       if (spec.choices?.length && !spec.choices.some(choice=>String(choice)===part)) return true;
+      if (key==="--premat_cpu_layer_batch_size" && !["single_layer","all_layers"].includes(part))
+        return !/^[1-9][0-9]*$/.test(part) || !Number.isSafeInteger(Number(part)) || Number(part)<2;
       // vvv THOG the width capture window alone admits the documented unbounded sentinel
       if (spec.type === "int") {
         if (key === "--instrumentation__width_activation_curves__end_step" && part === "-1") return false;
@@ -296,6 +342,7 @@
   const enabled_option = value => value === true || value === "true" || value === "enabled";
   function category_enabled(name, recipe) {
     if(name === "Premat")return premat_enabled(recipe);
+    if(name === "CPU Premat")return premat_enabled(recipe) && (Array.isArray(recipe.parameters?.["--premat_materialisation_device"])?recipe.parameters["--premat_materialisation_device"]:[recipe.parameters?.["--premat_materialisation_device"]]).includes("cpu_and_gpu");
     if(name === "NSIGHT")return (recipe.profilers || []).some(value=>value !== "none");
     const key={"Coarse":"--plastic__coarse_phase","Variable Depth":"--plastic__do_learn_layer_count",
       "Chaos Bumps":"--chaos_bump__sampling__enabled"}[name];
@@ -310,7 +357,7 @@
       control.classList.toggle("runner-category-enabled",category_enabled(control.dataset.runnerCategory,current_recipe()));
   }
   function categories_for_field(key, catalogue, common) {
-    return [...(common.includes(key) ? ["Frequently Used"] : []),catalogue[key]?.category].filter(Boolean);
+    return [...(common.includes(key) ? ["Frequently Used"] : []),catalogue[key]?.category,...(catalogue[key]?.extra_categories || [])].filter(Boolean);
   }
   function matches_search(key, spec, query) {
     const normalize=value=>String(value || "").toLowerCase().replace(/[-_\s]/g,"");
@@ -321,6 +368,39 @@
     const rank=key=>{const index=order.indexOf(key);return index<0 ? 999 : index;};
     return rank(left)-rank(right) || left.localeCompare(right);
   }
+  // vvv THOG Profiling mode publishes the effective automatic settings into the editable Recipe
+  const profiling_help = `None: ordinary training without a Nsight wrapper.
+NSYS: Nsight Systems records CUDA kernels, copies and NVTX operation ranges on a common time axis, plus device metric samples. Use it for overlap, gaps, copies and elapsed timing.
+NCU: Nsight Compute replays selected kernels to measure launch resources and occupancy. It captures MAIN QKV/O/UP/DOWN consumers at the zero-based --ncu-probe-layer (default 0), plus selected GPU PREMAT materialisations. CPU materialisation captures MAIN kernels and marks GPU co-residency N/A. NCU replay changes execution timings; its timings are not a training-speed benchmark.
+NSYS and NCU pair: two separate executions of the same resolved training configuration, NSYS first and NCU second, sharing a pairing identity. Opening the NSYS eye pairs valid NCU evidence automatically. NCU has no NSYS temporal trace of its own.
+Automatic settings for any selected profiler:
+--premat_processing_logging = enabled
+--premat_processing_profiler = nsys for NSYS, ncu for NCU; a pair uses one value per execution (the Recipe shows nsys for its first execution).
+Defaults supplied only when the field is blank:
+--premat_processing_logging_capture_frequency_hz = 10000 (NSYS sampling only)
+--premat_processing_logging_capture_update = step 10, or the shortest run's final step if shorter than 10
+--premat_instra__full_step_timing_capture_and_chart = enable
+--premat_instra__full_step_timing_capture_and_chart_capture = step N, matching the Processing capture update
+--ncu-probe-layer = 0 for NCU or a pair
+For enabled PREMAT: --premat_instra = enabled, --premat_logging = enabled, --premat_retain_detailed_premat_history = true, --premat_instra_microsteps = all.
+Explicit capture steps and other user settings are preserved. CPU NSYS with full-step timing captures all forwards, backwards and the optimiser at step N; other Nsight Processing scopes capture its first forward microstep. PREMAT Recapitulation independently uses --log-interval, so use 1 to chart every step's microsteps. Full-step timing capture must be enabled for an explicit full-step capture; CPU NSYS requires matching capture steps. All capture steps must fit within every run's --max-iters.`;
+  function apply_profiling_defaults(recipe) {
+    const modes=recipe.profilers || ["none"], parameters=recipe.parameters;
+    if(!modes.some(mode=>mode!=="none"))return recipe;
+    parameters["--premat_processing_logging"]="enabled";
+    parameters["--premat_processing_profiler"]=modes[0];
+    const limits=parameters["--max-iters"];
+    const limit=Math.min(...(Array.isArray(limits)?limits:[limits??50]).map(Number));
+    parameters["--premat_processing_logging_capture_frequency_hz"]??=10000;
+    parameters["--premat_processing_logging_capture_update"]??=Math.min(10,limit);
+    parameters["--premat_instra__full_step_timing_capture_and_chart"]??="enable";
+    if(parameters["--premat_instra__full_step_timing_capture_and_chart"]==="enable")
+      parameters["--premat_instra__full_step_timing_capture_and_chart_capture"]??=`step ${parameters["--premat_processing_logging_capture_update"]}`;
+    if(modes.includes("ncu"))parameters["--ncu-probe-layer"]??=0;
+    if(premat_enabled(recipe))for(const [key,value] of Object.entries({"--premat_instra":"enabled","--premat_logging":"enabled","--premat_retain_detailed_premat_history":"true","--premat_instra_microsteps":"all"}))parameters[key]??=value;
+    return recipe;
+  }
+  // ^^^ THOG
   function show_fields(container, keys, include_profiler=false) {
     const grid = add(container,"div",undefined,"runner-fields");
     const columns = window.innerWidth < 800 ? 1 : !by_id("runner_parameter_search")?.value &&
@@ -329,13 +409,19 @@
     grid.style.setProperty("--runner-rows",String(Math.max(1,Math.ceil((keys.length + (include_profiler ? 1 : 0))/columns))));
     if (include_profiler) {
       const profile_label=add(grid,"label");add(profile_label,"span","Profiling mode");
-      profile_label.title="Available options: none, NSYS, NCU, NSYS and NCU pair";
+      profile_label.title=profiling_help;
       const profile=add(profile_label,"select");
       for (const [name,value] of [["None","none"],["NSYS","nsys"],["NCU","ncu"],["NSYS and NCU pair","pair"]]) {
         const option=add(profile,"option",name);option.value=value;
       }
       profile.value=current_recipe().profilers?.length===2?"pair":current_recipe().profilers?.[0]||"none";
-      profile.addEventListener("change",()=>{draft=current_recipe();draft.profilers=profile.value==="pair"?["nsys","ncu"]:[profile.value];dirty=true;update_category_states();check_recipe();});
+      profile.title=profiling_help;
+      profile.dataset.runnerProfilingMode="true";
+      profile.addEventListener("change",()=>{
+        draft=current_recipe();draft.profilers=profile.value==="pair"?["nsys","ncu"]:[profile.value];
+        if(profile.value==="none")draft.parameters["--premat_processing_logging"]="disabled";
+        apply_profiling_defaults(draft);dirty=true;render_editor();
+      });
       button(profile_label,"Change default value",()=>{remember_default("profiling_mode",profile.value);message.textContent="Profiling default saved";});
     }
     for (const key of keys) {
@@ -353,10 +439,43 @@
       });
       change_default.classList.add("runner-change-default");
       field.dataset.runnerField = key;
+      // vvv THOG offer finite choices and open-ended suggestions on every applicable field
+      const suggestions=spec.suggestions || spec.choices || (["flag","bool_value"].includes(spec.type) ? ["true","false"] : []);
+      if (suggestions.length) {
+        const options=add(label,"datalist");options.id="runner_choices_"+key.replace(/[^a-z0-9]/gi,"_");
+        for(const choice of suggestions) {const item=add(options,"option");item.value=String(choice);}
+        field.setAttribute("list",options.id);
+      }
+      // ^^^ THOG
+      if (suggestions.length) {
+        const picker=add(label,"select",undefined,"runner-choice-picker");
+        picker.dataset.runnerChoices=key;
+        picker.setAttribute("aria-label",`Choose value for ${key}`);
+        picker.title=field_help(spec);
+        const prompt=add(picker,"option","Choices");prompt.value="";
+        for (const choice of suggestions) {
+          const option=add(picker,"option",String(choice));option.value=String(choice);
+        }
+        picker.addEventListener("change",()=>{
+          if (!picker.value || field.disabled || field.readOnly) return;
+          const separator=spec.kind==="list" ? "\n" : spec.kind==="dimension" ? "," : null;
+          const parts=separator ? field.value.split(separator).map(part=>part.trim()) : [];
+          if (parts.length>1) {
+            parts.pop();
+            if (!parts.includes(picker.value)) parts.push(picker.value);
+            field.value=parts.join(separator==="," ? ", " : "\n");
+          } else field.value=picker.value;
+          field.dispatchEvent(new Event("input",{bubbles:true}));
+          field.dispatchEvent(new Event("change",{bubbles:true}));
+          picker.value="";
+        });
+      }
       field.title=field_help(spec);
       field.value = Array.isArray(current_recipe().parameters[key]) ? current_recipe().parameters[key].join(spec.kind === "list" ? "\n" : ", ") :
         String(current_recipe().parameters[key] ?? "");
       field.setAttribute("aria-invalid",String(invalid_field_value(key,field.value,spec)));
+      if(key==="--premat_processing_profiler" && current_recipe().profilers?.length===2)
+        add(label,"small","Automatic: NSYS run = nsys; NCU run = ncu.","runner-field-categories");
       field.placeholder = spec.kind === "dimension" ? "One or comma-separated choices" : spec.kind === "list" ? "One item per line" :
         spec.type === "flag" ? "true or false" : String(spec.default ?? "");
       field.addEventListener("input", () => {
@@ -380,7 +499,8 @@
   }
   function render_editor() {
     detail.replaceChildren();
-    const recipe = current_recipe();
+    const recipe = apply_profiling_defaults(current_recipe());
+    if((recipe.profilers || []).some(mode=>mode!=="none"))draft=recipe;
     add(detail,"h2",draft_id ? `Grid Recipe · ${recipe.label}` : "Grid Recipe");
     const label = add(detail,"label",undefined,"runner-recipe-label");add(label,"span","Recipe label");
     const label_input = add(label,"input"); label_input.value = recipe.label;
@@ -399,7 +519,7 @@
         const prior=snapshot.recipes.find(item=>item.recipe_id===draft_id);
         const recipe_id=editing_existing ? draft_id : prior && prior.recipe.label===current_recipe().label ? draft_id : null;
         const saved=await action(editing_existing ? "update_recipe" : "save",{recipe_id,recipe:current_recipe()});
-        draft_id=saved.recipe_id;draft=JSON.parse(JSON.stringify(saved.recipe));dirty=false;chosen=draft_id;render();
+        draft_id=saved.recipe_id;draft=JSON.parse(JSON.stringify(saved.recipe));dirty=false;chosen=draft_id;category="Frequently Used";render();
       }
       catch (_) { /* The error is displayed above. */ }
     });
@@ -438,7 +558,7 @@
           const prior=snapshot.recipes.find(item=>item.recipe_id===draft_id);
           const recipe_id=editing_existing ? draft_id : prior && prior.recipe.label===current_recipe().label ? draft_id : null;
           const saved=await action(editing_existing ? "update_recipe" : "save",{recipe_id,recipe:current_recipe()});
-          draft_id=saved.recipe_id;draft=JSON.parse(JSON.stringify(saved.recipe));dirty=false;
+          draft_id=saved.recipe_id;draft=JSON.parse(JSON.stringify(saved.recipe));dirty=false;category="Frequently Used";
         }
         const launched=await action("launch",{recipe_id:draft_id,confirm_large:preview.total_runs>100});
         last_history_grid=launched.grid_id;chosen=launched.grid_id;manual_grid_selection=true;tab="progress";render();
@@ -516,15 +636,15 @@
         control.classList.toggle("active",category===name && (!query || filter_category));
       }
       const keys=(query?matching.filter(key=>!filter_category || categories_for_field(key,snapshot.catalogue,snapshot.common).includes(category)):
-        category==="Frequently Used"?snapshot.common:Object.keys(snapshot.catalogue).filter(key=>snapshot.catalogue[key].category===category))
+        category==="Frequently Used"?snapshot.common:Object.keys(snapshot.catalogue).filter(key=>categories_for_field(key,snapshot.catalogue,snapshot.common).includes(category)))
         .filter(key=>!snapshot.catalogue[key].ui_hidden && !["manual","automatic"].includes(snapshot.catalogue[key].kind))
         .sort((a,b)=>compare_fields(a,b,category));
       show_fields(fields,keys,query ? profiling_match && (!filter_category || category==="NSIGHT") : category==="NSIGHT");
       if(query && !keys.length && !profiling_match)add(fields,"p","No matching fields","runner-search-empty");
       update_category_states();
+      check_recipe(); // <<< THOG apply conditional controls before the first keystroke in a new tab or search
     }
     search.addEventListener("input",()=>show_category(search.value));show_category();
-    check_recipe();
   }
   function wall_time(value) {
     if (!value) return "—";
@@ -727,7 +847,7 @@
       const legend=add(detail,"p","Possible states are: ","runner-state-legend");
       const states=["ready","queued","dispatching","running","blocked","stopping","flushing","unknown","completed","failed","cancelled"];
       states.forEach((state,index)=>{
-        add(legend,"span",state,index<4 ? "runner-legend-green" : index>=6 ? "runner-legend-red" : "");
+        add(legend,"span",state,`runner-status runner-status-${state}`);
         legend.appendChild(document.createTextNode(index===states.length-1 ? "." : ", "));
       });
     }
@@ -967,6 +1087,7 @@
     }
     view.classList.toggle("runner-full-width",tab==="multiview");
     view.classList.toggle("runner-history",tab==="history");
+    view.classList.toggle("runner-progress",tab==="progress");
     multiview.hidden=tab!=="multiview";
   }
   async function refresh(repaint=false) {
@@ -1004,6 +1125,6 @@
     render();
   });
   setInterval(()=>{if(visible && tab!=="recipes")refresh();},5000);
-  window.instra_runner_test_hooks = Object.freeze({recipe_problems,apply_width_selection,current_recipe,remember_default,format_duration,grid_elapsed,estimate_range,estimated_run_end,history_outcome,field_help,invalid_field_value,premat_enabled,category_enabled,categories_for_field,matches_search,compare_fields});
+  window.instra_runner_test_hooks = Object.freeze({cpu_field_active,apply_profiling_defaults,profiling_help,recipe_problems,apply_width_selection,current_recipe,remember_default,format_duration,grid_elapsed,estimate_range,estimated_run_end,history_outcome,field_help,invalid_field_value,premat_enabled,category_enabled,categories_for_field,matches_search,compare_fields});
 })();
 // ^^^ THOG

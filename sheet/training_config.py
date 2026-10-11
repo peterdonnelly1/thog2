@@ -65,6 +65,9 @@ from .plastic_depth import (
 # ^^^ THOG
 # vvv THOG dynamic pre-materialisation configuration validation
 from .premat import validate_premat_configuration
+# vvv THOG shared CPU configuration and identity resolution
+from .premat_cpu_config import CPU_DEFAULTS, cpu_config_dict, cpu_identity, strip_inactive_cpu, validate_cpu_configuration, resolve_cpu_threads
+# ^^^ THOG
 # ^^^ THOG
 
 
@@ -73,7 +76,7 @@ ROW_ORDER_SCALING_RULE = "proportional_ceil_v1"
 MODEL_TYPES = ("dense", "thog2_sheet")
 # vvv THOG processing capture is diagnostic execution state, never checkpoint model identity
 # EXECUTION_OVERRIDE_FIELDS = {"instrumentation__optimizer_histories__full_matrix_every_n_steps", "device", "dtype", "max_updates", "max_wall_minutes", "eval_interval", "eval_batches", "checkpoint_interval", "checkpoint_segment_size", "out_dir", "log_interval", "nonfinite_update_policy", "max_nonfinite_update_skips", "premat_enable_gpu_timing_diagnostic"}
-EXECUTION_OVERRIDE_FIELDS = {"instrumentation__optimizer_histories__full_matrix_every_n_steps", "device", "dtype", "max_updates", "max_wall_minutes", "eval_interval", "eval_batches", "checkpoint_interval", "checkpoint_segment_size", "save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step", "out_dir", "log_interval", "nonfinite_update_policy", "max_nonfinite_update_skips", "premat_enable_gpu_timing_diagnostic", "premat_processing_logging", "premat_processing_logging_capture_frequency_hz", "premat_processing_logging_capture_update"}                         # <<< THOG processing and relay controls are execution state, never checkpoint model identity
+EXECUTION_OVERRIDE_FIELDS = {"instrumentation__optimizer_histories__full_matrix_every_n_steps", "device", "dtype", "max_updates", "max_wall_minutes", "eval_interval", "eval_batches", "checkpoint_interval", "checkpoint_segment_size", "save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step", "out_dir", "log_interval", "nonfinite_update_policy", "max_nonfinite_update_skips", "premat_enable_gpu_timing_diagnostic", "premat_processing_logging", "premat_processing_logging_capture_frequency_hz", "premat_processing_logging_capture_update", "premat_instra_microsteps", "premat_instra_playback"}                         # <<< THOG processing and relay controls are execution state, never checkpoint model identity
 # ^^^ THOG
 # vvv THOG PLASTIC DEPTH fields are omitted from persistent disabled-run metadata to preserve the exact pre-feature identity
 PLASTIC_TRAINING_CONFIG_FIELDS = (
@@ -301,6 +304,17 @@ class TrainingConfig:
     premat: str = "disabled"
     premat_attention_mode: str = "fused"
     premat_timing: str = "as_the_code_flies"
+    # vvv THOG CPU provider settings remain dormant at GPU defaults
+    premat_materialisation_device: str = "gpu"
+    premat_cpu_preparation: str = "eager"
+    premat_cpu_layer_batch_size: str = "single_layer"
+    premat_cpu_workers: int = 1
+    premat_cpu_threads_per_worker: int = 0
+    premat_cpu_transfer_timing: str = "as_the_code_flies"
+    premat_cpu_transfer_lead_ms: float = 0.0
+    premat_cpu_staging_limit_mb: float = 0.0
+    premat_cpu_checkpoint_replay: str = "disabled"
+    # ^^^ THOG
     premat_target_layer: int = 1
     premat_target_matrix: object = None                                                                                                                    # <<< THOG persist optional fused-family PREMAT selector set through training/checkpoint config
     premat_weight_matrix_target_order: str = "r_to_l"
@@ -320,6 +334,10 @@ class TrainingConfig:
     premat_processing_logging: str = "disabled"
     premat_processing_logging_capture_frequency_hz: int = 10000
     premat_processing_logging_capture_update: int = 1                                                                                                      # <<< THOG exact optimizer update selected for bounded Processing capture
+    # ^^^ THOG
+    # vvv THOG all accumulation microsteps are the default PREMAT chart capture unit
+    premat_instra_microsteps: str = "all"
+    premat_instra_playback: str = "complete_step"
     # ^^^ THOG
     premat_retain_detailed_premat_history: bool = False
     # ^^^ THOG
@@ -611,12 +629,21 @@ class TrainingConfig:
         # vvv THOG the global reserve replaces the fixed PLASTIC memory budget and configures premat even while scheduling is disabled
         if self.premat_target_layer == 10:
             self.premat_weight_matrix_target_order = "r_to_l"
+        # vvv THOG the optional first-microstep sampler changes instrumentation only
+        # vvv THOG playback affects presentation only
+        if self.premat_instra_playback not in ("complete_step", "latest"):
+            raise ValueError("premat_instra_playback must be complete_step or latest")
+        # ^^^ THOG
+        if self.premat_instra_microsteps not in ("all", "first"):
+            raise ValueError("premat_instra_microsteps must be all or first")
+        # ^^^ THOG
         if not isinstance(self.premat_retain_detailed_premat_history, bool):
             raise ValueError("premat_retain_detailed_premat_history must be bool")
         if not isinstance(self.premat_enable_gpu_timing_diagnostic, bool):
             raise ValueError("premat_enable_gpu_timing_diagnostic must be bool")
         if not isinstance(self.premat_enable_shadow_mode, bool):
             raise ValueError("premat_enable_shadow_mode must be bool")
+        validate_cpu_configuration(self)                 # <<< THOG reject unsupported CPU combinations before model allocation
         validate_premat_configuration(
             premat=self.premat,
             attention_mode=self.premat_attention_mode,
@@ -1053,7 +1080,7 @@ class TrainingConfig:
 
     # vvv THOG serialize no dormant PLASTIC DEPTH fields when disabled so checkpoint and report metadata remain exact regressions
     def persistent_dict(self) -> Dict[str, Any]:
-        values = asdict(self)
+        values = strip_inactive_cpu(asdict(self))         # <<< THOG GPU persistent configuration remains byte stable
         if values.get("instrumentation__optimizer_histories__full_matrix_every_n_steps") == 0:
             values.pop("instrumentation__optimizer_histories__full_matrix_every_n_steps", None)
         # vvv THOG old optimizer checkpoint identity is unchanged at default settings
@@ -1158,6 +1185,7 @@ class TrainingConfig:
                     "premat": self.premat,
                     "premat_attention_mode": self.premat_attention_mode,
                     "premat_timing": self.premat_timing,
+                    **(cpu_config_dict(self) if self.premat_materialisation_device == "cpu_and_gpu" else {}),             # <<< THOG carry numerical provider to model arguments
                     "premat_target_layer": self.premat_target_layer,
                     "premat_target_matrix": self.premat_target_matrix,                                                                                     # <<< THOG pass selected PREMAT matrix into SheetGPTConfig
                     "premat_weight_matrix_target_order": self.premat_weight_matrix_target_order,
@@ -1329,6 +1357,8 @@ class TrainingConfig:
                 "logging": self.premat_logging,
                 "instra": self.premat_instra,
             }
+        if self.premat_materialisation_device == "cpu_and_gpu":
+            identity["premat_cpu"] = cpu_config_dict(self)  # <<< THOG CPU experiments have distinct checkpoint identities
         return identity
 
     # vvv THOG schema-2 checkpoint signatures must stay available after execution-only fields such as max_wall_minutes are added

@@ -142,6 +142,9 @@ class SharedTrainer(
     # ^^^ THOG
 
     def close(self) -> None:
+        runtime = getattr(getattr(self, "raw_model", None), "_premat_runtime", None)  # <<< THOG bounded CPU worker/transfer shutdown
+        if runtime is not None and hasattr(runtime, "close"):
+            runtime.close()
         self.distributed.close()
 
 

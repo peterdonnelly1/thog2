@@ -104,6 +104,7 @@ const address=process.env.INSTRA_TEST_URL || "http://127.0.0.1:8765";
     assert.ok(states.slice(6).every(item=>item.color==="rgb(179, 38, 46)"));
     assert.deepEqual(errors,[]);
     console.log("PASS registered hover options, Chebyshev/DCT equivalence, Save to New Name and state colours");
+    await page.unrouteAll({behavior:"wait"});
     if(process.env.INSTRA_TEST_EVIDENCE)fs.writeFileSync(process.env.INSTRA_TEST_EVIDENCE,JSON.stringify({browser:browser_type.name(),retention,columns,states,page_errors:errors},null,2)+"\n");
   } finally {await browser.close();}
 })().catch(error=>{console.error(error.stack);process.exit(1);});

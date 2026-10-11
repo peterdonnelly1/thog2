@@ -32,6 +32,16 @@ from .plastic_depth_gauge import (
 from .geometry import SheetGeometryConfig
 from .semantic_materializer import ATTENTION_KEY_WEIGHT, ATTENTION_OUTPUT_WEIGHT, ATTENTION_QUERY_WEIGHT, ATTENTION_VALUE_WEIGHT, LEGACY_ATTENTION_INPUT_WEIGHT, MLP_CONTRACTION_WEIGHT, MLP_EXPANSION_WEIGHT
 from .trajectory import build_family_metadata
+# vvv THOG both providers use the existing PREMAT node and consumer-stream anchor
+# from .depth_numerical_policy import CpuDepthBinding
+from .depth_numerical_policy import (
+    PrematBindingContext,
+    effective_depth_policy,
+    DepthNumericalPolicy,
+    dtype_name,
+)
+from .premat_native_binding import bind_cached_depth
+# ^^^ THOG
 
 
 DEPTH_MATRIX_FAMILIES = (
@@ -44,109 +54,35 @@ DEPTH_MATRIX_FAMILIES = (
 )
 
 
-# vvv THOG a metadata-only edge created on the consumer stream prevents a
-# Premat custom node's gradient from reaching a persistent leaf AccumulateGrad
-# directly with the cached tensor's auxiliary-stream provenance.
-class _PrematConsumerStreamAnchor(torch.autograd.Function):
+# vvv THOG shared Main Stream anchor and cached-value entry point retain native autograd nodes
+class _PrematConsumerStreamAnchor:
     @staticmethod
-    def forward(ctx, value: Tensor) -> Tensor:
-        return value.view_as(value)
-
-    @staticmethod
-    def backward(ctx, gradient: Tensor):
-        return gradient
-# ^^^ THOG
+    def apply(value: Tensor) -> Tensor:
+        # Initialize a leaf's ordinary AccumulateGrad edge on the consumer
+        # stream. Adding an identity backward node changes gradient accumulation
+        # order and can amplify FP16 rounding through AdamW near zero gradients.
+        if torch.is_grad_enabled() and value.requires_grad:
+            torch.autograd.graph.get_gradient_edge(value)
+        return value
 
 
-# vvv THOG bind a no-grad prematerialised value to its ordinary differentiable
-# DEPTH identity only when the layer consumes it.  Physical CUDA timing can
-# therefore move earlier without moving the autograd/checkpoint operation.
-class _PrematerializedDepthBundle(torch.autograd.Function):
+class _PrematerializedDepthBundle:
     @staticmethod
-    def forward(ctx, cached: Tensor, *coefficient_depth_pairs: Tensor) -> Tensor:
-        if not coefficient_depth_pairs or len(coefficient_depth_pairs) % 2:
-            raise RuntimeError("prematerialised DEPTH binding requires coefficient/depth-row pairs")
-        saved = []
-        pair_specs = []
-        for index in range(0, len(coefficient_depth_pairs), 2):
-            coefficient = coefficient_depth_pairs[index]
-            depth_row = coefficient_depth_pairs[index + 1]
-            coefficient_needs_gradient = bool(coefficient.requires_grad)
-            depth_needs_gradient = bool(depth_row.requires_grad)
-            # Match ordinary einsum's saved-tensor contract: a coefficient
-            # gradient needs only the depth row, while a depth gradient needs
-            # only the coefficient.  Saving both unconditionally made fused
-            # QKV checkpoint forward retain three tensors more than replay.
-            if coefficient_needs_gradient:
-                # torch.einsum("p,rcp->rc", ...) lowers to a batched matrix
-                # product under autocast and saves this [1,1,P] working view in
-                # the generated output dtype.  Match that metadata exactly so
-                # non-reentrant checkpoint replay can pair the saved tensors.
-                saved.append(
-                    depth_row.to(device=cached.device, dtype=cached.dtype).reshape(1, 1, -1)
-                )
-            if depth_needs_gradient:
-                saved.append(
-                    coefficient.to(device=cached.device, dtype=cached.dtype)
-                    .permute(2, 0, 1)
-                    .reshape(1, coefficient.shape[2], -1)
-                )
-            pair_specs.append(
-                (
-                    int(coefficient.shape[0]),
-                    int(coefficient.shape[1]),
-                    coefficient.dtype,
-                    depth_row.dtype,
-                    coefficient_needs_gradient,
-                    depth_needs_gradient,
-                )
+    def apply(cached: Tensor, *coefficient_depth_pairs) -> Tensor:
+        if coefficient_depth_pairs and isinstance(coefficient_depth_pairs[0], PrematBindingContext):
+            binding, *pairs = coefficient_depth_pairs
+        else:
+            pairs = coefficient_depth_pairs
+            if not pairs:
+                raise RuntimeError("prematerialised DEPTH binding requires coefficient/depth-row pairs")
+            # Compatibility for callers of the original einsum binding entry.
+            working = dtype_name(cached.dtype)
+            numerical_policy = DepthNumericalPolicy(
+                "einsum", dtype_name(pairs[0].dtype), working,
+                "float64" if cached.dtype == torch.float64 else "float32", working,
             )
-        ctx.save_for_backward(*saved)
-        ctx.pair_specs = tuple(pair_specs)
-        return cached.view_as(cached)
-
-    @staticmethod
-    def backward(ctx, gradient: Tensor):
-        saved = iter(ctx.saved_tensors)
-        result = [None]
-        row_start = 0
-        for pair_index, (
-            row_count,
-            column_count,
-            coefficient_dtype,
-            depth_dtype,
-            coefficient_needs_gradient,
-            depth_needs_gradient,
-        ) in enumerate(ctx.pair_specs):
-            depth_row = (
-                next(saved).reshape(-1).to(dtype=coefficient_dtype)
-                if coefficient_needs_gradient
-                else None
-            )
-            coefficient = None
-            if depth_needs_gradient:
-                coefficient_working = next(saved)
-                coefficient = (
-                    coefficient_working.reshape(-1, row_count, column_count)
-                    .permute(1, 2, 0)
-                    .to(dtype=depth_dtype)
-                )
-            family_gradient = gradient[row_start : row_start + row_count]
-            coefficient_input = 1 + 2 * pair_index
-            depth_input = coefficient_input + 1
-            coefficient_gradient = (
-                torch.einsum("rc,p->rcp", family_gradient, depth_row)
-                if coefficient_needs_gradient and ctx.needs_input_grad[coefficient_input]
-                else None
-            )
-            depth_gradient = (
-                torch.einsum("rc,rcp->p", family_gradient, coefficient)
-                if depth_needs_gradient and ctx.needs_input_grad[depth_input]
-                else None
-            )
-            result.extend((coefficient_gradient, depth_gradient))
-            row_start += row_count
-        return tuple(result)
+            binding = PrematBindingContext(numerical_policy)
+        return bind_cached_depth(cached, binding, *pairs)
 # ^^^ THOG
 
 
@@ -807,14 +743,14 @@ class DepthTrajectory(nn.Module):
             return self._materialize_legacy_vector(name, layer_index)
         return self._materialize_conventional_parameter(name, layer_index)
 
-    # vvv THOG no copied dense tensor is created here: the cached value keeps
-    # its storage while the custom autograd node supplies the exact linear
-    # coefficient/depth-row derivatives of ordinary materialisation.
+    # vvv THOG cached values keep their storage while native autograd supplies
+    # ordinary materialisation's coefficient/depth-row derivatives and rounding.
     def attach_prematerialized(
         self,
         names: Tuple[str, ...],
         layer_index: int,
         generated: Tensor,
+        *, binding_context=None,                                                                                                                           # <<< THOG optional provider storage lease
     ) -> Tensor:
         if not names:
             raise ValueError("prematerialised DEPTH binding requires at least one family")
@@ -851,6 +787,13 @@ class DepthTrajectory(nn.Module):
                 f"prematerialised DEPTH bundle has shape {tuple(generated.shape)}; "
                 f"expected {expected_shape}"
             )
+        # vvv THOG both backends and providers retain the native graph, saved tensors and autocast rounding
+        if binding_context is None:
+            binding_context = PrematBindingContext(effective_depth_policy(self, qualify_cpu=False))
+        # ^^^ THOG
+        if binding_context is not None:
+            # return CpuDepthBinding.apply(generated.detach(), binding_context, *pairs)
+            return _PrematerializedDepthBundle.apply(generated.detach(), binding_context, *pairs)                                                          # <<< THOG retain the actual input-gradient storage lease
         return _PrematerializedDepthBundle.apply(generated.detach(), *pairs)
     # ^^^ THOG
 

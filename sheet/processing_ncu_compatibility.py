@@ -586,7 +586,10 @@ def normalize_semantic_ncu_exports(
     semantic_path: Path,
     *,
     compute_capability: str | None = None,
+    materialisation_device: str = "gpu",
 ) -> list[Dict[str, Any]]:
+    if materialisation_device not in ("gpu", "cpu_and_gpu"):
+        raise ValueError("unknown materialisation device for NCU export")
     rows = normalize_raw_ncu_csv(
         raw_path,
         role="UNKNOWN",
@@ -611,7 +614,7 @@ def normalize_semantic_ncu_exports(
         updated.update(label)
         normalized.append(updated)
     roles = {str(row.get("role", "")).upper() for row in normalized}
-    if "MAIN" not in roles or "PREMAT" not in roles:
+    if "MAIN" not in roles or (materialisation_device == "gpu" and "PREMAT" not in roles):
         raise ValueError(
             "NCU semantic export did not contain both MAIN consume and PREMAT materialize launches"
         )
@@ -709,16 +712,19 @@ def write_kernel_resources(rows: Sequence[Mapping[str, Any]], path: Path) -> Pat
     return path
 
 
-def write_outputs(rows: Sequence[Mapping[str, Any]], output_directory: Path) -> Dict[str, Path]:
+def write_outputs(rows: Sequence[Mapping[str, Any]], output_directory: Path, *, materialisation_device: str = "gpu") -> Dict[str, Path]:
     output_directory = Path(output_directory)
     output_directory.mkdir(parents=True, exist_ok=True)
     kernel_path = write_kernel_resources(rows, output_directory / "processing_ncu_kernel_resources.csv")
-    compatibility = build_compatibility_rows(rows)
+    compatibility = build_compatibility_rows(rows) if materialisation_device == "gpu" else []
     json_path = output_directory / "processing_premat_compatibility.json"
     csv_path = output_directory / "processing_premat_compatibility.csv"
     json_path.write_text(json.dumps({
         "schema_version": 2,
-        "interpretation": "aggregate_sm_budget_only_all_premat_stages",
+        "interpretation": "aggregate_sm_budget_only_all_premat_stages" if materialisation_device == "gpu" else "main_kernel_resources_only",
+        "materialisation_device": materialisation_device,
+        "available": bool(compatibility),
+        "reason": "N/A: CPU materialisation" if materialisation_device == "cpu_and_gpu" else "",
         "rows": compatibility,
     }, indent=2, sort_keys=True))
     fieldnames = list(compatibility[0]) if compatibility else []

@@ -313,6 +313,15 @@ PLASTIC DEPTH:
   --plastic__coarse_phase_roll_through | --no-plastic__coarse_phase_roll_through
 
 Dynamic pre-materialisation:
+  --premat_materialisation_device gpu|cpu_and_gpu=gpu
+  --premat_cpu_preparation eager|scheduled|demand_driven=eager
+  --premat_cpu_layer_batch_size single_layer|all_layers|integer>=2=single_layer
+  --premat_cpu_workers N=1  separate processes; no CUDA context
+  --premat_cpu_threads_per_worker N=0  automatic affinity-aware native threads
+  --premat_cpu_transfer_timing as_the_code_flies|previous_gemm_leading_edge|as_soon_as_ready|demand_driven|predicted_gemm_start
+  --premat_cpu_transfer_lead_ms MS=0  explicit use requires predicted_gemm_start
+  --premat_cpu_staging_limit_mb MIB=0  automatic two selected layer sets
+  --premat_cpu_checkpoint_replay enabled|disabled=disabled
   --premat enabled|disabled=${PREMAT}
   --premat_attention_mode fused|unfused=${PREMAT_ATTENTION_MODE}
   --premat_target_layer 0|1|2|10=${PREMAT_TARGET_LAYER}  10 means ordered +1 then +0
@@ -326,6 +335,8 @@ Dynamic pre-materialisation:
   --premat_enable_shadow_mode true|false=${PREMAT_ENABLE_SHADOW_MODE}  schedule/admit normally but suppress side-stream weight materialisation; default false
   --premat_logging enabled|disabled=${PREMAT_LOGGING}
   --premat_instra enabled|disabled=${PREMAT_INSTRA}
+  --premat_instra_playback complete_step|latest=complete_step  complete captured steps or follow latest data
+  --premat_instra_microsteps all|first=all  all microsteps, or first-only, at each --log-interval
 
 Sampling-only chaos bump:
   --chaos_bump__sampling__enabled | --no-chaos_bump__sampling__enabled
@@ -399,6 +410,7 @@ GEOMETRY_UI_EXTRA_ARGS=()
 WIDTH_CAPTURE_EXTRA_ARGS=()
 WIDTH_LEGACY_BASIS_EXPLICIT=false                                                                                                                          # <<< THOG reject explicit global families even when equal to defaults
 DENSE_SNAPSHOT_EXTRA_ARGS=()
+CPU_PREMAT_EXTRA_ARGS=()  # <<< THOG preserve explicitly requested CPU controls for early parser validation
 THOGOPT_EXTRA_ARGS=()  # <<< THOG forward independent optimizer history budgets
 EXPLAIN_GEOMETRY=false
 OPTIMIZER_SAW_SEPARATOR=false
@@ -409,6 +421,17 @@ while (( $# > 0 )); do
     continue
   fi
   case "$1" in
+    # vvv THOG consume CPU controls before getopts in either canonical value spelling
+    --premat_instra_playback|--premat_instra_microsteps|--premat_materialisation_device|--premat_cpu_preparation|--premat_cpu_layer_batch_size|--premat_cpu_workers|--premat_cpu_threads_per_worker|--premat_cpu_transfer_timing|--premat_cpu_transfer_lead_ms|--premat_cpu_staging_limit_mb|--premat_cpu_checkpoint_replay)
+      (( $# >= 2 )) || { echo "$1 requires a value" >&2; exit 2; }
+      CPU_PREMAT_EXTRA_ARGS+=("$1" "$2")
+      shift 2
+      ;;
+    --premat_instra_playback=*|--premat_instra_microsteps=*|--premat_materialisation_device=*|--premat_cpu_preparation=*|--premat_cpu_layer_batch_size=*|--premat_cpu_workers=*|--premat_cpu_threads_per_worker=*|--premat_cpu_transfer_timing=*|--premat_cpu_transfer_lead_ms=*|--premat_cpu_staging_limit_mb=*|--premat_cpu_checkpoint_replay=*)
+      CPU_PREMAT_EXTRA_ARGS+=("$1")
+      shift
+      ;;
+    # ^^^ THOG
     --save-dense-initialisation-snapshot)
       SAVE_DENSE_INITIALISATION_SNAPSHOT=true
       DENSE_SNAPSHOT_EXTRA_ARGS+=("--save-dense-initialisation-snapshot")
@@ -847,6 +870,7 @@ EXTRA_ARGS+=("${WIDTH_CAPTURE_EXTRA_ARGS[@]}")
 EXTRA_ARGS+=("${GEOMETRY_UI_EXTRA_ARGS[@]}")
 EXTRA_ARGS+=("${DENSE_SNAPSHOT_EXTRA_ARGS[@]}")
 EXTRA_ARGS+=("${THOGOPT_EXTRA_ARGS[@]}")
+EXTRA_ARGS+=("${CPU_PREMAT_EXTRA_ARGS[@]}")  # <<< THOG pass CPU options without injecting defaults in GPU mode
 
 # vvv THOG options beyond the wrapper separator are intentionally forwarded to
 # Python, but launch-time CUDA allocator policy must still see the resolved

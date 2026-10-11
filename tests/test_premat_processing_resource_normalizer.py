@@ -71,7 +71,7 @@ def test_normalizer_emits_exact_owners_stream_resource_csv_and_idle_intervals(tm
         capture_metadata={"optimizer_update": 50, "micro_step": 1},
     )
 
-    assert payload["metadata"]["schema_version"] == 2
+    assert payload["metadata"]["schema_version"] == 4  # THOG current GPU Processing schema; CPU evidence extends it to v5
     assert payload["metadata"]["metric_catalog"]["dram_read_pct"]["available"] is True
     assert payload["metadata"]["metric_catalog"]["dram_write_pct"]["available"] is False
 

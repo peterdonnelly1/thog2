@@ -11,9 +11,24 @@ const processing_view = {
 };
 
 // vvv THOG Processing cards use the ordinary INSTRA plot-mount readiness contract instead of direct Plotly.react on empty divs
+// vvv THOG render resource charts with SVG when the browser has no WebGL context
+let processing_webgl_available;
+function processing_supports_webgl() {
+  if (processing_webgl_available !== undefined) return processing_webgl_available;
+  try {
+    const canvas=document.createElement("canvas");
+    const context=canvas.getContext?.("webgl2") || canvas.getContext?.("webgl");
+    processing_webgl_available=Boolean(context);
+    context?.getExtension("WEBGL_lose_context")?.loseContext();
+  } catch (_) {processing_webgl_available=false;}
+  return processing_webgl_available;
+}
+// ^^^ THOG
 async function processing_plot(mount_id, traces, layout) {
   const mount = by_id(mount_id);
   if (!mount) return;
+  if(traces.some(trace=>trace.type==="scattergl") && !processing_supports_webgl())
+    traces=traces.map(trace=>trace.type==="scattergl" ? {...trace,type:"scatter"} : trace);
   const resolved_layout = {...layout, autosize: true};
   if (mount.dataset.plotReady === "true") {
     await Plotly.react(mount, traces, resolved_layout, plot_config);

@@ -282,6 +282,10 @@ from sheet.width import WIDTH_PRESET, WIDTH_CAPTURE_DEFAULTS, WIDTH_CAPTURE_PREF
 from sheet.width_geometry import add_width_arguments, resolve_width_geometry, ExplicitLegacyBasisAction
 # ^^^ THOG
 
+# vvv THOG CPU controls use the same public parser in wrappers and lifecycle
+from sheet.premat_cpu_config import add_cpu_arguments, cpu_config_dict, validate_cpu_arguments, resolve_cpu_threads
+# ^^^ THOG
+
 def build_parser() -> argparse.ArgumentParser:
     parser = _ThogArgumentParser(description="Train or resume one canonical THOG2 OpenWebText run")
     # vvv THOG wrapper consumes these before core argparse, but --help must still advertise the exact public names
@@ -381,9 +385,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--premat_logging", choices=("enabled", "disabled"), default="disabled")
     parser.add_argument("--premat_instra", choices=("enabled", "disabled"), default="disabled")
     # vvv THOG public processing controls are consumed by the wrapper before core parsing; hidden aliases keep them out of the PREMAT scheduler surface
-    parser.add_argument("--processing_logging_internal", dest="premat_processing_logging", choices=("enabled", "disabled"), default="disabled", help=argparse.SUPPRESS)
-    parser.add_argument("--processing_logging_capture_frequency_hz_internal", dest="premat_processing_logging_capture_frequency_hz", type=int, default=10000, help=argparse.SUPPRESS)
-    parser.add_argument("--processing_logging_capture_update_internal", dest="premat_processing_logging_capture_update", type=int, default=1, help=argparse.SUPPRESS)                    # <<< THOG exact optimizer update for bounded Nsight capture
+    parser.add_argument("--processing_logging_internal", "--processing-logging-internal", dest="premat_processing_logging", choices=("enabled", "disabled"), default="disabled", help=argparse.SUPPRESS)
+    parser.add_argument("--processing_logging_capture_frequency_hz_internal", "--processing-logging-capture-frequency-hz-internal", dest="premat_processing_logging_capture_frequency_hz", type=int, default=10000, help=argparse.SUPPRESS)
+    parser.add_argument("--processing_logging_capture_update_internal", "--processing-logging-capture-update-internal", dest="premat_processing_logging_capture_update", type=int, default=1, help=argparse.SUPPRESS)                    # <<< THOG exact optimizer update for bounded Nsight capture, including sitecustomize aliases
+    # ^^^ THOG
+    # vvv THOG expose microstep capture equally in Runner, direct CLI and wrapper forwarding
+    parser.add_argument("--premat_instra_playback", choices=("complete_step", "latest"), default="complete_step",
+                        help="PREMAT playback: finish every captured microstep of the current optimiser step (default), or immediately follow latest data; the chart button overrides this preference")
+    parser.add_argument("--premat_instra_microsteps", choices=("all", "first"), default="all",
+                        help="PREMAT charts: all microsteps (default), or only the first microstep of each sampled optimizer step; sampling still follows --log-interval")
     # ^^^ THOG
     parser.add_argument("--premat_retain_detailed_premat_history", type=_true_false, default=False, metavar="true|false")
     parser.add_argument(
@@ -535,6 +545,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--print-artifact-name", action="store_true")
     parser.add_argument("--print-resolved-json", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
+    add_cpu_arguments(parser)  # <<< THOG all nine CPU controls are public and canonical
     return parser
 
 
@@ -808,6 +819,7 @@ def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) 
         premat=arguments.premat,
         premat_attention_mode=arguments.premat_attention_mode,
         premat_timing=arguments.premat_timing,
+        **cpu_config_dict(arguments),  # <<< THOG retain requested CPU configuration
         premat_target_layer=arguments.premat_target_layer,
         premat_target_matrix=arguments.premat_target_matrix,                                                                                               # <<< THOG carry selected PREMAT matrix into persistent run configuration
         premat_weight_matrix_target_order=arguments.premat_weight_matrix_target_order,
@@ -824,6 +836,10 @@ def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) 
         premat_processing_logging=arguments.premat_processing_logging,
         premat_processing_logging_capture_frequency_hz=arguments.premat_processing_logging_capture_frequency_hz,
         premat_processing_logging_capture_update=arguments.premat_processing_logging_capture_update,                                                       # <<< THOG pass explicit Processing capture update into resolved run configuration
+        # vvv THOG preserve the requested chart capture unit in the run configuration
+        premat_instra_microsteps=arguments.premat_instra_microsteps,
+        premat_instra_playback=arguments.premat_instra_playback,
+        # ^^^ THOG
         premat_retain_detailed_premat_history=arguments.premat_retain_detailed_premat_history,
         plastic__layer_count__cuda_allocator_reserve_gib=arguments.plastic__layer_count__cuda_allocator_reserve_gib,
         plastic__geometry_learning_rate_multiplier=arguments.plastic__geometry_learning_rate_multiplier,
@@ -1058,7 +1074,7 @@ def print_model_parameters_and_options(config: OwtRunConfig, trainer: OwtTrainer
             f"cuda_allocator={os.environ.get('PYTORCH_CUDA_ALLOC_CONF', 'default')} "
             f"lookahead=l+{config.premat_target_layer} "
             f"matrix_target=relative_layer_{config.premat_target_layer} "
-            f"target_order={config.premat_weight_matrix_target_order}",
+            f"target_order={config.premat_weight_matrix_target_order}" + cpu_startup_text(config),
         )
         # ^^^ THOG
         # vvv THOG HYPERBLOCK field identity and coefficient budget are first-class console diagnostics
@@ -1074,8 +1090,24 @@ def print_model_parameters_and_options(config: OwtRunConfig, trainer: OwtTrainer
 # ^^^ THOG
 
 
+
+# vvv THOG append CPU resolution to the existing PREMAT startup row; legacy fixtures may omit new fields
+def cpu_startup_text(config):
+    controls = cpu_config_dict(config)
+    if controls["premat_materialisation_device"] == "gpu":
+        return ""
+    threads, budget = resolve_cpu_threads(controls["premat_cpu_workers"], controls["premat_cpu_threads_per_worker"])
+    text = " " + " ".join(f"{name}={value}" for name, value in controls.items())
+    canonical = getattr(config, "canonical_dict", None)
+    resolved = canonical(world_size=1) if callable(canonical) else {}
+    details = "".join(f" {name}={resolved[name]}" for name in ("premat_generated_dtype_resolved", "premat_cpu_staging_limit_bytes_resolved", "premat_target_offset_active", "premat_cpu_preparation_target_offset_active") if name in resolved)
+    return text + f" threads_per_worker_resolved={threads} affinity_budget={budget} gpu_premat_timing=inactive cpu_all_layer_count={config.n_layer}" + details
+# ^^^ THOG
+
+
 def main() -> int:
     arguments = build_parser().parse_args()
+    validate_cpu_arguments(arguments, sys.argv[1:])  # <<< THOG reject inactive/conflicting explicit CPU flags before allocation
     geometry_plan = geometry_plan_from_arguments(arguments)
     if arguments.explain_geometry:
         if geometry_plan is None:

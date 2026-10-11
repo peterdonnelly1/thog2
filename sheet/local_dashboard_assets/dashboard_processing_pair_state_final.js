@@ -63,13 +63,13 @@
   function is_nsys_run_id(run_id) {
     const run = run_for_id(run_id);
     const artifact = String(run?.artifact_name || run?.run_name || "").toUpperCase();
-    return artifact.includes("_NSYS_") || artifact.includes("NSYS_PREMAT");
+    return run?.nsight === "NSYS" || artifact.includes("_NSYS_") || artifact.includes("NSYS_PREMAT");
   }
 
   function is_ncu_run_id(run_id) {
     const run = run_for_id(run_id);
     const artifact = String(run?.artifact_name || run?.run_name || "").toUpperCase();
-    return artifact.includes("_NCU_") || artifact.includes("NCU_PREMAT");
+    return run?.nsight === "NCU" || artifact.includes("_NCU_") || artifact.includes("NCU_PREMAT");
   }
 
   function run_timestamp(run_id) {
@@ -237,6 +237,10 @@
   function set_processing_unavailable(run_id = null) {
     processing_view.available = false;
     processing_view.trace_available = false;
+    processing_view.ncu_resources_available = false;
+    processing_view.resource_available = false;
+    processing_view.compatibility_available = false;
+    processing_view.operations_payload = null;
     processing_sync_visibility();
     processing_view.run_id = run_id;
     processing_view.revision = null;

@@ -219,6 +219,26 @@ def test_live_reporter_publishes_only_the_completed_microstep(monkeypatch) -> No
     assert {event["pass_sequence"] for event in latest["events"]} == {1}
 
 
+def test_completed_report_keeps_its_microstep_and_deferred_reports_publish_in_order(monkeypatch) -> None:
+    from types import SimpleNamespace
+    runtime, _fake_cuda, _calls = _runtime(monkeypatch, stay_below_current_peak=False)
+    published = []
+    runtime.set_live_reporter(published.append)
+    runtime.optimizer_step, runtime.micro_step = 11, 2
+    runtime.end()
+    assert (published[0]["optimizer_update"], published[0]["micro_step"]) == (11, 2)
+    first = dict(published.pop())
+    second = {**first, "pass_sequence": 2, "micro_step": 3}
+    runtime._pending_completed_live_reports = {1: first, 2: second}
+    runtime._pending_timings = [SimpleNamespace(pass_sequence=1)]
+    runtime.optimizer_step, runtime.micro_step = 12, 0
+    runtime._publish_completed_live_reports_if_ready()
+    assert published == []
+    runtime._pending_timings.clear()
+    runtime._publish_completed_live_reports_if_ready()
+    assert [(row["optimizer_update"], row["micro_step"]) for row in published] == [(11, 2), (11, 3)]
+
+
 def test_live_reporter_skips_uncaptured_updates(monkeypatch) -> None:
     runtime, _fake_cuda, _calls = _runtime(
         monkeypatch,
@@ -281,7 +301,7 @@ def test_retired_plastic_memory_budget_cli_names_replacement(capsys) -> None:
     assert "--premat_gpu_memory_buffer_gb" in capsys.readouterr().err
 
 
-def test_public_cli_exposes_exactly_the_seventeen_premat_options() -> None:
+def test_public_cli_exposes_existing_options_and_nine_cpu_controls() -> None:
     parser = build_parser()
     option_strings = {
         option
@@ -291,6 +311,15 @@ def test_public_cli_exposes_exactly_the_seventeen_premat_options() -> None:
     }
     assert option_strings == {
         "--premat",
+        "--premat_materialisation_device",
+        "--premat_cpu_preparation",
+        "--premat_cpu_layer_batch_size",
+        "--premat_cpu_workers",
+        "--premat_cpu_threads_per_worker",
+        "--premat_cpu_transfer_timing",
+        "--premat_cpu_transfer_lead_ms",
+        "--premat_cpu_staging_limit_mb",
+        "--premat_cpu_checkpoint_replay",
         "--premat_allocator_aware_admission",
         "--premat_attention_mode",
         "--premat_timing",
@@ -306,6 +335,8 @@ def test_public_cli_exposes_exactly_the_seventeen_premat_options() -> None:
         "--premat_enable_shadow_mode",
         "--premat_logging",
         "--premat_instra",
+        "--premat_instra_microsteps",
+        "--premat_instra_playback",
         "--premat_retain_detailed_premat_history",
     }
 

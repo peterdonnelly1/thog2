@@ -36,12 +36,28 @@ def _canonical(value):
     return value
 
 
+def _cpu_execution_key(run):
+    parameters = run.get("parameters", {})
+    if parameters.get("--premat_materialisation_device", "gpu") != "cpu_and_gpu":
+        return None
+    execution = run.get("cpu_execution") or {}
+    budget = execution.get("affinity_thread_budget")
+    try:
+        workers = int(parameters.get("--premat_cpu_workers", 1))
+        threads = int(parameters.get("--premat_cpu_threads_per_worker", 0))
+        resolved_threads = threads or (max(1, int(budget) // workers) if budget is not None and workers > 0 else None)
+    except (TypeError, ValueError, ZeroDivisionError):
+        resolved_threads = None
+    return (run.get("host_id"), run.get("host_label"), run.get("execution_profile"),
+            budget, resolved_threads, _canonical(execution.get("affinity_cores")))
+
+
 def _workload_key(run):
     parameters = tuple(sorted((key, _canonical(value)) for key, value in run.get("parameters", {}).items()
                               if key not in NON_TIMING_FIELDS and value is not None))
     power = run.get("requested_power_w") or run.get("default_power_w") or run.get("gpu", {}).get("default_power_w")
     return (parameters, run.get("profiler"), run.get("dtype"), run.get("attention_backend"),
-            run.get("gpu", {}).get("model"), _canonical(power))
+            run.get("gpu", {}).get("model"), _canonical(power), _cpu_execution_key(run))
 
 
 def _predict(run, candidates):
@@ -98,7 +114,8 @@ def estimate(runs, history, parallelism=1, *, dynamic=False):
                           (item.get("requested_power_w") or item.get("default_power_w")) ==
                           (runs[0].get("requested_power_w") or runs[0].get("default_power_w")) and
                           item.get("dtype") == runs[0].get("dtype") and
-                          item.get("attention_backend") == runs[0].get("attention_backend") for item in runs)
+                          item.get("attention_backend") == runs[0].get("attention_backend") and
+                          _cpu_execution_key(item) == _cpu_execution_key(runs[0]) for item in runs)
         if dynamic and homogeneous:
             slots = [0.0] * capacity
             for duration in values:

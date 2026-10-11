@@ -317,10 +317,10 @@ def test_history_reducer_covers_all_retained_steps_and_layers_and_exports_csv() 
     assert "2147483648,2147483648,1,1,1,0,0,0" in rendered["csv"]
 
     detailed_lines = rendered["detailed_csv"].splitlines()
-    assert detailed_lines[0].startswith("step,layer,matrix,target,target_offset,matrix_order")
+    assert detailed_lines[0].startswith("step,microstep,layer,matrix,target,target_offset,matrix_order")
     assert len(detailed_lines) == 17
-    assert detailed_lines[1].startswith("11,2,ATTN FUSED · QKV,")
-    assert detailed_lines[9].startswith("10,2,ATTN FUSED · QKV,")
+    assert detailed_lines[1].startswith("11,1,2,ATTN FUSED · QKV,")
+    assert detailed_lines[9].startswith("10,1,2,ATTN FUSED · QKV,")
     assert any("global device buffer" in line for line in detailed_lines[1:])
 
 
@@ -417,7 +417,8 @@ def test_premat_view_has_all_layer_playback_controls_complete_key_and_inspector(
         "premat_history_raw_download", "premat_inspector_download",
     ):
         assert f'id="{element_id}"' in index
-    assert "Premat Recapitulation - Step" in index
+    assert "Premat Recapitulation - " in index
+    assert "Microstep " in index and "of Optimiser Step " in index
     assert "flex: 0 0 210px" in css
     for state_class in (
         "premat-neutral", "premat-pending", "premat-state-materialising", "premat-state-available",
@@ -483,7 +484,7 @@ def test_premat_view_has_all_layer_playback_controls_complete_key_and_inspector(
     assert "premat_open_history_step" in javascript
     assert "premat_detailed_history_csv(snapshots)" in javascript
     assert "inspector_return_panel" in javascript
-    assert "${premat_artifact_file_stem()}_step_${step}.csv" in javascript
+    assert "${premat_artifact_file_stem()}_step_${step}_microstep_${premat_micro_step(snapshot)+1}.csv" in javascript
     assert "Download retained detailed Premat history as CSV" in index
     assert "Download retained raw Premat event history as CSV" in index
     assert "premat_download_raw_event_history" in javascript

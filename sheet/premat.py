@@ -610,8 +610,10 @@ class PrematRuntime:
         logging_enabled: bool,
         target_matrix: object = None,                                                                                                                      # <<< THOG runtime filter for one or more fused matrix families
         timing: str = "as_the_code_flies",
+        materialisation_element_size: Optional[Callable[[], int]] = None,                                                                                  # <<< THOG price the authoritative materialiser separately from activation autocast
     ) -> None:
         self._materialize = materialize
+        self._materialisation_element_size = materialisation_element_size
         self._attach = attach or (lambda _family, _layer_index, tensor: tensor)
         self._n_embd = int(n_embd)
         self._n_head = int(n_head)
@@ -662,6 +664,10 @@ class PrematRuntime:
         self._sequence = 0
         self._event_sequence = 0
         self._advance_sequence = 0
+        # vvv THOG training supplies identities before each original forward; deferred reports retain them
+        self.optimizer_step = 0
+        self.micro_step = 0
+        # ^^^ THOG
         self._pass_sequence = 0
         self._events: List[Dict[str, object]] = []
         # vvv THOG Instra receives bounded transition snapshots on the training
@@ -697,6 +703,7 @@ class PrematRuntime:
         self._retained_bytes = 0
         self._transient_bytes = 0
         self._activation_bytes = 0
+        self._activation_element_bytes = 0
         self._dtype_bytes = 0
         self._batch_size = 0
         self._sequence_length = 0
@@ -1485,11 +1492,7 @@ class PrematRuntime:
         self._candidates.clear()
         self._display_layer_pair = None
         self._display_candidates = []
-        # Price the tensors that Premat will actually allocate.  The pass
-        # reference can remain FP32 under CUDA autocast even though matrix
-        # materialisation and its overlapping Main Stream activations are
-        # BF16/FP16.  Charging the reference dtype therefore doubles the
-        # admission envelope for mixed-precision training.
+        # vvv THOG activation autocast does not determine materialised weight storage: native DEPTH matmul remains FP32
         if torch.is_autocast_enabled("cuda"):
             autocast_dtype = torch.get_autocast_dtype("cuda")
             if autocast_dtype not in (torch.float16, torch.bfloat16):
@@ -1497,10 +1500,16 @@ class PrematRuntime:
                     "Premat CUDA autocast requires float16 or bfloat16; "
                     f"got {autocast_dtype}"
                 )
-            self._dtype_bytes = 2
+            self._activation_element_bytes = 2
         else:
-            self._dtype_bytes = int(reference.element_size())
-        self._activation_bytes = int(reference.numel() * self._dtype_bytes)
+            self._activation_element_bytes = int(reference.element_size())
+        self._dtype_bytes = (
+            int(self._materialisation_element_size())
+            if self._materialisation_element_size is not None
+            else self._activation_element_bytes
+        )
+        self._activation_bytes = int(reference.numel() * self._activation_element_bytes)
+        # ^^^ THOG
         self._batch_size = int(reference.shape[0]) if reference.ndim >= 1 else 1
         self._sequence_length = int(reference.shape[1]) if reference.ndim >= 2 else 1
         self._pass_start_ns = time.perf_counter_ns()
@@ -1690,10 +1699,9 @@ class PrematRuntime:
             self._aggregate["available_hits"] += 1
             self._aggregate["fully_hidden_hits"] += 1
             candidate.final_outcome = "FULL HIT"
-            # Explicit lifetime is stronger than record_stream here: the runtime
-            # retains the tensor until a Main Stream event recorded after its
-            # consuming GEMM completes.  Avoiding record_stream means final
-            # release returns directly to the tensor's Premat allocator stream.
+            # The scheduler retains its forward ownership through the consuming
+            # GEMM event. The shared differentiable binding separately protects
+            # consumer-stream uses when backward saves this cached storage.
             self._transition(
                 candidate,
                 CandidateState.CONSUMING,
@@ -2206,7 +2214,7 @@ class PrematRuntime:
                 * self._n_head
                 * self._sequence_length
                 * self._sequence_length
-                * self._dtype_bytes
+                * self._activation_element_bytes                                                                                                           # <<< THOG attention intermediates follow activation precision, independently of weight storage
             )
             causal_mask_bytes = self._sequence_length * self._sequence_length
             attention_peak += 2 * score_bytes + causal_mask_bytes
@@ -3376,10 +3384,9 @@ class PrematRuntime:
             if not complete:
                 remaining.append(release)
                 continue
-            # The tensor was deliberately kept alive until this Main Stream
-            # event.  PREMAT hits no longer call record_stream(current_stream),
-            # so dropping the last reference now returns the allocation directly
-            # to its original Premat-stream allocator pool.
+            # This event ends the scheduler's forward ownership. Saved autograd
+            # tensors and the binding's consumer-stream registration protect
+            # any later input-gradient reads before allocator reuse.
             release.tensor = None
             self._retained_bytes = max(
                 0,
@@ -3753,6 +3760,10 @@ class PrematRuntime:
         # report() is non-blocking; unresolved CUDA timings remain in
         # _pending_timings and this snapshot is held privately until they resolve.
         snapshot = self.report()
+        # vvv THOG capture identity now, before delayed CUDA diagnostics can advance to another microstep
+        snapshot["optimizer_update"] = self.optimizer_step
+        snapshot["micro_step"] = self.micro_step
+        # ^^^ THOG
         self._pending_completed_live_reports[self._pass_sequence] = snapshot
         self._publish_completed_live_reports_if_ready()
 
@@ -3832,7 +3843,9 @@ class PrematRuntime:
         )
         for pass_sequence in sorted(tuple(self._pending_completed_live_reports)):
             if pass_sequence in pending_passes:
-                continue
+                # Keep the live (update, microstep) cursor ordered even when an
+                # earlier pass is still waiting for its CUDA event timings.
+                break
             snapshot = self._pending_completed_live_reports.pop(pass_sequence)
             self._refresh_report_derived_aggregates(snapshot)
             try:

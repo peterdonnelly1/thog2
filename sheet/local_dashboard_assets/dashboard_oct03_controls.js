@@ -134,6 +134,12 @@ window.addEventListener("load", () => setTimeout(() => {
     const headers=[...header_row.children].filter(header=>header.dataset.instraColumnKey);
     const defaults=headers.map(header=>header.dataset.instraColumnKey);
     const keys=[...new Set([...layout.order.filter(key=>defaults.includes(key)),...defaults])];
+    // vvv THOG place the new profiler column beside Updated in existing saved layouts
+    if(!layout.order.includes("nsight") && keys.includes("nsight") && keys.includes("updated")) {
+      keys.splice(keys.indexOf("nsight"),1);keys.splice(keys.indexOf("updated"),0,"nsight");
+      layout.order=keys;save_layout();
+    }
+    // ^^^ THOG
     // vvv THOG migrate saved layouts without placing the new grid control at the far right
     if(!layout.order.includes("grid_visibility") && keys.includes("grid_visibility")) {
       keys.splice(keys.indexOf("grid_visibility"),1);keys.splice(keys.indexOf("visibility"),0,"grid_visibility");

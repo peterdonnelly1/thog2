@@ -208,8 +208,13 @@ def maybe_reexec_under_nsys(
     capture_metadata_path = temporary_root / "capture.json"
     environment = dict(os.environ)
     environment[_processing._PROCESSING_CHILD_ENV] = "1"
+    environment["THOG2_PREMAT_PROCESSING_PROFILER"] = profiler
     environment[_processing._PROCESSING_HANDOFF_ENV] = str(handoff_path)
     environment[_processing._PROCESSING_CAPTURE_METADATA_ENV] = str(capture_metadata_path)
+
+    # vvv THOG active Instra launcher shares CPU full-update capture selection
+    capture_update, rewritten_arguments, cpu_full_capture = _processing.resolve_processing_capture(arguments, capture_update, profiler)
+    # ^^^ THOG
 
     if profiler == "nsys":
         nsys = _processing._find_nsys()
@@ -229,7 +234,7 @@ def maybe_reexec_under_nsys(
         )
         print(
             f"THOG2 PREMAT processing capture: Nsight Systems @ {frequency} Hz; "
-            f"capturing update {capture_update}, first forward microstep",
+            f"capturing update {capture_update}, " + ("complete optimizer update" if cpu_full_capture else "first forward microstep"),
             flush=True,
         )
         completed = subprocess.run(command, env=environment)
@@ -277,6 +282,9 @@ def maybe_reexec_under_nsys(
             capture_frequency_hz=frequency,
             handoff=handoff,
             capture_metadata=capture_metadata,
+            # vvv THOG CPU precursors, copies, memory and replay must reach the active normalizer
+            **({"cpu_report": json.loads((temporary_root / "cpu_capture.json").read_text())} if (temporary_root / "cpu_capture.json").exists() else {}),
+            # ^^^ THOG
         )
         _postrun_progress(5, total, "GPU samples, kernel intervals and resource attribution normalized")
 
@@ -361,9 +369,12 @@ def maybe_reexec_under_nsys(
     )
     _postrun_progress(5, total, "semantic NCU CSV export complete; normalizing dominant MAIN kernels and every PREMAT stage")
 
-    resource_rows = _compat.normalize_semantic_ncu_exports(raw_csv, semantic_csv)
+    # vvv THOG CPU preparation has no PREMAT CUDA materialisation kernels
+    materialisation_device = (handoff.get("config") or {}).get("premat_materialisation_device") or _processing._argv_value(arguments, "--premat_materialisation_device", "gpu")
+    resource_rows = _compat.normalize_semantic_ncu_exports(raw_csv, semantic_csv, materialisation_device=materialisation_device)
+    # ^^^ THOG
     representative_rows = _compat.select_representative_kernel_resources(resource_rows)
-    paths = _compat.write_outputs(representative_rows, processing_directory)
+    paths = _compat.write_outputs(representative_rows, processing_directory, materialisation_device=materialisation_device)
     _postrun_progress(6, total, "NCU resources normalized and MAIN/PREMAT compatibility data written")
 
     report_destination = processing_directory / f"processing_ncu_trace{report_path.suffix}"

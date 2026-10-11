@@ -90,6 +90,9 @@ def _install_lightweight_premat_outcomes(trainer: Any, capture_update: int) -> N
     setattr(trainer, _OUTCOME_ATTRIBUTE, outcomes)
 
     def capture_selected_update(pass_sequence: int) -> bool:
+        runtime = getattr(getattr(trainer, "raw_model", None), "_premat_runtime", None)
+        if getattr(runtime, "cpu_phase", None) == "checkpoint_recompute":
+            return False
         prospective_update = int(trainer.state.completed_updates) + 1
         if prospective_update != int(capture_update):
             return False
@@ -102,6 +105,8 @@ def _install_lightweight_premat_outcomes(trainer: Any, capture_update: int) -> N
         return True
 
     def publish_selected_outcomes(snapshot: Mapping[str, Any]) -> None:
+        if snapshot.get("phase") == "checkpoint_recompute":
+            return
         pass_sequence = int(snapshot.get("pass_sequence", 0))
         micro_step = pass_to_microstep.get(pass_sequence)
         if micro_step is None:

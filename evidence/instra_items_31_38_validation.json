@@ -1,0 +1,805 @@
+{
+  "branch": "cpu_materialisation",
+  "implementation_base": "439d724864dd5ed48027f148c0b7d670ebfd1811",
+  "date_utc": "2026-10-11",
+  "scope": "Items 31-38: Recipe controls, PREMAT playback and CPU scheduler reporting",
+  "environment": {
+    "python": "3.12.14",
+    "torch": "2.8.0+cpu",
+    "cuda_available": false,
+    "threads": 1,
+    "browser_runtime": "Playwright Chromium headless shell and Firefox"
+  },
+  "focused_python": {
+    "junit_summary": {
+      "tests": 808,
+      "failures": 1,
+      "errors": 0,
+      "skipped": 201
+    },
+    "seconds": 41.078,
+    "test_cases": 802,
+    "passed_cases": 600,
+    "failed_cases": 1,
+    "failures": {
+      "tests.test_instra_sep30_feedback::test_chart_routes_hide_disabled_plastic_and_preserve_enabled_or_legacy_data": 1
+    }
+  },
+  "broad_python": {
+    "candidate": {
+      "junit_summary": {
+        "tests": 3011,
+        "failures": 72,
+        "errors": 0,
+        "skipped": 220
+      },
+      "seconds": 229.649,
+      "test_cases": 2517,
+      "passed_cases": 2231,
+      "failed_cases": 66,
+      "failures": {
+        "tests.test_basis_family_plugin_registry.BasisFamilyPluginRegistryTests::test_07_primary_wrappers_have_no_family_specific_allow_list_or_tag_branch": 2,
+        "tests.test_console_and_descriptor_help::test_wrapper_registry_emits_descriptor_table_once": 1,
+        "tests.test_console_model_summary::test_model_summary_aligns_optimizer_and_reports_cosine_decay": 1,
+        "tests.test_console_progress_layout.ConsoleProgressLayoutTests::test_current_layer_count_is_appended_only_when_plastic_is_enabled": 1,
+        "tests.test_console_progress_layout.ConsoleProgressLayoutTests::test_sampled_values_are_emitted_once_after_a_plastic_transition": 1,
+        "tests.test_console_progress_layout.ConsoleProgressLayoutTests::test_semantic_qkv_bypass_is_suppressed_only_for_depth_reporting": 1,
+        "tests.test_console_progress_layout.ConsoleProgressLayoutTests::test_validation_reuses_latest_step_mean_and_uses_two_level_yellow_emphasis": 1,
+        "tests.test_console_progress_pretty_rows::test_training_console_row_uses_hh_mm_ss_after_step_one_and_colors_negative_delta_bright_green": 1,
+        "tests.test_console_progress_pretty_rows::test_step_one_console_row_keeps_elapsed_seconds": 1,
+        "tests.test_console_progress_pretty_rows::test_validation_console_row_uses_bold_explicit_rgb_yellow_for_validation_loss": 1,
+        "tests.test_dense_weight_curves::test_dense_snapshot_reuses_all_six_families_with_integer_layer_points": 1,
+        "tests.test_dense_weight_curves::test_dense_figure_uses_crosses_with_per_step_connectors": 1,
+        "tests.test_dense_weight_curves::test_dense_scalar_coordinates_share_one_step_colour_and_legend_row": 1,
+        "tests.test_depth_weight_curves_and_observational_probes::test_scalar_selection_is_fixed_per_run_and_run_specific": 1,
+        "tests.test_depth_weight_curves_v2::test_all_attention_charts_share_one_head": 1,
+        "tests.test_depth_weight_curves_v2::test_plotly_history_emphasises_newest_and_oldest": 1,
+        "tests.test_direct_thog_mlp_application::test_training_wrappers_expose_default_on_direct_factorised_mlp_without_getopts_letter": 1,
+        "tests.test_final_activation_checkpoint_weight_relay::test_cli_flag_is_default_disabled_and_literal_spelling_enables_it": 1,
+        "tests.test_geometry_registry_phase1.GeometryRegistryPhase1Tests::test_registry_console_report_is_complete_and_explicit": 1,
+        "tests.test_instra_demand_runtime::test_twenty_four_warm_histories_resume_without_replaying_records": 1,
+        "tests.test_instra_demand_runtime::test_replaced_remote_wandb_file_reopens_the_new_inode": 1,
+        "tests.test_instra_sep01_enhancements.InstraEnhancementTests::test_new_and_legacy_cli_spellings_and_effective_environment": 6,
+        "tests.test_instra_sep30_feedback::test_chart_routes_hide_disabled_plastic_and_preserve_enabled_or_legacy_data": 1,
+        "tests.test_jpeg_like_v1_wrappers.JpegLikeV1WrapperTests::test_registry_comment_and_help_expose_new_contract": 1,
+        "tests.test_jpeg_like_v1_wrappers.JpegLikeV1WrapperTests::test_scruffy_dry_run_propagates_geometry_compressor_group_and_y": 1,
+        "tests.test_karitane_restart_launcher.KaritaneRestartLauncherTests::test_launcher_has_valid_shell_syntax_and_calls_dedicated_resume_module": 1,
+        "tests.test_layer_dropout_wrappers.LayerDropoutWrapperTests::test_long_forms_and_forwarding_are_present": 1,
+        "tests.test_layer_dropout_wrappers.LayerDropoutWrapperTests::test_short_layer_dropout_controls_are_native_getopts": 1,
+        "tests.test_modified_fast_discard_false::test_stage4_update_is_equivalent_and_releases_materializations": 1,
+        "tests.test_optimizer_wrapper.OptimizerWrapperTests::test_existing_run_scruffy_scripts_remain_present": 1,
+        "tests.test_optimizer_wrapper.OptimizerWrapperTests::test_full_wrappers_retain_body_and_native_optimizer_help": 1,
+        "tests.test_optimizer_wrapper.OptimizerWrapperTests::test_help_contains_old_and_new_controls": 1,
+        "tests.test_optimizer_wrapper.OptimizerWrapperTests::test_long_optimizer_controls_and_explicit_lr_override": 1,
+        "tests.test_optimizer_wrapper.OptimizerWrapperTests::test_short_optimizer_control_uses_optimizer_defaults": 1,
+        "tests.test_picton_cli_wrapper_contract::test_picton_canonical_host_wrappers_share_the_same_getopts_letters_and_long_options": 1,
+        "tests.test_picton_cli_wrapper_contract::test_picton_all_known_shell_wrappers_are_syntactically_valid": 1,
+        "tests.test_picton_wrapper_defaults_and_nonfinite_policy::test_current_training_wrappers_default_to_fast_discard_eval_100_and_checkpoint_1000": 1,
+        "tests.test_plastic_depth_interfaces::test_obsolete_hold_control_and_internal_sampling_seed_are_not_public_cli_options": 1,
+        "tests.test_resume_and_fork_cli_compatibility.ResumeAndForkCliCompatibilityTests::test_lifecycle_parser_accepts_all_preserved_master_long_controls": 1,
+        "tests.test_semantic_qkv_adapter_bypass_option::test_bypass_semantic_qkv_adapter_false_selects_legacy_adapter_path": 1,
+        "tests.test_sheet_stage3_compatibility.Stage3CompatibilityTests::test_s3_09_incompatible_checkpoint_rejection": 1,
+        "tests.test_sheet_stage6_runner_scripts.RunnerScriptTests::test_s6_33_dense_runner_resolves_canonical_identity_and_shared_defaults": 1,
+        "tests.test_sheet_stage6_runner_scripts.RunnerScriptTests::test_s6_34_depth_runner_ignores_non_depth_orders_by_default": 1,
+        "tests.test_stage6_plastic_depth_progress::test_plastic_probe_losses_score_z_sample_layer_and_samples_are_ordered": 1,
+        "tests.test_stage6_plastic_depth_progress::test_huge_score_z_uses_fixed_width_scientific_not_row_blowout": 1,
+        "tests.test_stage6_plastic_depth_progress::test_optimizer_progress_omits_depth_samples_when_absent": 1,
+        "tests.test_stage6_plastic_depth_progress::test_optimizer_progress_omits_probe_losses_when_absent": 1,
+        "tests.test_stage6_plastic_depth_progress::test_optimizer_progress_omits_score_z_when_absent": 1,
+        "tests.test_stage6_plastic_depth_progress::test_missing_edge_probe_loss_and_score_z_use_dash_placeholders_and_green_only": 1,
+        "tests.test_stage8_mlp_channel_order_and_wrapper_loops::test_stage8_training_wrappers_use_final_preset_as_single_architecture_selector": 1,
+        "tests.test_stage8_mlp_channel_order_and_wrapper_loops::test_stage8_training_wrappers_share_the_six_order_letters": 1,
+        "tests.test_stage8_mlp_channel_order_and_wrapper_loops::test_stage8_training_wrappers_loop_dense_once_and_compact_presets_across_depth_orders": 1,
+        "tests.test_stage8_training_instrumentation_selector::test_stage8_training_wrappers_expose_one_unambiguous_instrumentation_selector": 1,
+        "tests.test_stage8_wrapper_shell_syntax::test_stage8_training_wrappers_make_logging_backend_and_schedule_controls_explicit": 1,
+        "tests.test_stage8_wrapper_shell_syntax::test_stage8_training_wrappers_expose_all_six_semantic_order_controls": 1,
+        "tests.test_stage8_wrapper_shell_syntax::test_stage8_training_wrappers_auto_correct_dense_residual_source": 1,
+        "tests.test_stage8_wrappers_and_run_config::test_stage8_run_config_records_dct_full_block_identity_in_manifest_and_artifact_name": 1,
+        "tests.test_stage8_wrappers_and_run_config::test_stage8_semantic_order_defaults_are_recorded_in_manifest_identity_and_training_config": 1,
+        "tests.test_stage8_wrappers_and_run_config::test_stage8_semantic_order_overrides_are_recorded_in_manifest_artifact_identity_and_training_config": 1,
+        "tests.test_thogopt_integration::test_public_cli_history_arguments_and_reset_scope": 1,
+        "tests.test_thogopt_lifecycle::test_fresh_resume_reset_fork_and_capture": 1,
+        "tests.test_train_owt_public_wrapper.PublicTrainOwtWrapperTests::test_fresh_dry_run_preserves_master_cli_and_aligns_startup_values": 1,
+        "tests.test_vectorise_per_head_materialisation::test_training_wrappers_expose_default_on_vectorise_per_head_materialisation_without_getopts_letter": 1,
+        "tests.test_wrapper_learning_rate_and_batch_grids::test_run_config_artifact_contains_two_digit_learning_rate_code": 1,
+        "tests.test_wrapper_learning_rate_and_batch_grids::test_run_config_default_learning_rate_uses_lr_60_artifact_code": 1,
+        "tests.test_wrapper_learning_rate_and_batch_grids::test_wrappers_expose_lr_and_min_lr_codes_and_nest_lr_and_batch_grid_axes": 1
+      }
+    },
+    "baseline": {
+      "junit_summary": {
+        "tests": 3006,
+        "failures": 72,
+        "errors": 0,
+        "skipped": 220
+      },
+      "seconds": 229.9,
+      "test_cases": 2512,
+      "passed_cases": 2226,
+      "failed_cases": 66,
+      "failures": {
+        "tests.test_basis_family_plugin_registry.BasisFamilyPluginRegistryTests::test_07_primary_wrappers_have_no_family_specific_allow_list_or_tag_branch": 2,
+        "tests.test_console_and_descriptor_help::test_wrapper_registry_emits_descriptor_table_once": 1,
+        "tests.test_console_model_summary::test_model_summary_aligns_optimizer_and_reports_cosine_decay": 1,
+        "tests.test_console_progress_layout.ConsoleProgressLayoutTests::test_current_layer_count_is_appended_only_when_plastic_is_enabled": 1,
+        "tests.test_console_progress_layout.ConsoleProgressLayoutTests::test_sampled_values_are_emitted_once_after_a_plastic_transition": 1,
+        "tests.test_console_progress_layout.ConsoleProgressLayoutTests::test_semantic_qkv_bypass_is_suppressed_only_for_depth_reporting": 1,
+        "tests.test_console_progress_layout.ConsoleProgressLayoutTests::test_validation_reuses_latest_step_mean_and_uses_two_level_yellow_emphasis": 1,
+        "tests.test_console_progress_pretty_rows::test_training_console_row_uses_hh_mm_ss_after_step_one_and_colors_negative_delta_bright_green": 1,
+        "tests.test_console_progress_pretty_rows::test_step_one_console_row_keeps_elapsed_seconds": 1,
+        "tests.test_console_progress_pretty_rows::test_validation_console_row_uses_bold_explicit_rgb_yellow_for_validation_loss": 1,
+        "tests.test_dense_weight_curves::test_dense_snapshot_reuses_all_six_families_with_integer_layer_points": 1,
+        "tests.test_dense_weight_curves::test_dense_figure_uses_crosses_with_per_step_connectors": 1,
+        "tests.test_dense_weight_curves::test_dense_scalar_coordinates_share_one_step_colour_and_legend_row": 1,
+        "tests.test_depth_weight_curves_and_observational_probes::test_scalar_selection_is_fixed_per_run_and_run_specific": 1,
+        "tests.test_depth_weight_curves_v2::test_all_attention_charts_share_one_head": 1,
+        "tests.test_depth_weight_curves_v2::test_plotly_history_emphasises_newest_and_oldest": 1,
+        "tests.test_direct_thog_mlp_application::test_training_wrappers_expose_default_on_direct_factorised_mlp_without_getopts_letter": 1,
+        "tests.test_final_activation_checkpoint_weight_relay::test_cli_flag_is_default_disabled_and_literal_spelling_enables_it": 1,
+        "tests.test_geometry_registry_phase1.GeometryRegistryPhase1Tests::test_registry_console_report_is_complete_and_explicit": 1,
+        "tests.test_instra_demand_runtime::test_twenty_four_warm_histories_resume_without_replaying_records": 1,
+        "tests.test_instra_demand_runtime::test_replaced_remote_wandb_file_reopens_the_new_inode": 1,
+        "tests.test_instra_sep01_enhancements.InstraEnhancementTests::test_new_and_legacy_cli_spellings_and_effective_environment": 6,
+        "tests.test_instra_sep30_feedback::test_chart_routes_hide_disabled_plastic_and_preserve_enabled_or_legacy_data": 1,
+        "tests.test_jpeg_like_v1_wrappers.JpegLikeV1WrapperTests::test_registry_comment_and_help_expose_new_contract": 1,
+        "tests.test_jpeg_like_v1_wrappers.JpegLikeV1WrapperTests::test_scruffy_dry_run_propagates_geometry_compressor_group_and_y": 1,
+        "tests.test_karitane_restart_launcher.KaritaneRestartLauncherTests::test_launcher_has_valid_shell_syntax_and_calls_dedicated_resume_module": 1,
+        "tests.test_layer_dropout_wrappers.LayerDropoutWrapperTests::test_long_forms_and_forwarding_are_present": 1,
+        "tests.test_layer_dropout_wrappers.LayerDropoutWrapperTests::test_short_layer_dropout_controls_are_native_getopts": 1,
+        "tests.test_modified_fast_discard_false::test_stage4_update_is_equivalent_and_releases_materializations": 1,
+        "tests.test_optimizer_wrapper.OptimizerWrapperTests::test_existing_run_scruffy_scripts_remain_present": 1,
+        "tests.test_optimizer_wrapper.OptimizerWrapperTests::test_full_wrappers_retain_body_and_native_optimizer_help": 1,
+        "tests.test_optimizer_wrapper.OptimizerWrapperTests::test_help_contains_old_and_new_controls": 1,
+        "tests.test_optimizer_wrapper.OptimizerWrapperTests::test_long_optimizer_controls_and_explicit_lr_override": 1,
+        "tests.test_optimizer_wrapper.OptimizerWrapperTests::test_short_optimizer_control_uses_optimizer_defaults": 1,
+        "tests.test_picton_cli_wrapper_contract::test_picton_canonical_host_wrappers_share_the_same_getopts_letters_and_long_options": 1,
+        "tests.test_picton_cli_wrapper_contract::test_picton_all_known_shell_wrappers_are_syntactically_valid": 1,
+        "tests.test_picton_wrapper_defaults_and_nonfinite_policy::test_current_training_wrappers_default_to_fast_discard_eval_100_and_checkpoint_1000": 1,
+        "tests.test_plastic_depth_interfaces::test_obsolete_hold_control_and_internal_sampling_seed_are_not_public_cli_options": 1,
+        "tests.test_resume_and_fork_cli_compatibility.ResumeAndForkCliCompatibilityTests::test_lifecycle_parser_accepts_all_preserved_master_long_controls": 1,
+        "tests.test_semantic_qkv_adapter_bypass_option::test_bypass_semantic_qkv_adapter_false_selects_legacy_adapter_path": 1,
+        "tests.test_sheet_stage3_compatibility.Stage3CompatibilityTests::test_s3_09_incompatible_checkpoint_rejection": 1,
+        "tests.test_sheet_stage6_runner_scripts.RunnerScriptTests::test_s6_33_dense_runner_resolves_canonical_identity_and_shared_defaults": 1,
+        "tests.test_sheet_stage6_runner_scripts.RunnerScriptTests::test_s6_34_depth_runner_ignores_non_depth_orders_by_default": 1,
+        "tests.test_stage6_plastic_depth_progress::test_plastic_probe_losses_score_z_sample_layer_and_samples_are_ordered": 1,
+        "tests.test_stage6_plastic_depth_progress::test_huge_score_z_uses_fixed_width_scientific_not_row_blowout": 1,
+        "tests.test_stage6_plastic_depth_progress::test_optimizer_progress_omits_depth_samples_when_absent": 1,
+        "tests.test_stage6_plastic_depth_progress::test_optimizer_progress_omits_probe_losses_when_absent": 1,
+        "tests.test_stage6_plastic_depth_progress::test_optimizer_progress_omits_score_z_when_absent": 1,
+        "tests.test_stage6_plastic_depth_progress::test_missing_edge_probe_loss_and_score_z_use_dash_placeholders_and_green_only": 1,
+        "tests.test_stage8_mlp_channel_order_and_wrapper_loops::test_stage8_training_wrappers_use_final_preset_as_single_architecture_selector": 1,
+        "tests.test_stage8_mlp_channel_order_and_wrapper_loops::test_stage8_training_wrappers_share_the_six_order_letters": 1,
+        "tests.test_stage8_mlp_channel_order_and_wrapper_loops::test_stage8_training_wrappers_loop_dense_once_and_compact_presets_across_depth_orders": 1,
+        "tests.test_stage8_training_instrumentation_selector::test_stage8_training_wrappers_expose_one_unambiguous_instrumentation_selector": 1,
+        "tests.test_stage8_wrapper_shell_syntax::test_stage8_training_wrappers_make_logging_backend_and_schedule_controls_explicit": 1,
+        "tests.test_stage8_wrapper_shell_syntax::test_stage8_training_wrappers_expose_all_six_semantic_order_controls": 1,
+        "tests.test_stage8_wrapper_shell_syntax::test_stage8_training_wrappers_auto_correct_dense_residual_source": 1,
+        "tests.test_stage8_wrappers_and_run_config::test_stage8_run_config_records_dct_full_block_identity_in_manifest_and_artifact_name": 1,
+        "tests.test_stage8_wrappers_and_run_config::test_stage8_semantic_order_defaults_are_recorded_in_manifest_identity_and_training_config": 1,
+        "tests.test_stage8_wrappers_and_run_config::test_stage8_semantic_order_overrides_are_recorded_in_manifest_artifact_identity_and_training_config": 1,
+        "tests.test_thogopt_integration::test_public_cli_history_arguments_and_reset_scope": 1,
+        "tests.test_thogopt_lifecycle::test_fresh_resume_reset_fork_and_capture": 1,
+        "tests.test_train_owt_public_wrapper.PublicTrainOwtWrapperTests::test_fresh_dry_run_preserves_master_cli_and_aligns_startup_values": 1,
+        "tests.test_vectorise_per_head_materialisation::test_training_wrappers_expose_default_on_vectorise_per_head_materialisation_without_getopts_letter": 1,
+        "tests.test_wrapper_learning_rate_and_batch_grids::test_run_config_artifact_contains_two_digit_learning_rate_code": 1,
+        "tests.test_wrapper_learning_rate_and_batch_grids::test_run_config_default_learning_rate_uses_lr_60_artifact_code": 1,
+        "tests.test_wrapper_learning_rate_and_batch_grids::test_wrappers_expose_lr_and_min_lr_codes_and_nest_lr_and_batch_grid_axes": 1
+      }
+    },
+    "introduced_failing_cases": [],
+    "failure_counts_identical": true,
+    "exclusions": [
+      "tests/test_instra_firefox_acceptance.py",
+      "tests/test_instra_firefox_heatmap_diagnostics.py",
+      "tests/test_instra_firefox_maximize_history.py",
+      "tests/test_instra_firefox_weight_controls.py",
+      "tests/test_instra_firefox_workspace_range.py",
+      "tests/test_resume_and_fork_ddp_integration.py",
+      "tests/test_sheet_stage5_ddp.py",
+      "tests/test_sheet_stage5_failures.py"
+    ],
+    "exclusion_reason": "Old Python browser harnesses require a different browser installation; equivalent modern browser coverage ran separately below. Socket-based DDP cases are checked separately in this restricted runtime."
+  },
+  "isolated_stage_and_resume_python": {
+    "candidate": {
+      "junit_summary": {
+        "tests": 524,
+        "failures": 28,
+        "errors": 0,
+        "skipped": 9
+      },
+      "seconds": 151.701,
+      "test_cases": 289,
+      "passed_cases": 252,
+      "failed_cases": 28,
+      "failures": {
+        "tests.test_sheet_stage3_compatibility.Stage3CompatibilityTests::test_s3_09_incompatible_checkpoint_rejection": 1,
+        "tests.test_sheet_stage5_ddp.Stage5DdpTests::test_s5_08_ddp_construction_identity": 1,
+        "tests.test_sheet_stage5_ddp.Stage5DdpTests::test_s5_09_ddp_update_matches_single_process_global_batch": 1,
+        "tests.test_sheet_stage5_ddp.Stage5DdpTests::test_s5_10_ddp_state_remains_synchronized": 1,
+        "tests.test_sheet_stage5_ddp.Stage5DdpTests::test_s5_11_ddp_resume_preserves_lifecycle_and_state": 1,
+        "tests.test_sheet_stage5_ddp.Stage5DdpTests::test_s5_12_uneven_checkpoint_segment_boundary_under_ddp": 1,
+        "tests.test_sheet_stage5_failures.Stage5FailurePropagationTests::test_s5_rank_local_nonfinite_state_fails_collectively": 1,
+        "tests.test_sheet_stage5_failures.Stage5FailurePropagationTests::test_s5_structure_disagreement_fails_all_ranks_without_hang": 1,
+        "tests.test_sheet_stage6_runner_scripts.RunnerScriptTests::test_s6_33_dense_runner_resolves_canonical_identity_and_shared_defaults": 1,
+        "tests.test_sheet_stage6_runner_scripts.RunnerScriptTests::test_s6_34_depth_runner_ignores_non_depth_orders_by_default": 1,
+        "tests.test_stage6_plastic_depth_progress::test_plastic_probe_losses_score_z_sample_layer_and_samples_are_ordered": 1,
+        "tests.test_stage6_plastic_depth_progress::test_huge_score_z_uses_fixed_width_scientific_not_row_blowout": 1,
+        "tests.test_stage6_plastic_depth_progress::test_optimizer_progress_omits_depth_samples_when_absent": 1,
+        "tests.test_stage6_plastic_depth_progress::test_optimizer_progress_omits_probe_losses_when_absent": 1,
+        "tests.test_stage6_plastic_depth_progress::test_optimizer_progress_omits_score_z_when_absent": 1,
+        "tests.test_stage6_plastic_depth_progress::test_missing_edge_probe_loss_and_score_z_use_dash_placeholders_and_green_only": 1,
+        "tests.test_stage8_mlp_channel_order_and_wrapper_loops::test_stage8_training_wrappers_use_final_preset_as_single_architecture_selector": 1,
+        "tests.test_stage8_mlp_channel_order_and_wrapper_loops::test_stage8_training_wrappers_share_the_six_order_letters": 1,
+        "tests.test_stage8_mlp_channel_order_and_wrapper_loops::test_stage8_training_wrappers_loop_dense_once_and_compact_presets_across_depth_orders": 1,
+        "tests.test_stage8_training_instrumentation_selector::test_stage8_training_wrappers_expose_one_unambiguous_instrumentation_selector": 1,
+        "tests.test_stage8_wrapper_shell_syntax::test_stage8_training_wrappers_make_logging_backend_and_schedule_controls_explicit": 1,
+        "tests.test_stage8_wrapper_shell_syntax::test_stage8_training_wrappers_expose_all_six_semantic_order_controls": 1,
+        "tests.test_stage8_wrapper_shell_syntax::test_stage8_training_wrappers_auto_correct_dense_residual_source": 1,
+        "tests.test_stage8_wrappers_and_run_config::test_stage8_run_config_records_dct_full_block_identity_in_manifest_and_artifact_name": 1,
+        "tests.test_stage8_wrappers_and_run_config::test_stage8_semantic_order_defaults_are_recorded_in_manifest_identity_and_training_config": 1,
+        "tests.test_stage8_wrappers_and_run_config::test_stage8_semantic_order_overrides_are_recorded_in_manifest_artifact_identity_and_training_config": 1,
+        "tests.test_resume_and_fork_cli_compatibility.ResumeAndForkCliCompatibilityTests::test_lifecycle_parser_accepts_all_preserved_master_long_controls": 1,
+        "tests.test_resume_and_fork_ddp_integration.ResumeAndForkDdpIntegrationTests::test_two_rank_cpu_resume_preserves_logical_run": 1
+      }
+    },
+    "baseline": {
+      "junit_summary": {
+        "tests": 524,
+        "failures": 28,
+        "errors": 0,
+        "skipped": 9
+      },
+      "seconds": 152.027,
+      "test_cases": 289,
+      "passed_cases": 252,
+      "failed_cases": 28,
+      "failures": {
+        "tests.test_sheet_stage3_compatibility.Stage3CompatibilityTests::test_s3_09_incompatible_checkpoint_rejection": 1,
+        "tests.test_sheet_stage5_ddp.Stage5DdpTests::test_s5_08_ddp_construction_identity": 1,
+        "tests.test_sheet_stage5_ddp.Stage5DdpTests::test_s5_09_ddp_update_matches_single_process_global_batch": 1,
+        "tests.test_sheet_stage5_ddp.Stage5DdpTests::test_s5_10_ddp_state_remains_synchronized": 1,
+        "tests.test_sheet_stage5_ddp.Stage5DdpTests::test_s5_11_ddp_resume_preserves_lifecycle_and_state": 1,
+        "tests.test_sheet_stage5_ddp.Stage5DdpTests::test_s5_12_uneven_checkpoint_segment_boundary_under_ddp": 1,
+        "tests.test_sheet_stage5_failures.Stage5FailurePropagationTests::test_s5_rank_local_nonfinite_state_fails_collectively": 1,
+        "tests.test_sheet_stage5_failures.Stage5FailurePropagationTests::test_s5_structure_disagreement_fails_all_ranks_without_hang": 1,
+        "tests.test_sheet_stage6_runner_scripts.RunnerScriptTests::test_s6_33_dense_runner_resolves_canonical_identity_and_shared_defaults": 1,
+        "tests.test_sheet_stage6_runner_scripts.RunnerScriptTests::test_s6_34_depth_runner_ignores_non_depth_orders_by_default": 1,
+        "tests.test_stage6_plastic_depth_progress::test_plastic_probe_losses_score_z_sample_layer_and_samples_are_ordered": 1,
+        "tests.test_stage6_plastic_depth_progress::test_huge_score_z_uses_fixed_width_scientific_not_row_blowout": 1,
+        "tests.test_stage6_plastic_depth_progress::test_optimizer_progress_omits_depth_samples_when_absent": 1,
+        "tests.test_stage6_plastic_depth_progress::test_optimizer_progress_omits_probe_losses_when_absent": 1,
+        "tests.test_stage6_plastic_depth_progress::test_optimizer_progress_omits_score_z_when_absent": 1,
+        "tests.test_stage6_plastic_depth_progress::test_missing_edge_probe_loss_and_score_z_use_dash_placeholders_and_green_only": 1,
+        "tests.test_stage8_mlp_channel_order_and_wrapper_loops::test_stage8_training_wrappers_use_final_preset_as_single_architecture_selector": 1,
+        "tests.test_stage8_mlp_channel_order_and_wrapper_loops::test_stage8_training_wrappers_share_the_six_order_letters": 1,
+        "tests.test_stage8_mlp_channel_order_and_wrapper_loops::test_stage8_training_wrappers_loop_dense_once_and_compact_presets_across_depth_orders": 1,
+        "tests.test_stage8_training_instrumentation_selector::test_stage8_training_wrappers_expose_one_unambiguous_instrumentation_selector": 1,
+        "tests.test_stage8_wrapper_shell_syntax::test_stage8_training_wrappers_make_logging_backend_and_schedule_controls_explicit": 1,
+        "tests.test_stage8_wrapper_shell_syntax::test_stage8_training_wrappers_expose_all_six_semantic_order_controls": 1,
+        "tests.test_stage8_wrapper_shell_syntax::test_stage8_training_wrappers_auto_correct_dense_residual_source": 1,
+        "tests.test_stage8_wrappers_and_run_config::test_stage8_run_config_records_dct_full_block_identity_in_manifest_and_artifact_name": 1,
+        "tests.test_stage8_wrappers_and_run_config::test_stage8_semantic_order_defaults_are_recorded_in_manifest_identity_and_training_config": 1,
+        "tests.test_stage8_wrappers_and_run_config::test_stage8_semantic_order_overrides_are_recorded_in_manifest_artifact_identity_and_training_config": 1,
+        "tests.test_resume_and_fork_cli_compatibility.ResumeAndForkCliCompatibilityTests::test_lifecycle_parser_accepts_all_preserved_master_long_controls": 1,
+        "tests.test_resume_and_fork_ddp_integration.ResumeAndForkDdpIntegrationTests::test_two_rank_cpu_resume_preserves_logical_run": 1
+      }
+    },
+    "introduced_failing_cases": [],
+    "failure_counts_identical": true
+  },
+  "javascript": {
+    "suites": 42,
+    "passed": 42,
+    "results": {
+      "instra_aug30_enhancements_regression.js": {
+        "exit": 0,
+        "output": "instra August 30 enhancements regression: PASS\n"
+      },
+      "instra_cpu_evidence_regression.js": {
+        "exit": 0,
+        "output": "PASS independent prediction/readiness markers, censored CPU intervals, unknown-clock omission and legacy phase totals\n"
+      },
+      "instra_dashboard_consistency_final_regression.js": {
+        "exit": 0,
+        "output": "instra dashboard consistency final regression: PASS\n"
+      },
+      "instra_dashboard_feature_regression.js": {
+        "exit": 0,
+        "output": "PASS palette, trash, no-data chart, dual throughput z and reset-zoom regressions\n"
+      },
+      "instra_dashboard_performance_regression.js": {
+        "exit": 0,
+        "output": "instra dashboard performance regression: PASS\n"
+      },
+      "instra_further_enhancements_regression.js": {
+        "exit": 0,
+        "output": "instra further enhancements regression: PASS\n"
+      },
+      "instra_grid_chart_regression.js": {
+        "exit": 0,
+        "output": "PASS Grid shades, independent eyes and multi-Grid loss merge\n"
+      },
+      "instra_heatmap_performance_regression.js": {
+        "exit": 0,
+        "output": "instra heatmap performance regression: PASS\n"
+      },
+      "instra_host_grid_identity_regression.js": {
+        "exit": 0,
+        "output": "PASS host-qualified legacy eyes/colours and shared durable Grid UUIDs\n"
+      },
+      "instra_legacy_heatmap_repair_regression.js": {
+        "exit": 0,
+        "output": "instra legacy heatmap repair regression: PASS\n"
+      },
+      "instra_metric_group_state_regression.js": {
+        "exit": 0,
+        "output": "instra metric group state regression: PASS\n"
+      },
+      "instra_network_host_controls_regression.js": {
+        "exit": 0,
+        "output": "PASS Networks discovery, host removal with Master, local-only Master and masked SSH reconnect\n"
+      },
+      "instra_oct01_history_downloads_regression.js": {
+        "exit": 0,
+        "output": "PASS parallel/retry/live/legacy elapsed clocks and immutable estimate ranges\nPASS HSL Grid and hex override picker initialization/reset\n"
+      },
+      "instra_premat_playback_regression.js": {
+        "exit": 0,
+        "output": "PASS 6-microstep completion, 180-microstep queue protection, bounded backlog, pause, Skip, latest mode, overrides, reset, 384 CPU outcomes and legacy event recovery\n"
+      },
+      "instra_processing_pair_state_regression.js": {
+        "exit": 0,
+        "output": "PASS full startup pairing, sticky first claims, fallback companions, throughput-only runs and explicit unpairing\n"
+      },
+      "instra_processing_quiescence_regression.js": {
+        "exit": 0,
+        "output": "PASS Processing redraw batching and hidden-tab quiescence\n"
+      },
+      "instra_processing_update_timing_regression.js": {
+        "exit": 0,
+        "output": "PASS complete-update pair labels, ordering, matching, PREMAT parsing and cache invalidation\n"
+      },
+      "instra_processing_user_fixes_regression.js": {
+        "exit": 0,
+        "output": "PASS paired downloads, resource headings, maximize controls, dynamic comparison refresh and compact chart geometry\n"
+      },
+      "instra_regression_repair.js": {
+        "exit": 0,
+        "output": "instra legacy heatmap repair regression: PASS\n"
+      },
+      "instra_run_sort_and_poll_regression.js": {
+        "exit": 0,
+        "output": "PASS ordinal heading sorting and bounded catalogue polling\n"
+      },
+      "instra_runner_current_grid_regression.js": {
+        "exit": 0,
+        "output": "PASS Runner ordering, retained History/Log, active scoped Multiview, grey icons and maximized chart selection\n"
+      },
+      "instra_runner_followup_regression.js": {
+        "exit": 0,
+        "output": "PASS Runner automatic placement and required-field diagnostics, History visibility, Runs S segment value\n"
+      },
+      "instra_sep01_enhancements_regression.js": {
+        "exit": 0,
+        "output": "instra September 1 behaviour regression: PASS\n"
+      },
+      "instra_sep01_repair_regression.js": {
+        "exit": 0,
+        "output": "instra September 1 refresh/range repair regression: PASS\n"
+      },
+      "instra_sep02_enhancements_regression.js": {
+        "exit": 0,
+        "output": "instra September 2 columns/metric controls regression: PASS\n"
+      },
+      "instra_sep02_followup_regression.js": {
+        "exit": 0,
+        "output": "instra follow-up percentage/navigation/icons regression: PASS\n"
+      },
+      "instra_sep20_runtime_owner_regression.js": {
+        "exit": 0,
+        "output": "PASS bounded September runtime owners, stable redraw path and trash restoration\n"
+      },
+      "instra_sep21_user_requests_regression.js": {
+        "exit": 0,
+        "output": "PASS September 21 Instra user-request contracts\n"
+      },
+      "instra_sep30_feedback_regression.js": {
+        "exit": 0,
+        "output": "PASS category enables/order/search membership, progressive loss and cancellation of obsolete 40-run selections\n"
+      },
+      "instra_sep30_ui_regression.js": {
+        "exit": 0,
+        "output": "PASS duration units, all field options, immediate syntax/choice validation, History outcomes and distinct persistent Grid hues\nPASS string axis titles and 1000 unchanged layout passes without redraw\n"
+      },
+      "instra_system_visibility_regression.js": {
+        "exit": 0,
+        "output": "PASS System remains visible for missing, loading and unreadable data; recovers when metrics arrive and survives run changes\n"
+      },
+      "instra_thogopt_regression.js": {
+        "exit": 0,
+        "output": "PASS thogopt history groups, run switching, latest requests, signed differences, precision, bounded matrix windows, standard/maximized inspector actions\n"
+      },
+      "instra_weight_coupling_regression.js": {
+        "exit": 0,
+        "output": "instra weight coupling regression: PASS\n"
+      },
+      "instra_weight_inspector_regression.js": {
+        "exit": 0,
+        "output": "instra weight inspector data and event regressions: PASS\n"
+      },
+      "instra_weight_persistence_log_regression.js": {
+        "exit": 0,
+        "output": "instra weight persistence/log regression: PASS\n"
+      },
+      "instra_weight_precision_regression.js": {
+        "exit": 0,
+        "output": "instra weight inspection precision persistence regression: PASS\n"
+      },
+      "instra_weight_range_interaction_regression.js": {
+        "exit": 0,
+        "output": "instra weight range interaction regression: PASS\n"
+      },
+      "instra_weight_request_router_regression.js": {
+        "exit": 0,
+        "output": "instra weight request router regression: PASS\n"
+      },
+      "instra_weight_runtime_loader_regression.js": {
+        "exit": 0,
+        "output": "instra bounded runtime loader regression: PASS\n"
+      },
+      "instra_weight_stability_regression.js": {
+        "exit": 0,
+        "output": "instra weight stability regression: PASS\n"
+      },
+      "instra_weight_step_filter_regression.js": {
+        "exit": 0,
+        "output": "instra bounded runtime loader regression: PASS\ninstra weight request router regression: PASS\ninstra weight stability regression: PASS\n"
+      },
+      "instra_workspace_weight_overlay_regression.js": {
+        "exit": 0,
+        "output": "instra workspace weight overlay regression: PASS\n"
+      }
+    }
+  },
+  "browser": {
+    "recipes_playback": [
+      {
+        "browser": "chromium",
+        "native_popups": true,
+        "valid_option_help": true,
+        "sweeps": true,
+        "save_variants": 4,
+        "state_colours": [
+          {
+            "state": "ready",
+            "key": "rgb(22, 131, 59)",
+            "cell": "rgb(22, 131, 59)"
+          },
+          {
+            "state": "queued",
+            "key": "rgb(22, 131, 59)",
+            "cell": "rgb(22, 131, 59)"
+          },
+          {
+            "state": "dispatching",
+            "key": "rgb(22, 131, 59)",
+            "cell": "rgb(22, 131, 59)"
+          },
+          {
+            "state": "running",
+            "key": "rgb(22, 131, 59)",
+            "cell": "rgb(22, 131, 59)"
+          },
+          {
+            "state": "blocked",
+            "key": "rgb(37, 40, 45)",
+            "cell": "rgb(37, 40, 45)"
+          },
+          {
+            "state": "stopping",
+            "key": "rgb(37, 40, 45)",
+            "cell": "rgb(37, 40, 45)"
+          },
+          {
+            "state": "flushing",
+            "key": "rgb(179, 38, 46)",
+            "cell": "rgb(179, 38, 46)"
+          },
+          {
+            "state": "unknown",
+            "key": "rgb(179, 38, 46)",
+            "cell": "rgb(179, 38, 46)"
+          },
+          {
+            "state": "completed",
+            "key": "rgb(179, 38, 46)",
+            "cell": "rgb(179, 38, 46)"
+          },
+          {
+            "state": "failed",
+            "key": "rgb(179, 38, 46)",
+            "cell": "rgb(179, 38, 46)"
+          },
+          {
+            "state": "cancelled",
+            "key": "rgb(179, 38, 46)",
+            "cell": "rgb(179, 38, 46)"
+          }
+        ],
+        "skip": true,
+        "playback_mode": true,
+        "page_errors": []
+      },
+      {
+        "browser": "firefox",
+        "native_popups": true,
+        "valid_option_help": true,
+        "sweeps": true,
+        "save_variants": 4,
+        "state_colours": [
+          {
+            "state": "ready",
+            "key": "rgb(22, 131, 59)",
+            "cell": "rgb(22, 131, 59)"
+          },
+          {
+            "state": "queued",
+            "key": "rgb(22, 131, 59)",
+            "cell": "rgb(22, 131, 59)"
+          },
+          {
+            "state": "dispatching",
+            "key": "rgb(22, 131, 59)",
+            "cell": "rgb(22, 131, 59)"
+          },
+          {
+            "state": "running",
+            "key": "rgb(22, 131, 59)",
+            "cell": "rgb(22, 131, 59)"
+          },
+          {
+            "state": "blocked",
+            "key": "rgb(37, 40, 45)",
+            "cell": "rgb(37, 40, 45)"
+          },
+          {
+            "state": "stopping",
+            "key": "rgb(37, 40, 45)",
+            "cell": "rgb(37, 40, 45)"
+          },
+          {
+            "state": "flushing",
+            "key": "rgb(179, 38, 46)",
+            "cell": "rgb(179, 38, 46)"
+          },
+          {
+            "state": "unknown",
+            "key": "rgb(179, 38, 46)",
+            "cell": "rgb(179, 38, 46)"
+          },
+          {
+            "state": "completed",
+            "key": "rgb(179, 38, 46)",
+            "cell": "rgb(179, 38, 46)"
+          },
+          {
+            "state": "failed",
+            "key": "rgb(179, 38, 46)",
+            "cell": "rgb(179, 38, 46)"
+          },
+          {
+            "state": "cancelled",
+            "key": "rgb(179, 38, 46)",
+            "cell": "rgb(179, 38, 46)"
+          }
+        ],
+        "skip": true,
+        "playback_mode": true,
+        "page_errors": []
+      }
+    ],
+    "microsteps_nsight": [
+      {
+        "browser": "chromium",
+        "nsight_controls": true,
+        "automatic_values": true,
+        "cpu_tab": true,
+        "saved_recipe": true,
+        "microstep_queue": true,
+        "history": true,
+        "column_migration": true,
+        "page_errors": []
+      },
+      {
+        "browser": "firefox",
+        "nsight_controls": true,
+        "automatic_values": true,
+        "cpu_tab": true,
+        "saved_recipe": true,
+        "microstep_queue": true,
+        "history": true,
+        "column_migration": true,
+        "page_errors": []
+      }
+    ],
+    "cpu_evidence_soak": [
+      {
+        "browser": "chromium",
+        "cpu_evidence": true,
+        "recap": true,
+        "downloads": 4,
+        "zoom": true,
+        "maximize": true,
+        "legend": true,
+        "runner": true,
+        "soak_seconds": 60,
+        "iterations": 129,
+        "before": {
+          "dom": 3925,
+          "trace": 3,
+          "areas": {
+            "local_metric_690af5cb": 27,
+            "training_throughput_card": 193,
+            "processing_resource_card": 219,
+            "processing_timeline_card": 218,
+            "processing_compatibility_card": 150,
+            "processing_contention_card": 150,
+            "processing_throughput": 200,
+            "processing_update_timing_timeline_card": 15,
+            "processing_update_timing_microsteps_card": 15,
+            "processing_update_timing_summary_card": 34,
+            "processing_matrix_summary_card": 73,
+            "processing_cpu_summary_card": 96,
+            "heatmap": 22,
+            "attn_q_head_N": 24,
+            "attn_k_head_N": 24,
+            "attn_v_head_N": 24,
+            "attn_out_head_N": 24,
+            "mlp_up": 24,
+            "mlp_down": 24,
+            "width_energy": 21,
+            "width_probes": 21,
+            "width_curves": 21
+          }
+        },
+        "after": {
+          "dom": 3925,
+          "trace": 3,
+          "areas": {
+            "local_metric_690af5cb": 27,
+            "training_throughput_card": 193,
+            "processing_resource_card": 219,
+            "processing_timeline_card": 218,
+            "processing_compatibility_card": 150,
+            "processing_contention_card": 150,
+            "processing_throughput": 200,
+            "processing_update_timing_timeline_card": 15,
+            "processing_update_timing_microsteps_card": 15,
+            "processing_update_timing_summary_card": 34,
+            "processing_matrix_summary_card": 73,
+            "processing_cpu_summary_card": 96,
+            "heatmap": 22,
+            "attn_q_head_N": 24,
+            "attn_k_head_N": 24,
+            "attn_v_head_N": 24,
+            "attn_out_head_N": 24,
+            "mlp_up": 24,
+            "mlp_down": 24,
+            "width_energy": 21,
+            "width_probes": 21,
+            "width_curves": 21
+          }
+        },
+        "page_errors": []
+      },
+      {
+        "browser": "firefox",
+        "cpu_evidence": true,
+        "recap": true,
+        "downloads": 4,
+        "zoom": true,
+        "maximize": true,
+        "legend": true,
+        "runner": true,
+        "soak_seconds": 60,
+        "iterations": 122,
+        "before": {
+          "dom": 3930,
+          "trace": 3,
+          "areas": {
+            "local_metric_690af5cb": 27,
+            "training_throughput_card": 193,
+            "processing_resource_card": 224,
+            "processing_timeline_card": 218,
+            "processing_compatibility_card": 150,
+            "processing_contention_card": 150,
+            "processing_throughput": 200,
+            "processing_update_timing_timeline_card": 15,
+            "processing_update_timing_microsteps_card": 15,
+            "processing_update_timing_summary_card": 34,
+            "processing_matrix_summary_card": 73,
+            "processing_cpu_summary_card": 96,
+            "heatmap": 22,
+            "attn_q_head_N": 24,
+            "attn_k_head_N": 24,
+            "attn_v_head_N": 24,
+            "attn_out_head_N": 24,
+            "mlp_up": 24,
+            "mlp_down": 24,
+            "width_energy": 21,
+            "width_probes": 21,
+            "width_curves": 21
+          }
+        },
+        "after": {
+          "dom": 3930,
+          "trace": 3,
+          "areas": {
+            "local_metric_690af5cb": 27,
+            "training_throughput_card": 193,
+            "processing_resource_card": 224,
+            "processing_timeline_card": 218,
+            "processing_compatibility_card": 150,
+            "processing_contention_card": 150,
+            "processing_throughput": 200,
+            "processing_update_timing_timeline_card": 15,
+            "processing_update_timing_microsteps_card": 15,
+            "processing_update_timing_summary_card": 34,
+            "processing_matrix_summary_card": 73,
+            "processing_cpu_summary_card": 96,
+            "heatmap": 22,
+            "attn_q_head_N": 24,
+            "attn_k_head_N": 24,
+            "attn_v_head_N": 24,
+            "attn_out_head_N": 24,
+            "mlp_up": 24,
+            "mlp_down": 24,
+            "width_energy": 21,
+            "width_probes": 21,
+            "width_curves": 21
+          }
+        },
+        "page_errors": []
+      }
+    ],
+    "legacy_cpu_fields": [
+      {
+        "browser": "firefox",
+        "cpu_controls": 8,
+        "typing": true,
+        "tabs": true,
+        "search": true,
+        "sweep": true,
+        "saved": true,
+        "page_errors": []
+      }
+    ],
+    "legacy_settings": {
+      "firefox": [
+        "PASS width label, adjacent blue D/r, retained table, and data invalidation",
+        "PASS settings layout, collapsed pending data, explicit resume and all four colour bands",
+        "PASS registered hover options, Chebyshev/DCT equivalence, Save to New Name and state colours"
+      ],
+      "chromium": [
+        "PASS width label, adjacent blue D/r, retained table, and data invalidation",
+        "PASS settings layout, collapsed pending data, explicit resume and all four colour bands",
+        "PASS registered hover options, Chebyshev/DCT equivalence, Save to New Name and state colours"
+      ]
+    }
+  },
+  "syntax_checks": [
+    "Python compileall sheet and run_thog2_owt_core.py",
+    "node --check dashboard_runner.js",
+    "node --check dashboard_premat.js",
+    "bash -n train_OWT_core.sh",
+    "git diff --check"
+  ],
+  "notes": [
+    "JUnit counts include pytest subtests; passed_cases and failed_cases count ordinary testcase elements. Existing failed testcase identities and failure counts match the baseline exactly.",
+    "The focused suite has one inherited chart route failure (test_instra_sep30_feedback.py::test_chart_routes_hide_disabled_plastic_and_preserve_enabled_or_legacy_data), independently reproduced at the base commit.",
+    "CPU worker outcome tests use the actual scheduler with mocked CUDA readiness; no live GPU run or performance/speedup claim was possible.",
+    "The 384-use / 219-hit / 165-miss scenario is an explicit synthetic regression fixture, not a verification of the user's historical run.",
+    "Both browser soak runs retain stable DOM and Plotly trace counts and report no page errors."
+  ]
+}

@@ -64,7 +64,13 @@
     "kind": "dimension",
     "options_help": "chebyshev, dct, haar, lapped_cosine",
     "short": "-B",
-    "type": "string"
+    "type": "string",
+    "suggestions": [
+      "chebyshev",
+      "dct",
+      "haar",
+      "lapped_cosine"
+    ]
   },
   "--basis-version": {
     "category": "Geometry",
@@ -73,7 +79,14 @@
     "kind": "dimension",
     "options_help": "auto; chebyshev: chebyshev_first_kind_roots_v1; dct: dct_ii_orthonormal_v1; haar: haar_balanced_binary_orthonormal_v1; lapped_cosine: lapped_cosine_dc_preserving_orthonormal_v1; lapped_cosine_dc_preserving_orthonormal_v1_wN_o500 (even window N >= 2); the version must match the selected compressor",
     "short": "-v",
-    "type": "string"
+    "type": "string",
+    "suggestions": [
+      "auto",
+      "chebyshev_first_kind_roots_v1",
+      "dct_ii_orthonormal_v1",
+      "haar_balanced_binary_orthonormal_v1",
+      "lapped_cosine_dc_preserving_orthonormal_v1"
+    ]
   },
   "--batch-size": {
     "category": "GPT-2 Hyperparameters",
@@ -275,7 +288,7 @@
   },
   "--dropout": {
     "category": "GPT-2 Hyperparameters",
-    "default": 0.0,
+    "default": 0,
     "help": "model dropout probability",
     "kind": "dimension",
     "type": "float"
@@ -393,7 +406,7 @@
   },
   "--grad-clip": {
     "category": "GPT-2 Hyperparameters",
-    "default": 1.0,
+    "default": 1,
     "help": "gradient-norm clipping threshold",
     "kind": "dimension",
     "type": "float"
@@ -470,7 +483,14 @@
     "help": "auto or an exact registered version Chebyshev uses endpoint-clustered root nodes and direct normalization. It is mathematically equivalent to DCT-II up to ordering and signs; these are no longer distinct basis choices. Training quality requires experiments.",
     "kind": "dimension",
     "options_help": "auto; chebyshev: chebyshev_first_kind_roots_v1; dct: dct_ii_orthonormal_v1; haar: haar_balanced_binary_orthonormal_v1; lapped_cosine: lapped_cosine_dc_preserving_orthonormal_v1; lapped_cosine_dc_preserving_orthonormal_v1_wN_o500 (even window N >= 2); the version must match the selected compressor",
-    "type": "string"
+    "type": "string",
+    "suggestions": [
+      "auto",
+      "chebyshev_first_kind_roots_v1",
+      "dct_ii_orthonormal_v1",
+      "haar_balanced_binary_orthonormal_v1",
+      "lapped_cosine_dc_preserving_orthonormal_v1"
+    ]
   },
   "--hyperblock-d-model-order": {
     "category": "Geometry",
@@ -495,7 +515,7 @@
   },
   "--hyperblock-loop-decay": {
     "category": "Geometry",
-    "default": 1.0,
+    "default": 1,
     "help": "recurrent update decay in (0,1]",
     "kind": "dimension",
     "type": "float"
@@ -858,7 +878,10 @@
     "default": null,
     "help": "required zero-based absolute layer for NCU capture",
     "kind": "fixed",
-    "type": "int"
+    "type": "int",
+    "extra_categories": [
+      "CPU Premat"
+    ]
   },
   "--no-activation-checkpointing": {
     "alias_for": "--activation-checkpointing",
@@ -1120,7 +1143,7 @@
   },
   "--plastic__layer_count_cost_weight": {
     "category": "Variable Depth",
-    "default": 0.0,
+    "default": 0,
     "help": "layer-cost penalty weight",
     "kind": "dimension",
     "type": "float"
@@ -1161,7 +1184,7 @@
   },
   "--plastic__layer_count_probe_noise_lambda": {
     "category": "Variable Depth",
-    "default": 3.0,
+    "default": 3,
     "help": "directional_coherence robust significance threshold; ignored by Sen/Kendall and jump modes",
     "kind": "dimension",
     "type": "float"
@@ -1270,7 +1293,10 @@
     "default": "disabled",
     "help": "enable dynamic CUDA-stream pre-materialisation; default disabled",
     "kind": "dimension",
-    "type": "string"
+    "type": "string",
+    "extra_categories": [
+      "CPU Premat"
+    ]
   },
   "--premat_allocator_aware_admission": {
     "category": "Premat",
@@ -1283,7 +1309,10 @@
     "default": "disabled",
     "help": "disabled | cautious | normal | aggressive",
     "kind": "dimension",
-    "type": "string"
+    "type": "string",
+    "extra_categories": [
+      "CPU Premat"
+    ]
   },
   "--premat_attention_mode": {
     "category": "Premat",
@@ -1294,7 +1323,10 @@
     "default": "fused",
     "help": "attention materialisation mode; default fused",
     "kind": "dimension",
-    "type": "string"
+    "type": "string",
+    "extra_categories": [
+      "CPU Premat"
+    ]
   },
   "--premat_cuda_stream_priority": {
     "category": "Premat",
@@ -1305,21 +1337,30 @@
     "default": "normal",
     "help": "Premat CUDA dispatch priority; default normal",
     "kind": "dimension",
-    "type": "string"
+    "type": "string",
+    "extra_categories": [
+      "CPU Premat"
+    ]
   },
   "--premat_diagnostic_layer_delay_ms": {
     "category": "Premat",
-    "default": 0.0,
+    "default": 0,
     "help": "Diagnostic host-dispatch delay after each non-final layer; default 0",
     "kind": "fixed",
-    "type": "float"
+    "type": "float",
+    "extra_categories": [
+      "CPU Premat"
+    ]
   },
   "--premat_enable_gpu_timing_diagnostic": {
     "category": "Premat",
     "default": false,
     "help": "collect expensive CUDA timestamp/classification diagnostics",
     "kind": "fixed",
-    "type": "bool_value"
+    "type": "bool_value",
+    "extra_categories": [
+      "CPU Premat"
+    ]
   },
   "--premat_enable_shadow_mode": {
     "category": "Premat",
@@ -1330,24 +1371,33 @@
   },
   "--premat_gpu_memory_buffer_gb": {
     "category": "Premat",
-    "default": 1.0,
+    "default": 1,
     "help": "global CUDA reserve shared with memory_budget",
     "kind": "dimension",
-    "type": "float"
+    "type": "float",
+    "extra_categories": [
+      "CPU Premat"
+    ]
   },
   "--premat_headroom_stay_below_current_peak": {
     "category": "Premat",
     "default": null,
     "help": "admit only below the observed CUDA allocation peak",
     "kind": "dimension",
-    "type": "flag"
+    "type": "flag",
+    "extra_categories": [
+      "CPU Premat"
+    ]
   },
   "--premat_headroom_stay_within_global_buffer": {
     "category": "Premat",
     "default": null,
     "help": "admit only within the configured global reserve",
     "kind": "dimension",
-    "type": "flag"
+    "type": "flag",
+    "extra_categories": [
+      "CPU Premat"
+    ]
   },
   "--premat_instra": {
     "category": "Premat",
@@ -1358,7 +1408,10 @@
     "default": "disabled",
     "help": "publish PREMAT data to the local Instra dashboard",
     "kind": "fixed",
-    "type": "string"
+    "type": "string",
+    "extra_categories": [
+      "CPU Premat"
+    ]
   },
   "--premat_logging": {
     "category": "Premat",
@@ -1369,7 +1422,10 @@
     "default": "disabled",
     "help": "write PREMAT scheduler history",
     "kind": "fixed",
-    "type": "string"
+    "type": "string",
+    "extra_categories": [
+      "CPU Premat"
+    ]
   },
   "--premat_processing_logging": {
     "category": "NSIGHT",
@@ -1381,7 +1437,10 @@
     "help": "run bounded Nsight Processing capture",
     "kind": "fixed",
     "options_help": "enabled, disabled",
-    "type": "string"
+    "type": "string",
+    "extra_categories": [
+      "CPU Premat"
+    ]
   },
   "--premat_processing_profiler": {
     "category": "NSIGHT",
@@ -1389,18 +1448,24 @@
       "nsys",
       "ncu"
     ],
-    "default": null,
-    "help": "select temporal NSYS or structural NCU capture",
-    "kind": "automatic",
+    "default": "nsys",
+    "help": "Nsight collector: nsys records a temporal trace; ncu replays selected CUDA kernels for structural resource measurements. Profiling mode sets this field automatically. A pair uses nsys for its first run and ncu for its second run.",
+    "kind": "fixed",
     "options_help": "nsys, ncu",
-    "type": "string"
+    "type": "string",
+    "extra_categories": [
+      "CPU Premat"
+    ]
   },
   "--premat_retain_detailed_premat_history": {
     "category": "Premat",
     "default": false,
     "help": "retain per-event PREMAT history",
     "kind": "fixed",
-    "type": "bool_value"
+    "type": "bool_value",
+    "extra_categories": [
+      "CPU Premat"
+    ]
   },
   "--premat_target_layer": {
     "category": "Premat",
@@ -1413,15 +1478,29 @@
     "default": 1,
     "help": "relative target; 10 means ordered +1 then +0 sweep",
     "kind": "dimension",
-    "type": "int"
+    "type": "int",
+    "extra_categories": [
+      "CPU Premat"
+    ]
   },
   "--premat_target_matrix": {
     "category": "Premat",
     "default": null,
     "help": "optional comma-separated QKV/O/UP/DOWN selector combination",
     "kind": "list",
-    "options_help": "one text value per line",
-    "type": "list"
+    "options_help": "1=QKV, 2=O, 3=UP, 4=DOWN; comma-separated combinations, for example 2,4; blank targets all families",
+    "type": "list",
+    "extra_categories": [
+      "CPU Premat"
+    ],
+    "suggestions": [
+      "1",
+      "2",
+      "3",
+      "4",
+      "2,4",
+      "1,2,3,4"
+    ]
   },
   "--premat_timing": {
     "category": "Premat",
@@ -1443,7 +1522,10 @@
     "default": "r_to_l",
     "help": "matrix submission order; default r_to_l",
     "kind": "dimension",
-    "type": "string"
+    "type": "string",
+    "extra_categories": [
+      "CPU Premat"
+    ]
   },
   "--print-artifact-name": {
     "category": "Run Control Parameters",
@@ -1714,7 +1796,13 @@
     "help": "Independent fixed depth basis, used with select-depth. Chebyshev uses endpoint-clustered root nodes and direct normalization. It is mathematically equivalent to DCT-II up to ordering and signs; these are no longer distinct basis choices. Training quality requires experiments.",
     "kind": "fixed",
     "options_help": "chebyshev, dct, haar, lapped_cosine; also family@version using the corresponding registered version",
-    "type": "str"
+    "type": "str",
+    "suggestions": [
+      "chebyshev",
+      "dct",
+      "haar",
+      "lapped_cosine"
+    ]
   },
   "DEPTH.compressor_version": {
     "category": "Geometry",
@@ -1723,7 +1811,14 @@
     "help": "Exact independent depth basis version. Chebyshev uses endpoint-clustered root nodes and direct normalization. It is mathematically equivalent to DCT-II up to ordering and signs; these are no longer distinct basis choices. Training quality requires experiments.",
     "kind": "fixed",
     "options_help": "auto; chebyshev: chebyshev_first_kind_roots_v1; dct: dct_ii_orthonormal_v1; haar: haar_balanced_binary_orthonormal_v1; lapped_cosine: lapped_cosine_dc_preserving_orthonormal_v1; lapped_cosine_dc_preserving_orthonormal_v1_wN_o500 (even window N >= 2); the version must match the selected compressor",
-    "type": "str"
+    "type": "str",
+    "suggestions": [
+      "auto",
+      "chebyshev_first_kind_roots_v1",
+      "dct_ii_orthonormal_v1",
+      "haar_balanced_binary_orthonormal_v1",
+      "lapped_cosine_dc_preserving_orthonormal_v1"
+    ]
   },
   "DEPTH.order": {
     "category": "Geometry",
@@ -1740,7 +1835,13 @@
     "help": "Independent width basis from the shared registry; family@version is accepted. Chebyshev uses endpoint-clustered root nodes and direct normalization. It is mathematically equivalent to DCT-II up to ordering and signs; these are no longer distinct basis choices. Training quality requires experiments.",
     "kind": "fixed",
     "options_help": "chebyshev, dct, haar, lapped_cosine; also family@version using the corresponding registered version",
-    "type": "str"
+    "type": "str",
+    "suggestions": [
+      "chebyshev",
+      "dct",
+      "haar",
+      "lapped_cosine"
+    ]
   },
   "WIDTH.compressor_version": {
     "category": "Geometry",
@@ -1749,7 +1850,14 @@
     "help": "Resolved exact width basis version; saved version controls compatible resume. Chebyshev uses endpoint-clustered root nodes and direct normalization. It is mathematically equivalent to DCT-II up to ordering and signs; these are no longer distinct basis choices. Training quality requires experiments.",
     "kind": "fixed",
     "options_help": "auto; chebyshev: chebyshev_first_kind_roots_v1; dct: dct_ii_orthonormal_v1; haar: haar_balanced_binary_orthonormal_v1; lapped_cosine: lapped_cosine_dc_preserving_orthonormal_v1; lapped_cosine_dc_preserving_orthonormal_v1_wN_o500 (even window N >= 2); the version must match the selected compressor",
-    "type": "str"
+    "type": "str",
+    "suggestions": [
+      "auto",
+      "chebyshev_first_kind_roots_v1",
+      "dct_ii_orthonormal_v1",
+      "haar_balanced_binary_orthonormal_v1",
+      "lapped_cosine_dc_preserving_orthonormal_v1"
+    ]
   },
   "WIDTH.order": {
     "category": "Geometry",
@@ -1759,5 +1867,189 @@
     "kind": "dimension",
     "options_help": "integers from 2 through D (--n-embd), including 512 and 1024 when D=1024",
     "type": "int"
+  },
+  "--premat_materialisation_device": {
+    "category": "Premat",
+    "kind": "dimension",
+    "type": "string",
+    "default": "gpu",
+    "help": "Select existing GPU PREMAT or CPU preparation with mandatory non-waiting ordinary GPU fallback.",
+    "options_help": "gpu, cpu_and_gpu",
+    "choices": [
+      "gpu",
+      "cpu_and_gpu"
+    ],
+    "extra_categories": [
+      "CPU Premat"
+    ]
+  },
+  "--premat_cpu_preparation": {
+    "category": "CPU Premat",
+    "kind": "dimension",
+    "type": "string",
+    "default": "eager",
+    "help": "Choose CPU preparation trigger independently of upload timing and layer batch.",
+    "options_help": "eager, scheduled, demand_driven",
+    "choices": [
+      "eager",
+      "scheduled",
+      "demand_driven"
+    ],
+    "cpu_only": true
+  },
+  "--premat_cpu_layer_batch_size": {
+    "category": "CPU Premat",
+    "kind": "dimension",
+    "type": "string",
+    "default": "single_layer",
+    "help": "single_layer, all_layers (every physical layer 1..L for selected families), or integer >= 2.",
+    "options_help": "single_layer, all_layers, or an integer >= 2 (layers per CPU task)",
+    "cpu_only": true,
+    "suggestions": [
+      "single_layer",
+      "all_layers",
+      "2",
+      "4",
+      "8"
+    ]
+  },
+  "--premat_cpu_workers": {
+    "category": "CPU Premat",
+    "kind": "dimension",
+    "type": "int",
+    "default": 1,
+    "help": "Separate spawned CPU workers with shared snapshots and matrix banks; no CUDA contexts.",
+    "options_help": "integers >= 1, within the CPU affinity thread budget",
+    "cpu_only": true
+  },
+  "--premat_cpu_threads_per_worker": {
+    "category": "CPU Premat",
+    "kind": "dimension",
+    "type": "int",
+    "default": 0,
+    "help": "Native computation threads per worker. 0 resolves from CPU affinity and reserves a training core.",
+    "options_help": "0 (automatic) or integers >= 1, within the CPU affinity thread budget",
+    "cpu_only": true
+  },
+  "--premat_cpu_transfer_timing": {
+    "category": "CPU Premat",
+    "kind": "dimension",
+    "type": "string",
+    "default": "as_the_code_flies",
+    "help": "Choose GPU upload timing. Completed copies alone qualify as FULL HIT; predicted mode is approximate.",
+    "options_help": "as_the_code_flies, previous_gemm_leading_edge, as_soon_as_ready, demand_driven, predicted_gemm_start",
+    "choices": [
+      "as_the_code_flies",
+      "previous_gemm_leading_edge",
+      "as_soon_as_ready",
+      "demand_driven",
+      "predicted_gemm_start"
+    ],
+    "cpu_only": true
+  },
+  "--premat_cpu_transfer_lead_ms": {
+    "category": "CPU Premat",
+    "kind": "dimension",
+    "type": "float",
+    "default": 0,
+    "help": "Non-negative intended availability lead before predicted GEMM. Applies only to predicted_gemm_start.",
+    "options_help": "finite numbers >= 0; active only with predicted_gemm_start",
+    "cpu_only": true,
+    "predicted_only": true
+  },
+  "--premat_cpu_staging_limit_mb": {
+    "category": "CPU Premat",
+    "kind": "dimension",
+    "type": "float",
+    "default": 0,
+    "help": "GPU storage cap in MiB, including pending destinations, copies and autograd retention. 0 resolves to two selected layer sets.",
+    "options_help": "0 (automatic: two selected layer sets) or finite positive numbers in MiB",
+    "cpu_only": true
+  },
+  "--premat_cpu_checkpoint_replay": {
+    "category": "CPU Premat",
+    "kind": "dimension",
+    "type": "string",
+    "default": "disabled",
+    "help": "Permit CPU matrices only for actual checkpoint replay segments; preserve checkpoint size, RNG and early stop.",
+    "options_help": "enabled, disabled",
+    "choices": [
+      "enabled",
+      "disabled"
+    ],
+    "cpu_only": true
+  },
+  "--premat_instra_microsteps": {
+    "category": "Premat",
+    "kind": "fixed",
+    "type": "string",
+    "choices": [
+      "all",
+      "first"
+    ],
+    "default": "all",
+    "extra_categories": [
+      "CPU Premat"
+    ],
+    "help": "PREMAT Recapitulation, inspector and history capture all original-forward accumulation microsteps by default. first keeps only the first microstep of each sampled optimiser step and reduces capture overhead. The update sampling interval remains --log-interval; use 1 to capture every step."
+  },
+  "--premat_processing_logging_capture_frequency_hz": {
+    "category": "NSIGHT",
+    "kind": "fixed",
+    "type": "int",
+    "default": 10000,
+    "help": "NSYS GPU metric sample frequency in Hz; default 10000. Applies to NSYS; NCU measures kernel resource use rather than a sample timeline.",
+    "extra_categories": [
+      "CPU Premat"
+    ]
+  },
+  "--premat_processing_logging_capture_update": {
+    "category": "NSIGHT",
+    "kind": "fixed",
+    "type": "int",
+    "default": 1,
+    "help": "Positive optimiser step to profile, independent of --log-interval. Profiling mode defaults to step 10 (or the shortest run's final step when fewer than 10). Preserve an explicit step; it must not exceed --max-iters. CPU NSYS with full-step timing captures all forwards, backwards and the optimiser at this step; other processing scopes capture the first forward microstep.",
+    "extra_categories": [
+      "CPU Premat"
+    ]
+  },
+  "--premat_instra__full_step_timing_capture_and_chart": {
+    "category": "NSIGHT",
+    "kind": "fixed",
+    "type": "string",
+    "choices": [
+      "enable",
+      "disable"
+    ],
+    "default": "disable",
+    "help": "Enable bounded full-optimiser-step timing and its Processing charts. Profiling mode defaults this to enable. Includes all accumulation forwards/backwards and the optimiser; NCU kernel replay distorts elapsed timings, so use the NSYS half of a pair for timing comparisons.",
+    "extra_categories": [
+      "CPU Premat"
+    ]
+  },
+  "--premat_instra__full_step_timing_capture_and_chart_capture": {
+    "category": "NSIGHT",
+    "kind": "fixed",
+    "type": "string",
+    "default": null,
+    "help": "Exact full-step timing capture: enter step N, for example step 10. Requires full-step timing enable. Blank uses the final optimiser step. Profiling mode defaults it to the Processing capture step; CPU NSYS requires the two capture steps to agree.",
+    "extra_categories": [
+      "CPU Premat"
+    ],
+    "options_help": "Enter step N, where N is a positive optimiser update within --max-iters. Example: step 10. Profiling supplies the processing capture update by default."
+  },
+  "--premat_instra_playback": {
+    "category": "Premat",
+    "choices": [
+      "complete_step",
+      "latest"
+    ],
+    "default": "complete_step",
+    "extra_categories": [
+      "CPU Premat"
+    ],
+    "help": "finish all captured microsteps of the current optimiser step or follow latest data; default complete_step; chart button can override",
+    "kind": "fixed",
+    "type": "string"
   }
 }
