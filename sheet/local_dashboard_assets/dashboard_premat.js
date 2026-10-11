@@ -23,6 +23,9 @@ const premat_view = {
   request_serial: 0,
   latest_received_update: 0,
   pending_snapshots: [],
+  playback_mode: "complete_step",
+  playback_override: null,
+  skip_to_latest: false,
   latest_received_micro_step: -1,
   history_latest_micro_step: -1,
   active_snapshot: null,
@@ -290,6 +293,7 @@ function premat_build_model(snapshot) {
   };
 
   const events = [...(snapshot.events || [])]
+    .map(event => snapshot.materialisation_device === "cpu_and_gpu" && event.event_type ? {...event, event:event.event_type} : event)
     .filter(event => snapshot.materialisation_device !== "cpu_and_gpu" || (event.phase || "original_forward") === "original_forward")
     .sort((left, right) => Number(left.sequence) - Number(right.sequence));
   for (const event of events) {
@@ -447,7 +451,7 @@ function premat_detailed_history_retained(snapshot) {
 // vvv THOG every chart, history row and export identifies its original-forward microstep
 function premat_micro_step(snapshot) { return Number(snapshot?.micro_step ?? 0); }
 function premat_snapshot_key(snapshot) { return `${Number(snapshot?.optimizer_update ?? 0)}:${premat_micro_step(snapshot)}`; }
-function premat_snapshot_label(snapshot) { return `Microstep ${premat_micro_step(snapshot)+1} of Step ${Number(snapshot?.optimizer_update ?? 0)}`; }
+function premat_snapshot_label(snapshot) { return `Microstep ${premat_micro_step(snapshot)+1} of Optimiser Step ${Number(snapshot?.optimizer_update ?? 0)}`; }
 function premat_compare_snapshots(left,right) { return Number(left?.optimizer_update ?? 0)-Number(right?.optimizer_update ?? 0) || premat_micro_step(left)-premat_micro_step(right); }
 // ^^^ THOG
 function premat_history_model(snapshots) {
@@ -1026,6 +1030,7 @@ function premat_clear_timer() {
 }
 
 function premat_finish_playback() {
+  premat_clear_timer();
   premat_view.playback_running = false;
   if (premat_view.playing && premat_view.pending_snapshots.length) {
     premat_start_snapshot(premat_view.pending_snapshots.shift());
@@ -1308,15 +1313,65 @@ function premat_start_snapshot(snapshot) {
   premat_advance_playback();
 }
 
+// vvv THOG complete-step playback protects the active step's siblings under sustained incoming data
+function premat_sync_playback_mode() {
+  const button = by_id("premat_playback_mode");
+  if (!button) return;
+  const complete = premat_view.playback_mode === "complete_step";
+  button.textContent = complete ? "Complete optimiser step" : "Latest data";
+  button.setAttribute("aria-pressed", String(complete));
+  button.title = "Complete optimiser step: finish every retained microstep before advancing. Latest data: interrupt playback for the newest complete microstep. Click to switch. Skip jumps to the newest received data without changing this mode.";
+}
+
+function premat_trim_pending_snapshots() {
+  // Discard whole future steps only; never drop a sibling of the active step or split the newest step.
+  const active_update = Number(premat_view.active_snapshot?.optimizer_update ?? 0);
+  const newest_update = Number(premat_view.pending_snapshots.at(-1)?.optimizer_update ?? 0);
+  if (premat_view.pending_snapshots.length > 128)
+    premat_view.pending_snapshots = premat_view.pending_snapshots.filter(snapshot =>
+      Number(snapshot.optimizer_update) === active_update || Number(snapshot.optimizer_update) === newest_update);
+}
+
+function premat_skip_playback() {
+  premat_clear_timer();
+  premat_view.playback_running = false;
+  premat_view.playing = true;
+  premat_sync_play_button();
+  premat_view.skip_to_latest = true;
+  const newest = premat_view.pending_snapshots.pop();
+  premat_view.pending_snapshots = [];
+  if (newest) premat_start_snapshot(newest);
+  else by_id("premat_update").textContent = "Waiting for new data after Skip";
+  void refresh_premat();
+}
+
+function premat_toggle_playback_mode() {
+  premat_view.playback_mode = premat_view.playback_mode === "complete_step" ? "latest" : "complete_step";
+  premat_view.playback_override = premat_view.playback_mode;
+  premat_sync_playback_mode();
+  if (premat_view.playback_mode === "latest" && premat_view.playing && premat_view.pending_snapshots.length)
+    premat_skip_playback();
+}
+// ^^^ THOG
+
 function premat_receive_snapshot(snapshot) {
   if (!premat_snapshot_complete(snapshot)) return;
   const cursor={optimizer_update:premat_view.latest_received_update,micro_step:premat_view.latest_received_micro_step};
   if(premat_compare_snapshots(snapshot,cursor)<=0)return;
   premat_view.latest_received_update=Number(snapshot.optimizer_update ?? 0);
   premat_view.latest_received_micro_step=premat_micro_step(snapshot);
-  if(premat_view.playback_running || !premat_view.playing){
-    premat_view.pending_snapshots.push(snapshot);
-    if(premat_view.pending_snapshots.length>128)premat_view.pending_snapshots.shift();
+  if (!premat_view.playback_override) {
+    const run = typeof current_run === "function" ? current_run() : null;
+    const requested = snapshot.playback_mode || run?.configuration?.premat_instra_playback || "complete_step";
+    premat_view.playback_mode = requested === "latest" ? "latest" : "complete_step";
+    premat_sync_playback_mode();
+  }
+  if (!premat_view.playing || (premat_view.playback_running && premat_view.playback_mode === "complete_step")) {
+    if (premat_view.playback_mode === "latest") premat_view.pending_snapshots = [snapshot];
+    else {
+      premat_view.pending_snapshots.push(snapshot);
+      premat_trim_pending_snapshots();
+    }
     return;
   }
   premat_start_snapshot(snapshot);
@@ -1336,7 +1391,11 @@ function premat_toggle_playback() {
     premat_clear_timer();
     return;
   }
-  if (premat_view.playback_running) {
+  if (premat_view.playback_mode === "latest" && premat_view.pending_snapshots.length) {
+    const newest=premat_view.pending_snapshots.pop();
+    premat_view.pending_snapshots=[];
+    premat_start_snapshot(newest);
+  } else if (premat_view.playback_running) {
     premat_advance_playback();
   } else if (premat_view.pending_snapshots.length) {
     premat_start_snapshot(premat_view.pending_snapshots.shift());
@@ -1347,6 +1406,10 @@ function premat_reset() {
   premat_clear_timer();
   premat_view.latest_received_update = 0;
   premat_view.pending_snapshots = [];
+  premat_view.playback_mode = "complete_step";
+  premat_view.playback_override = null;
+  premat_view.skip_to_latest = false;
+  premat_sync_playback_mode();
   premat_view.latest_received_micro_step = -1;
   premat_view.history_latest_micro_step = -1;
   premat_view.active_snapshot = null;
@@ -1451,7 +1514,13 @@ async function refresh_premat_payload(signal) {
     const payload = await fetch_json(`/api/premat?run=${encodeURIComponent(run_id)}&after=${after}&after_micro=${premat_view.latest_received_micro_step}`, {signal});
     if (serial !== premat_view.request_serial || run_id !== app.current_run_id) return;
     if (payload?.latest || payload?.snapshots?.length) {
-      for(const snapshot of payload.snapshots || [payload.latest])premat_receive_snapshot(snapshot);
+      const snapshots=(payload.snapshots || [payload.latest]).filter(premat_snapshot_complete).sort(premat_compare_snapshots);
+      const requested=premat_view.playback_override || snapshots.at(-1)?.playback_mode ||
+        (typeof current_run === "function" ? current_run()?.configuration?.premat_instra_playback : null) || premat_view.playback_mode;
+      if (snapshots.length && (premat_view.skip_to_latest || requested === "latest")) {
+        premat_receive_snapshot(snapshots.at(-1));
+        premat_view.skip_to_latest = false;
+      } else for (const snapshot of snapshots) premat_receive_snapshot(snapshot);
       if (premat_view.active_panel === "history") void premat_load_history();
     }
   } catch (_error) {
@@ -1481,6 +1550,8 @@ window.addEventListener("DOMContentLoaded", () => {
   };
   duration?.addEventListener("input", update_duration);
   by_id("premat_play_toggle")?.addEventListener("click", premat_toggle_playback);
+  by_id("premat_playback_mode")?.addEventListener("click", premat_toggle_playback_mode);
+  by_id("premat_skip")?.addEventListener("click", premat_skip_playback);
   by_id("premat_inspect_button")?.addEventListener("click", () => {
     if (!premat_view.active_snapshot || !premat_view.active_model) return;
     if (!premat_detailed_history_retained(premat_view.active_snapshot)) {

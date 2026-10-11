@@ -1006,6 +1006,7 @@ def attach_telemetry(trainer: Any, telemetry: WandbTelemetry) -> None:
             captured_snapshot = dict(snapshot)
             captured_snapshot["optimizer_update"] = update
             captured_snapshot["capture_microsteps"] = vars(trainer.config).get("premat_instra_microsteps", "all")
+            captured_snapshot["playback_mode"] = vars(trainer.config).get("premat_instra_playback", "complete_step")
             live_sink.publish(update, captured_snapshot)
 
         def capture_premat_update(pass_sequence: int) -> bool:

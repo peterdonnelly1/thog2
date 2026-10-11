@@ -336,6 +336,7 @@ def test_public_cli_exposes_existing_options_and_nine_cpu_controls() -> None:
         "--premat_logging",
         "--premat_instra",
         "--premat_instra_microsteps",
+        "--premat_instra_playback",
         "--premat_retain_detailed_premat_history",
     }
 

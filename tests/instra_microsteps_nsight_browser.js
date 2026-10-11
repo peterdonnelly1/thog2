@@ -25,7 +25,7 @@ async function check(type){
   const field=key=>page.locator(`input[data-runner-field="${key}"]`);
   await category('CPU Premat');
   const keys=await page.locator('.runner-fields input[data-runner-field]').evaluateAll(nodes=>nodes.map(n=>n.dataset.runnerField));
-  assert.ok(keys.indexOf('--premat_cpu_workers')<keys.indexOf('--premat'),'pure CPU controls precede shared PREMAT controls');
+  assert.equal(keys[0],'--premat','PREMAT enable control must lead CPU Premat');
   await field('--premat').fill('enabled');await field('--premat_materialisation_device').fill('cpu_and_gpu');
   await category('NSIGHT');
   const mode=page.locator('[data-runner-profiling-mode]');await mode.selectOption('pair');
@@ -56,12 +56,12 @@ async function check(type){
   const queued=await page.evaluate(()=>[premat_view.active_snapshot,...premat_view.pending_snapshots].map(s=>s.micro_step));
   assert.deepEqual(queued,[0,1,2]);
   await page.evaluate(()=>{premat_finish_playback();premat_start_snapshot(premat_view.pending_snapshots.pop());premat_finish_playback();});
-  assert.equal(await page.locator('#premat_step').textContent(),'Microstep 3 of Step 11');
+  assert.equal(await page.locator('#premat_step').textContent(),'Microstep 3 of Optimiser Step 11');
   await page.setViewportSize({width:900,height:1000});
   await page.locator('#premat_history_button').click();
   await page.waitForFunction(()=>premat_view.history_snapshots.length===3);
   const labels=await page.locator('#premat_history_body [data-premat-history-step]').allTextContents();
-  assert.ok(labels.some(label=>label.includes('Microstep 3 of Step 11')));
+  assert.ok(labels.some(label=>label.includes('Microstep 3 of Optimiser Step 11')));
   const csv=await page.evaluate(()=>premat_history_csv(premat_view.history_model));
   assert.ok(csv.startsWith('"step","microstep",'));assert.ok(csv.includes('11,3,'));
   assert.deepEqual(errors,[]);

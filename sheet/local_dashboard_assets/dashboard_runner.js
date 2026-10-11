@@ -11,7 +11,7 @@
   const main_table_order = ["--geometry-preset", "--optimizer", "--n-layer", "DEPTH.order", "WIDTH.order", "--warmup-iters",
     "--block-size", "--n-embd", "--n-head", "--gradient-accumulation-steps", "--checkpoint-segment-size",
     "--learning-rate", "--min-lr", "--max-iters", "--batch-size", "--log-interval", "--eval-iters", "--eval-interval"];
-  const category_first_fields = {"CPU Premat":["--premat_materialisation_device", "--premat_cpu_preparation", "--premat_cpu_layer_batch_size", "--premat_cpu_workers", "--premat_cpu_threads_per_worker", "--premat_cpu_transfer_timing", "--premat_cpu_transfer_lead_ms", "--premat_cpu_staging_limit_mb", "--premat_cpu_checkpoint_replay", "--premat"], "NSIGHT":["--premat_processing_logging", "--premat_processing_profiler", "--premat_processing_logging_capture_update", "--premat_processing_logging_capture_frequency_hz", "--premat_instra__full_step_timing_capture_and_chart", "--premat_instra__full_step_timing_capture_and_chart_capture", "--ncu-probe-layer"], "Coarse":["--plastic__coarse_phase"],
+  const category_first_fields = {"CPU Premat":["--premat", "--premat_materialisation_device", "--premat_cpu_preparation", "--premat_cpu_layer_batch_size", "--premat_cpu_workers", "--premat_cpu_threads_per_worker", "--premat_cpu_transfer_timing", "--premat_cpu_transfer_lead_ms", "--premat_cpu_staging_limit_mb", "--premat_cpu_checkpoint_replay"], "NSIGHT":["--premat_processing_logging", "--premat_processing_profiler", "--premat_processing_logging_capture_update", "--premat_processing_logging_capture_frequency_hz", "--premat_instra__full_step_timing_capture_and_chart", "--premat_instra__full_step_timing_capture_and_chart_capture", "--ncu-probe-layer"], "Coarse":["--plastic__coarse_phase"],
     "Variable Depth":["--plastic__do_learn_layer_count","--no-plastic__do_learn_layer_count"],
     "Chaos Bumps":["--chaos_bump__sampling__enabled","--no-chaos_bump__sampling__enabled"]};
   const required_parameters = ["--geometry-preset", "--optimizer", "--n-layer", "--warmup-iters", "--block-size",
@@ -237,6 +237,8 @@
       const active=cpu_field_active(key,current_recipe().parameters || {});
       const automatic=["--premat_processing_profiler","--premat_processing_logging"].includes(key) && (current_recipe().profilers || []).some(mode=>mode!=="none");
       field.disabled=!active;field.readOnly=automatic;field.dataset.inactive=String(!active);
+      const picker=field.parentElement.querySelector(".runner-choice-picker");
+      if (picker) picker.disabled=!active || automatic || field.readOnly;
       field.title=field_help(spec || {})+(!active ? " Inactive for the selected materialisation provider or transfer timing; saved request retained." : "");
       if (spec) field.setAttribute("aria-invalid",String(Boolean(active && (invalid_field_value(key,field.value,spec) ||
         dense_only && spec.dense_compatible===false && field.value.trim()))));
@@ -303,10 +305,12 @@
     return completed && completed === grid.runs.length ? "complete" : completed ? "partial" : "none";
   }
   function field_help(spec) {
-    const options = spec.options_help || (spec.choices?.length ? spec.choices.join(", ") :
-      ["flag","bool_value"].includes(spec.type) ? "true, false" :
+    const choices = spec.choices?.length ? spec.choices.join(", ") : "";
+    const typed_options = ["flag","bool_value"].includes(spec.type) ? "true, false" :
       spec.type === "int" ? "nonnegative whole numbers" : spec.type === "float" ? "finite numbers" :
-      spec.kind === "list" ? "one text value per line" : "text values");
+      spec.kind === "list" ? "one text value per line" : "text values";
+    const options = choices ? choices + (spec.options_help && spec.options_help !== choices ? "; " + spec.options_help : "") :
+      spec.options_help || typed_options;
     return `${spec.help || ""}\nAvailable options: ${options}.${spec.kind === "dimension" ? " Use commas for a sweep." : ""}`;
   }
   function invalid_field_value(key, raw, spec) {
@@ -318,6 +322,8 @@
     if(key==="--premat_instra__full_step_timing_capture_and_chart_capture")return !/^step [1-9][0-9]*$/.test(raw.trim());
     return parts.some(part => {
       if (spec.choices?.length && !spec.choices.some(choice=>String(choice)===part)) return true;
+      if (key==="--premat_cpu_layer_batch_size" && !["single_layer","all_layers"].includes(part))
+        return !/^[1-9][0-9]*$/.test(part) || !Number.isSafeInteger(Number(part)) || Number(part)<2;
       // vvv THOG the width capture window alone admits the documented unbounded sentinel
       if (spec.type === "int") {
         if (key === "--instrumentation__width_activation_curves__end_step" && part === "-1") return false;
@@ -433,11 +439,37 @@ Explicit capture steps and other user settings are preserved. CPU NSYS with full
       });
       change_default.classList.add("runner-change-default");
       field.dataset.runnerField = key;
-      if (spec.choices?.length) {
+      // vvv THOG offer finite choices and open-ended suggestions on every applicable field
+      const suggestions=spec.suggestions || spec.choices || (["flag","bool_value"].includes(spec.type) ? ["true","false"] : []);
+      if (suggestions.length) {
         const options=add(label,"datalist");options.id="runner_choices_"+key.replace(/[^a-z0-9]/gi,"_");
-        for(const choice of spec.choices) {const item=add(options,"option");item.value=String(choice);}
+        for(const choice of suggestions) {const item=add(options,"option");item.value=String(choice);}
         field.setAttribute("list",options.id);
-      } // <<< THOG provide enum choices while retaining independent comma-separated sweeps
+      }
+      // ^^^ THOG
+      if (suggestions.length) {
+        const picker=add(label,"select",undefined,"runner-choice-picker");
+        picker.dataset.runnerChoices=key;
+        picker.setAttribute("aria-label",`Choose value for ${key}`);
+        picker.title=field_help(spec);
+        const prompt=add(picker,"option","Choices");prompt.value="";
+        for (const choice of suggestions) {
+          const option=add(picker,"option",String(choice));option.value=String(choice);
+        }
+        picker.addEventListener("change",()=>{
+          if (!picker.value || field.disabled || field.readOnly) return;
+          const separator=spec.kind==="list" ? "\n" : spec.kind==="dimension" ? "," : null;
+          const parts=separator ? field.value.split(separator).map(part=>part.trim()) : [];
+          if (parts.length>1) {
+            parts.pop();
+            if (!parts.includes(picker.value)) parts.push(picker.value);
+            field.value=parts.join(separator==="," ? ", " : "\n");
+          } else field.value=picker.value;
+          field.dispatchEvent(new Event("input",{bubbles:true}));
+          field.dispatchEvent(new Event("change",{bubbles:true}));
+          picker.value="";
+        });
+      }
       field.title=field_help(spec);
       field.value = Array.isArray(current_recipe().parameters[key]) ? current_recipe().parameters[key].join(spec.kind === "list" ? "\n" : ", ") :
         String(current_recipe().parameters[key] ?? "");
@@ -487,7 +519,7 @@ Explicit capture steps and other user settings are preserved. CPU NSYS with full
         const prior=snapshot.recipes.find(item=>item.recipe_id===draft_id);
         const recipe_id=editing_existing ? draft_id : prior && prior.recipe.label===current_recipe().label ? draft_id : null;
         const saved=await action(editing_existing ? "update_recipe" : "save",{recipe_id,recipe:current_recipe()});
-        draft_id=saved.recipe_id;draft=JSON.parse(JSON.stringify(saved.recipe));dirty=false;chosen=draft_id;render();
+        draft_id=saved.recipe_id;draft=JSON.parse(JSON.stringify(saved.recipe));dirty=false;chosen=draft_id;category="Frequently Used";render();
       }
       catch (_) { /* The error is displayed above. */ }
     });
@@ -526,7 +558,7 @@ Explicit capture steps and other user settings are preserved. CPU NSYS with full
           const prior=snapshot.recipes.find(item=>item.recipe_id===draft_id);
           const recipe_id=editing_existing ? draft_id : prior && prior.recipe.label===current_recipe().label ? draft_id : null;
           const saved=await action(editing_existing ? "update_recipe" : "save",{recipe_id,recipe:current_recipe()});
-          draft_id=saved.recipe_id;draft=JSON.parse(JSON.stringify(saved.recipe));dirty=false;
+          draft_id=saved.recipe_id;draft=JSON.parse(JSON.stringify(saved.recipe));dirty=false;category="Frequently Used";
         }
         const launched=await action("launch",{recipe_id:draft_id,confirm_large:preview.total_runs>100});
         last_history_grid=launched.grid_id;chosen=launched.grid_id;manual_grid_selection=true;tab="progress";render();
@@ -815,7 +847,7 @@ Explicit capture steps and other user settings are preserved. CPU NSYS with full
       const legend=add(detail,"p","Possible states are: ","runner-state-legend");
       const states=["ready","queued","dispatching","running","blocked","stopping","flushing","unknown","completed","failed","cancelled"];
       states.forEach((state,index)=>{
-        add(legend,"span",state,index<4 ? "runner-legend-green" : index>=6 ? "runner-legend-red" : "");
+        add(legend,"span",state,`runner-status runner-status-${state}`);
         legend.appendChild(document.createTextNode(index===states.length-1 ? "." : ", "));
       });
     }
@@ -1055,6 +1087,7 @@ Explicit capture steps and other user settings are preserved. CPU NSYS with full
     }
     view.classList.toggle("runner-full-width",tab==="multiview");
     view.classList.toggle("runner-history",tab==="history");
+    view.classList.toggle("runner-progress",tab==="progress");
     multiview.hidden=tab!=="multiview";
   }
   async function refresh(repaint=false) {

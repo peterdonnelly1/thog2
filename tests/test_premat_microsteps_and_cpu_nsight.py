@@ -82,7 +82,7 @@ def test_telemetry_sampling_retains_all_or_first_original_forward_microsteps(mon
     hooks={}
     runtime=SimpleNamespace(cpu_phase='original_forward')
     model=SimpleNamespace(_premat_runtime=runtime,set_premat_live_reporter=lambda publish,capture:hooks.update(publish=publish,capture=capture))
-    config=SimpleNamespace(premat_instra='enabled',premat_instra_microsteps=mode,log_interval=10,max_updates=20)
+    config=SimpleNamespace(premat_instra='enabled',premat_instra_microsteps=mode,premat_instra_playback='latest',log_interval=10,max_updates=20)
     trainer=SimpleNamespace(config=config,raw_model=model,state=SimpleNamespace(completed_updates=0),distributed=SimpleNamespace(is_primary=True),_print_progress=lambda *a,**k:None)
     telemetry=SimpleNamespace(config={},name='fixture')
     received=[]
@@ -102,6 +102,7 @@ def test_telemetry_sampling_retains_all_or_first_original_forward_microsteps(mon
     trainer.state.completed_updates=10
     hooks['publish'](snapshot(10,2,6))
     assert received[0][0]==10 and received[0][1]['micro_step']==2
+    assert received[0][1]['playback_mode']=='latest'
 
 
 def write_semantic(path,include_premat=False):

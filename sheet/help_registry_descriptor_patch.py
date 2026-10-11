@@ -147,6 +147,7 @@ _DESCRIPTOR_SECTIONS: Tuple[DescriptorSection, ...] = (
             ("—", "--premat_enable_gpu_timing_diagnostic true|false", "collect expensive CUDA timestamp/classification diagnostics"),
             ("—", "--premat_enable_shadow_mode true|false", "exercise scheduling without side-stream materialisation"),
             ("—", "--premat_logging enabled|disabled", "write PREMAT scheduler history"),
+            ("—", "--premat_instra_playback complete_step|latest", "finish all captured microsteps of the current optimiser step or follow latest data; default complete_step; chart button can override"),
             ("—", "--premat_instra enabled|disabled", "publish PREMAT data to the local Instra dashboard"),
             ("—", "--premat_retain_detailed_premat_history true|false", "retain per-event PREMAT history"),
             ("—", "--premat_processing_logging enabled|disabled", "run bounded Nsight Processing capture"),

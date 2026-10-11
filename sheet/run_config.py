@@ -276,6 +276,7 @@ class OwtRunConfig:
     # ^^^ THOG
     # vvv THOG PREMAT capture scope is an instrumentation choice, default all microsteps
     premat_instra_microsteps: str = "all"
+    premat_instra_playback: str = "complete_step"
     # ^^^ THOG
     premat_retain_detailed_premat_history: bool = False
     # ^^^ THOG
@@ -623,6 +624,10 @@ class OwtRunConfig:
             raise ValueError("plastic__layer_count_cost_weight must be finite and non-negative")
         if self.premat_target_layer == 10:
             object.__setattr__(self, "premat_weight_matrix_target_order", "r_to_l")
+        # vvv THOG playback affects presentation only
+        if self.premat_instra_playback not in ("complete_step", "latest"):
+            raise ValueError("premat_instra_playback must be complete_step or latest")
+        # ^^^ THOG
         if self.premat_instra_microsteps not in ("all", "first"):
             raise ValueError("premat_instra_microsteps must be all or first")
         if not isinstance(self.premat_retain_detailed_premat_history, bool):
@@ -1604,6 +1609,7 @@ class OwtRunConfig:
             premat_processing_logging_capture_update=self.premat_processing_logging_capture_update,                                                       # <<< THOG propagate requested Processing capture update into TrainingConfig
             # vvv THOG transfer the chart sampler without changing model arithmetic
             premat_instra_microsteps=self.premat_instra_microsteps,
+            premat_instra_playback=self.premat_instra_playback,
             # ^^^ THOG
             premat_retain_detailed_premat_history=self.premat_retain_detailed_premat_history,
             plastic__layer_count__cuda_allocator_reserve_gib=float(self.plastic__layer_count__cuda_allocator_reserve_gib),

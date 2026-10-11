@@ -76,7 +76,7 @@ ROW_ORDER_SCALING_RULE = "proportional_ceil_v1"
 MODEL_TYPES = ("dense", "thog2_sheet")
 # vvv THOG processing capture is diagnostic execution state, never checkpoint model identity
 # EXECUTION_OVERRIDE_FIELDS = {"instrumentation__optimizer_histories__full_matrix_every_n_steps", "device", "dtype", "max_updates", "max_wall_minutes", "eval_interval", "eval_batches", "checkpoint_interval", "checkpoint_segment_size", "out_dir", "log_interval", "nonfinite_update_policy", "max_nonfinite_update_skips", "premat_enable_gpu_timing_diagnostic"}
-EXECUTION_OVERRIDE_FIELDS = {"instrumentation__optimizer_histories__full_matrix_every_n_steps", "device", "dtype", "max_updates", "max_wall_minutes", "eval_interval", "eval_batches", "checkpoint_interval", "checkpoint_segment_size", "save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step", "out_dir", "log_interval", "nonfinite_update_policy", "max_nonfinite_update_skips", "premat_enable_gpu_timing_diagnostic", "premat_processing_logging", "premat_processing_logging_capture_frequency_hz", "premat_processing_logging_capture_update", "premat_instra_microsteps"}                         # <<< THOG processing and relay controls are execution state, never checkpoint model identity
+EXECUTION_OVERRIDE_FIELDS = {"instrumentation__optimizer_histories__full_matrix_every_n_steps", "device", "dtype", "max_updates", "max_wall_minutes", "eval_interval", "eval_batches", "checkpoint_interval", "checkpoint_segment_size", "save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step", "out_dir", "log_interval", "nonfinite_update_policy", "max_nonfinite_update_skips", "premat_enable_gpu_timing_diagnostic", "premat_processing_logging", "premat_processing_logging_capture_frequency_hz", "premat_processing_logging_capture_update", "premat_instra_microsteps", "premat_instra_playback"}                         # <<< THOG processing and relay controls are execution state, never checkpoint model identity
 # ^^^ THOG
 # vvv THOG PLASTIC DEPTH fields are omitted from persistent disabled-run metadata to preserve the exact pre-feature identity
 PLASTIC_TRAINING_CONFIG_FIELDS = (
@@ -337,6 +337,7 @@ class TrainingConfig:
     # ^^^ THOG
     # vvv THOG all accumulation microsteps are the default PREMAT chart capture unit
     premat_instra_microsteps: str = "all"
+    premat_instra_playback: str = "complete_step"
     # ^^^ THOG
     premat_retain_detailed_premat_history: bool = False
     # ^^^ THOG
@@ -629,6 +630,10 @@ class TrainingConfig:
         if self.premat_target_layer == 10:
             self.premat_weight_matrix_target_order = "r_to_l"
         # vvv THOG the optional first-microstep sampler changes instrumentation only
+        # vvv THOG playback affects presentation only
+        if self.premat_instra_playback not in ("complete_step", "latest"):
+            raise ValueError("premat_instra_playback must be complete_step or latest")
+        # ^^^ THOG
         if self.premat_instra_microsteps not in ("all", "first"):
             raise ValueError("premat_instra_microsteps must be all or first")
         # ^^^ THOG

@@ -624,12 +624,21 @@ class CpuPrematRuntime(PrematRuntime):
         payload = super()._record(event, **kwargs)
         if payload is not None:
             payload.update({"schema_version": 5, "materialisation_device": "cpu_and_gpu", "phase": self.cpu_phase, "snapshot_id": None if self.cpu_snapshot is None else self.cpu_snapshot.snapshot_id})
+            # vvv THOG worker provenance must not overwrite scheduler event identity, clocks or state
             if kwargs.get("candidate") is not None:
-                payload.update(getattr(kwargs["candidate"], "cpu_metadata", {}))
+                metadata = vars(kwargs["candidate"]).get("cpu_metadata", {})
+                payload.update({key: value for key, value in metadata.items() if key not in payload})
+                if "event" in metadata:
+                    payload["cpu_preparation_event"] = metadata["event"]
+                if "host_time_ns" in metadata:
+                    payload["cpu_preparation_host_time_ns"] = metadata["host_time_ns"]
+            # ^^^ THOG
         return payload
 
     def _candidate_payload(self, candidate):
-        return {**super()._candidate_payload(candidate), **getattr(candidate, "cpu_metadata", {})}
+        # vvv THOG live candidate state is authoritative over cached worker provenance
+        return {**vars(candidate).get("cpu_metadata", {}), **super()._candidate_payload(candidate)}
+        # ^^^ THOG
 
     def end(self):
         with self.cpu_lock:

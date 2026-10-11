@@ -82,6 +82,10 @@ jobs:
       - run: /tmp/instra-browser/node_modules/.bin/playwright install --with-deps chromium firefox
       - name: Runner CPU field typing, tabs, search and Recipe persistence
         run: PYTHONPATH=. python tests/run_instra_oct07_browser.py tests/instra_runner_cpu_fields_browser.js
+      - name: Recipe popups, Save behaviour, Progress colours and PREMAT playback
+        run: PYTHONPATH=. python tests/run_instra_oct07_browser.py tests/instra_recipes_playback_browser.js
+      - name: PREMAT microsteps and Nsight controls in Chromium and Firefox
+        run: PYTHONPATH=. python tests/run_instra_oct07_browser.py tests/instra_microsteps_nsight_browser.js
       - name: Chromium legacy settings and Runner
         env:
           INSTRA_TEST_BROWSER: chromium

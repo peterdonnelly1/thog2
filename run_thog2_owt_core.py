@@ -390,6 +390,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--processing_logging_capture_update_internal", "--processing-logging-capture-update-internal", dest="premat_processing_logging_capture_update", type=int, default=1, help=argparse.SUPPRESS)                    # <<< THOG exact optimizer update for bounded Nsight capture, including sitecustomize aliases
     # ^^^ THOG
     # vvv THOG expose microstep capture equally in Runner, direct CLI and wrapper forwarding
+    parser.add_argument("--premat_instra_playback", choices=("complete_step", "latest"), default="complete_step",
+                        help="PREMAT playback: finish every captured microstep of the current optimiser step (default), or immediately follow latest data; the chart button overrides this preference")
     parser.add_argument("--premat_instra_microsteps", choices=("all", "first"), default="all",
                         help="PREMAT charts: all microsteps (default), or only the first microstep of each sampled optimizer step; sampling still follows --log-interval")
     # ^^^ THOG
@@ -836,6 +838,7 @@ def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) 
         premat_processing_logging_capture_update=arguments.premat_processing_logging_capture_update,                                                       # <<< THOG pass explicit Processing capture update into resolved run configuration
         # vvv THOG preserve the requested chart capture unit in the run configuration
         premat_instra_microsteps=arguments.premat_instra_microsteps,
+        premat_instra_playback=arguments.premat_instra_playback,
         # ^^^ THOG
         premat_retain_detailed_premat_history=arguments.premat_retain_detailed_premat_history,
         plastic__layer_count__cuda_allocator_reserve_gib=arguments.plastic__layer_count__cuda_allocator_reserve_gib,

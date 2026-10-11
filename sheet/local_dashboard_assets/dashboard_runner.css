@@ -46,6 +46,11 @@
 .runner-fields label > span { grid-column:1 / -1; }
 .runner-fields label > input, .runner-fields label > select { grid-column:1; grid-row:2; }
 .runner-fields label > .runner-change-default, .runner-fields label > button { grid-column:2; grid-row:2; margin-left:.45rem; white-space:nowrap; font-size:.76rem; }
+/* vvv THOG native popup remains beside the editable scalar or sweep input */
+.runner-fields label:has(.runner-choice-picker) { grid-template-columns:minmax(0,32rem) auto auto; }
+.runner-fields label > .runner-choice-picker { grid-column:2; grid-row:2; width:auto; max-width:12rem; font-size:.8rem; }
+.runner-fields label:has(.runner-choice-picker) > .runner-change-default { grid-column:3; }
+/* ^^^ THOG */
 .runner-field-categories { grid-column:1 / -1; grid-row:3; color:#52667e; font-size:.75rem; }
 .runner-parameter-panel { margin-top:1.3rem; padding:1rem; border:1px solid #c5d1df; border-radius:8px; background:#f6f8fb; }
 .runner-parameter-panel > h3 { margin:0 0 .7rem; color:#344a63; font-size:1rem; }
@@ -84,10 +89,17 @@
 .runner-run summary { cursor:pointer; }
 .runner-run-identity, .runner-run-headings { display:grid; grid-template-columns:minmax(5rem,1fr) 8.5rem 10.8rem 10.8rem minmax(6rem,1fr) minmax(5rem,.8fr) minmax(5rem,.85fr) minmax(3.5rem,.6fr) minmax(4rem,.65fr) minmax(4rem,.65fr) minmax(7rem,1fr); gap:.65rem; align-items:center; } /* <<< THOG add aligned run start/end columns */
 .runner-run-headings { padding:.4rem .75rem; border-bottom:1px solid #68778a; }
+/* vvv THOG use the established Progress legend palette in both keys and State cells */
 .runner-status-running, .runner-status-completed { color:#147348; }
 .runner-status-failed, .runner-status-blocked, .runner-status-unknown, .runner-status-cancelled { color:#ad302b; }
-.runner-status-waiting { color:#aa6410; }
-.runner-status-flushing { color:#aa6410; }
+.runner-status-waiting, .runner-status-flushing { color:#aa6410; }
+.runner-progress .runner-status-ready, .runner-progress .runner-status-queued,
+.runner-progress .runner-status-dispatching, .runner-progress .runner-status-running { color:#16833b; }
+.runner-progress .runner-status-flushing, .runner-progress .runner-status-unknown,
+.runner-progress .runner-status-completed, .runner-progress .runner-status-failed,
+.runner-progress .runner-status-cancelled { color:#b3262e; }
+.runner-progress .runner-status-blocked, .runner-progress .runner-status-stopping { color:inherit; }
+/* ^^^ THOG */
 /* vvv THOG preserve recipe name width while making room for Edit; align Progress estimates */
 @media (min-width:900px) {
   .runner-recipes .runner-layout { grid-template-columns:minmax(19.5rem,calc(24% + 4.5rem)) minmax(20rem,1fr); }

@@ -64,7 +64,13 @@
     "kind": "dimension",
     "options_help": "chebyshev, dct, haar, lapped_cosine",
     "short": "-B",
-    "type": "string"
+    "type": "string",
+    "suggestions": [
+      "chebyshev",
+      "dct",
+      "haar",
+      "lapped_cosine"
+    ]
   },
   "--basis-version": {
     "category": "Geometry",
@@ -73,7 +79,14 @@
     "kind": "dimension",
     "options_help": "auto; chebyshev: chebyshev_first_kind_roots_v1; dct: dct_ii_orthonormal_v1; haar: haar_balanced_binary_orthonormal_v1; lapped_cosine: lapped_cosine_dc_preserving_orthonormal_v1; lapped_cosine_dc_preserving_orthonormal_v1_wN_o500 (even window N >= 2); the version must match the selected compressor",
     "short": "-v",
-    "type": "string"
+    "type": "string",
+    "suggestions": [
+      "auto",
+      "chebyshev_first_kind_roots_v1",
+      "dct_ii_orthonormal_v1",
+      "haar_balanced_binary_orthonormal_v1",
+      "lapped_cosine_dc_preserving_orthonormal_v1"
+    ]
   },
   "--batch-size": {
     "category": "GPT-2 Hyperparameters",
@@ -470,7 +483,14 @@
     "help": "auto or an exact registered version Chebyshev uses endpoint-clustered root nodes and direct normalization. It is mathematically equivalent to DCT-II up to ordering and signs; these are no longer distinct basis choices. Training quality requires experiments.",
     "kind": "dimension",
     "options_help": "auto; chebyshev: chebyshev_first_kind_roots_v1; dct: dct_ii_orthonormal_v1; haar: haar_balanced_binary_orthonormal_v1; lapped_cosine: lapped_cosine_dc_preserving_orthonormal_v1; lapped_cosine_dc_preserving_orthonormal_v1_wN_o500 (even window N >= 2); the version must match the selected compressor",
-    "type": "string"
+    "type": "string",
+    "suggestions": [
+      "auto",
+      "chebyshev_first_kind_roots_v1",
+      "dct_ii_orthonormal_v1",
+      "haar_balanced_binary_orthonormal_v1",
+      "lapped_cosine_dc_preserving_orthonormal_v1"
+    ]
   },
   "--hyperblock-d-model-order": {
     "category": "Geometry",
@@ -1431,7 +1451,7 @@
     "default": "nsys",
     "help": "Nsight collector: nsys records a temporal trace; ncu replays selected CUDA kernels for structural resource measurements. Profiling mode sets this field automatically. A pair uses nsys for its first run and ncu for its second run.",
     "kind": "fixed",
-    "options_help": "nsys, ncu; controlled by Profiling mode when NSYS/NCU is selected",
+    "options_help": "nsys, ncu",
     "type": "string",
     "extra_categories": [
       "CPU Premat"
@@ -1468,10 +1488,18 @@
     "default": null,
     "help": "optional comma-separated QKV/O/UP/DOWN selector combination",
     "kind": "list",
-    "options_help": "one text value per line",
+    "options_help": "1=QKV, 2=O, 3=UP, 4=DOWN; comma-separated combinations, for example 2,4; blank targets all families",
     "type": "list",
     "extra_categories": [
       "CPU Premat"
+    ],
+    "suggestions": [
+      "1",
+      "2",
+      "3",
+      "4",
+      "2,4",
+      "1,2,3,4"
     ]
   },
   "--premat_timing": {
@@ -1768,7 +1796,13 @@
     "help": "Independent fixed depth basis, used with select-depth. Chebyshev uses endpoint-clustered root nodes and direct normalization. It is mathematically equivalent to DCT-II up to ordering and signs; these are no longer distinct basis choices. Training quality requires experiments.",
     "kind": "fixed",
     "options_help": "chebyshev, dct, haar, lapped_cosine; also family@version using the corresponding registered version",
-    "type": "str"
+    "type": "str",
+    "suggestions": [
+      "chebyshev",
+      "dct",
+      "haar",
+      "lapped_cosine"
+    ]
   },
   "DEPTH.compressor_version": {
     "category": "Geometry",
@@ -1777,7 +1811,14 @@
     "help": "Exact independent depth basis version. Chebyshev uses endpoint-clustered root nodes and direct normalization. It is mathematically equivalent to DCT-II up to ordering and signs; these are no longer distinct basis choices. Training quality requires experiments.",
     "kind": "fixed",
     "options_help": "auto; chebyshev: chebyshev_first_kind_roots_v1; dct: dct_ii_orthonormal_v1; haar: haar_balanced_binary_orthonormal_v1; lapped_cosine: lapped_cosine_dc_preserving_orthonormal_v1; lapped_cosine_dc_preserving_orthonormal_v1_wN_o500 (even window N >= 2); the version must match the selected compressor",
-    "type": "str"
+    "type": "str",
+    "suggestions": [
+      "auto",
+      "chebyshev_first_kind_roots_v1",
+      "dct_ii_orthonormal_v1",
+      "haar_balanced_binary_orthonormal_v1",
+      "lapped_cosine_dc_preserving_orthonormal_v1"
+    ]
   },
   "DEPTH.order": {
     "category": "Geometry",
@@ -1794,7 +1835,13 @@
     "help": "Independent width basis from the shared registry; family@version is accepted. Chebyshev uses endpoint-clustered root nodes and direct normalization. It is mathematically equivalent to DCT-II up to ordering and signs; these are no longer distinct basis choices. Training quality requires experiments.",
     "kind": "fixed",
     "options_help": "chebyshev, dct, haar, lapped_cosine; also family@version using the corresponding registered version",
-    "type": "str"
+    "type": "str",
+    "suggestions": [
+      "chebyshev",
+      "dct",
+      "haar",
+      "lapped_cosine"
+    ]
   },
   "WIDTH.compressor_version": {
     "category": "Geometry",
@@ -1803,7 +1850,14 @@
     "help": "Resolved exact width basis version; saved version controls compatible resume. Chebyshev uses endpoint-clustered root nodes and direct normalization. It is mathematically equivalent to DCT-II up to ordering and signs; these are no longer distinct basis choices. Training quality requires experiments.",
     "kind": "fixed",
     "options_help": "auto; chebyshev: chebyshev_first_kind_roots_v1; dct: dct_ii_orthonormal_v1; haar: haar_balanced_binary_orthonormal_v1; lapped_cosine: lapped_cosine_dc_preserving_orthonormal_v1; lapped_cosine_dc_preserving_orthonormal_v1_wN_o500 (even window N >= 2); the version must match the selected compressor",
-    "type": "str"
+    "type": "str",
+    "suggestions": [
+      "auto",
+      "chebyshev_first_kind_roots_v1",
+      "dct_ii_orthonormal_v1",
+      "haar_balanced_binary_orthonormal_v1",
+      "lapped_cosine_dc_preserving_orthonormal_v1"
+    ]
   },
   "WIDTH.order": {
     "category": "Geometry",
@@ -1820,7 +1874,7 @@
     "type": "string",
     "default": "gpu",
     "help": "Select existing GPU PREMAT or CPU preparation with mandatory non-waiting ordinary GPU fallback.",
-    "options_help": "Select existing GPU PREMAT or CPU preparation with mandatory non-waiting ordinary GPU fallback.",
+    "options_help": "gpu, cpu_and_gpu",
     "choices": [
       "gpu",
       "cpu_and_gpu"
@@ -1835,7 +1889,7 @@
     "type": "string",
     "default": "eager",
     "help": "Choose CPU preparation trigger independently of upload timing and layer batch.",
-    "options_help": "Choose CPU preparation trigger independently of upload timing and layer batch.",
+    "options_help": "eager, scheduled, demand_driven",
     "choices": [
       "eager",
       "scheduled",
@@ -1849,8 +1903,15 @@
     "type": "string",
     "default": "single_layer",
     "help": "single_layer, all_layers (every physical layer 1..L for selected families), or integer >= 2.",
-    "options_help": "single_layer, all_layers (every physical layer 1..L for selected families), or integer >= 2.",
-    "cpu_only": true
+    "options_help": "single_layer, all_layers, or an integer >= 2 (layers per CPU task)",
+    "cpu_only": true,
+    "suggestions": [
+      "single_layer",
+      "all_layers",
+      "2",
+      "4",
+      "8"
+    ]
   },
   "--premat_cpu_workers": {
     "category": "CPU Premat",
@@ -1858,7 +1919,7 @@
     "type": "int",
     "default": 1,
     "help": "Separate spawned CPU workers with shared snapshots and matrix banks; no CUDA contexts.",
-    "options_help": "Separate spawned CPU workers with shared snapshots and matrix banks; no CUDA contexts.",
+    "options_help": "integers >= 1, within the CPU affinity thread budget",
     "cpu_only": true
   },
   "--premat_cpu_threads_per_worker": {
@@ -1867,7 +1928,7 @@
     "type": "int",
     "default": 0,
     "help": "Native computation threads per worker. 0 resolves from CPU affinity and reserves a training core.",
-    "options_help": "Native computation threads per worker. 0 resolves from CPU affinity and reserves a training core.",
+    "options_help": "0 (automatic) or integers >= 1, within the CPU affinity thread budget",
     "cpu_only": true
   },
   "--premat_cpu_transfer_timing": {
@@ -1876,7 +1937,7 @@
     "type": "string",
     "default": "as_the_code_flies",
     "help": "Choose GPU upload timing. Completed copies alone qualify as FULL HIT; predicted mode is approximate.",
-    "options_help": "Choose GPU upload timing. Completed copies alone qualify as FULL HIT; predicted mode is approximate.",
+    "options_help": "as_the_code_flies, previous_gemm_leading_edge, as_soon_as_ready, demand_driven, predicted_gemm_start",
     "choices": [
       "as_the_code_flies",
       "previous_gemm_leading_edge",
@@ -1892,7 +1953,7 @@
     "type": "float",
     "default": 0,
     "help": "Non-negative intended availability lead before predicted GEMM. Applies only to predicted_gemm_start.",
-    "options_help": "Non-negative intended availability lead before predicted GEMM. Applies only to predicted_gemm_start.",
+    "options_help": "finite numbers >= 0; active only with predicted_gemm_start",
     "cpu_only": true,
     "predicted_only": true
   },
@@ -1902,7 +1963,7 @@
     "type": "float",
     "default": 0,
     "help": "GPU storage cap in MiB, including pending destinations, copies and autograd retention. 0 resolves to two selected layer sets.",
-    "options_help": "GPU storage cap in MiB, including pending destinations, copies and autograd retention. 0 resolves to two selected layer sets.",
+    "options_help": "0 (automatic: two selected layer sets) or finite positive numbers in MiB",
     "cpu_only": true
   },
   "--premat_cpu_checkpoint_replay": {
@@ -1911,10 +1972,10 @@
     "type": "string",
     "default": "disabled",
     "help": "Permit CPU matrices only for actual checkpoint replay segments; preserve checkpoint size, RNG and early stop.",
-    "options_help": "Permit CPU matrices only for actual checkpoint replay segments; preserve checkpoint size, RNG and early stop.",
+    "options_help": "enabled, disabled",
     "choices": [
-      "disabled",
-      "enabled"
+      "enabled",
+      "disabled"
     ],
     "cpu_only": true
   },
@@ -1976,5 +2037,19 @@
       "CPU Premat"
     ],
     "options_help": "Enter step N, where N is a positive optimiser update within --max-iters. Example: step 10. Profiling supplies the processing capture update by default."
+  },
+  "--premat_instra_playback": {
+    "category": "Premat",
+    "choices": [
+      "complete_step",
+      "latest"
+    ],
+    "default": "complete_step",
+    "extra_categories": [
+      "CPU Premat"
+    ],
+    "help": "finish all captured microsteps of the current optimiser step or follow latest data; default complete_step; chart button can override",
+    "kind": "fixed",
+    "type": "string"
   }
 }

@@ -228,7 +228,7 @@
         <section class="chart-group premat-group" id="premat_chart_group" data-chart-group="premat" hidden>
           <header class="chart-group-header premat-header">
             <div class="premat-header-title">
-              <strong>Premat Recapitulation - <span id="premat_step">Microstep — of Step —</span></strong>
+              <strong>Premat Recapitulation - <span id="premat_step">Microstep — of Optimiser Step —</span></strong>
               <span class="premat-mode" id="premat_mode">waiting</span>
               <span class="premat-step-totals" id="premat_step_totals">F — · P — · M —</span>
             </div>
@@ -236,6 +236,8 @@
             <div class="premat-header-controls">
               <button class="premat-icon-button premat-inspect-button" id="premat_inspect_button" type="button" aria-label="Inspect Premat data" title="Inspect Premat data" aria-pressed="false" disabled><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="m16 16 5 5"></path></svg></button>
               <button class="premat-icon-button" id="premat_play_toggle" type="button" aria-label="Pause Premat playback" title="Pause Premat playback">Ⅱ</button>
+              <button id="premat_playback_mode" type="button" aria-pressed="true">Complete optimiser step</button>
+              <button id="premat_skip" type="button" title="Skip the current animation and queued microsteps; immediately follow the newest received complete microstep">Skip</button>
               <label class="premat-playback-control" for="premat_state_duration">
                 state duration
                 <input id="premat_state_duration" type="range" min="1" max="1000" step="1" value="100">
@@ -258,7 +260,7 @@
           <section class="premat-docked-panel premat-inspector" id="premat_inspector" aria-label="Premat data inspector" hidden>
             <header class="premat-panel-toolbar">
               <button class="premat-panel-back" id="premat_inspector_close" type="button" aria-label="Back to Premat recapitulation" title="Back to Premat recapitulation">←</button>
-              <div class="premat-panel-heading"><strong>Premat data · <span id="premat_inspector_step">Microstep — of Step —</span></strong><span id="premat_inspector_detail"></span></div>
+              <div class="premat-panel-heading"><strong>Premat data · <span id="premat_inspector_step">Microstep — of Optimiser Step —</span></strong><span id="premat_inspector_detail"></span></div>
               <button class="premat-icon-button" id="premat_inspector_download" type="button" aria-label="Download this Premat step as CSV" title="Download this Premat step as CSV" disabled><svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 21h14"></path></svg></button>
             </header>
             <div class="premat-inspector-scroll">

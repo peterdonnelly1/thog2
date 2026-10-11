@@ -418,7 +418,7 @@ def test_premat_view_has_all_layer_playback_controls_complete_key_and_inspector(
     ):
         assert f'id="{element_id}"' in index
     assert "Premat Recapitulation - " in index
-    assert "Microstep " in index and "of Step " in index
+    assert "Microstep " in index and "of Optimiser Step " in index
     assert "flex: 0 0 210px" in css
     for state_class in (
         "premat-neutral", "premat-pending", "premat-state-materialising", "premat-state-available",

@@ -55,6 +55,7 @@
   line-height: 1;
   cursor: pointer;
 }
+#premat_playback_mode[aria-pressed="true"] { background:#e4f2ff; border-color:#8cbbdf; color:#214f72; }
 .premat-icon-button:hover:not(:disabled) { background: #eef3f7; }
 .premat-icon-button:disabled { opacity: .42; cursor: default; }
 .premat-summary {

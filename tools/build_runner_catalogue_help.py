@@ -59,6 +59,45 @@ def enrich_options(catalogue):
     for key, options in documented.items():
         if key in catalogue:
             catalogue[key]["options_help"] = options
+    # vvv THOG take finite CPU options from the canonical validator and expose open batch presets separately
+    cpu_tree = ast.parse((ROOT / "sheet/premat_cpu_config.py").read_text())
+    cpu_choices = next(ast.literal_eval(node.value) for node in cpu_tree.body
+                       if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name)
+                       and target.id == "CPU_CHOICES" for target in node.targets))
+    for name, choices in cpu_choices.items():
+        catalogue["--" + name]["choices"] = list(choices)
+        catalogue["--" + name]["options_help"] = ", ".join(choices)
+    cpu_options = {
+        "--premat_cpu_layer_batch_size": "single_layer, all_layers, or an integer >= 2 (layers per CPU task)",
+        "--premat_cpu_workers": "integers >= 1, within the CPU affinity thread budget",
+        "--premat_cpu_threads_per_worker": "0 (automatic) or integers >= 1, within the CPU affinity thread budget",
+        "--premat_cpu_transfer_lead_ms": "finite numbers >= 0; active only with predicted_gemm_start",
+        "--premat_cpu_staging_limit_mb": "0 (automatic: two selected layer sets) or finite positive numbers in MiB",
+        "--premat_target_matrix": "1=QKV, 2=O, 3=UP, 4=DOWN; comma-separated combinations, for example 2,4; blank targets all families",
+    }
+    for key, options in cpu_options.items():
+        catalogue[key]["options_help"] = options
+    catalogue["--premat_cpu_layer_batch_size"]["suggestions"] = ["single_layer", "all_layers", "2", "4", "8"]
+    catalogue["--premat_target_matrix"]["suggestions"] = ["1", "2", "3", "4", "2,4", "1,2,3,4"]
+    for key in ("--basis-family", "DEPTH.compressor", "WIDTH.compressor"):
+        catalogue[key]["suggestions"] = list(versions)
+    for key in ("--basis-version", "DEPTH.compressor_version", "WIDTH.compressor_version", "--hyperblock-compressor-version"):
+        catalogue[key]["suggestions"] = ["auto", *versions.values()]
+    parser_tree = ast.parse((ROOT / "run_thog2_owt_core.py").read_text())
+    for node in ast.walk(parser_tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute) or node.func.attr != "add_argument":
+            continue
+        choice_node = next((argument.value for argument in node.keywords if argument.arg == "choices"), None)
+        if choice_node is None:
+            continue
+        try:
+            choices = list(ast.literal_eval(choice_node))
+        except (ValueError, TypeError):
+            continue
+        for argument in node.args:
+            if isinstance(argument, ast.Constant) and argument.value in catalogue and choices:
+                catalogue[argument.value].setdefault("choices", choices)
+    # ^^^ THOG
     catalogue["--reset-optimizer"]["type"] = "flag"
     catalogue["--print-geometry-registry"]["type"] = "flag"
     catalogue["--plastic-layer-count-hold-updates"]["type"] = "int"
