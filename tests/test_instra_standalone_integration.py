@@ -48,3 +48,19 @@ def test_scalar_only_run_finalizes_without_chart_store(tmp_path, monkeypatch):
     assert telemetry._instra_producer.health()['closed']
     with sqlite3.connect(telemetry._instra_producer.database_path) as connection:
         assert connection.execute('SELECT kind FROM records ORDER BY sequence DESC LIMIT 1').fetchone()[0]=='finish'
+
+
+def test_native_scalars_record_with_legacy_backend_disabled(tmp_path, monkeypatch):
+    from sheet.wandb_telemetry import WandbTelemetry
+    source=tmp_path/'source';source.mkdir()
+    instra.initialize_source(source,'thog2')
+    monkeypatch.setenv('INSTRA_ENABLED','1')
+    monkeypatch.setenv('INSTRA_SOURCE_ROOT',str(source))
+    telemetry=WandbTelemetry(enabled=False,project='test',entity=None,mode='offline',root=tmp_path,name='native',group='',job_type='train',config={'device':'cpu'})
+    telemetry.backend='none'
+    telemetry.start()
+    telemetry.log_event('optimizer_progress',{'completed_updates':1,'training_loss':2.5,'consumed_tokens':128,'cumulative_training_seconds':1.0,'learning_rate':0.001,'gradient_norm':0.5})
+    telemetry.finish()
+    with sqlite3.connect(telemetry._instra_producer.database_path) as connection:
+        rows=connection.execute("SELECT payload FROM records WHERE kind='measurements'").fetchall()
+    assert rows, 'Native recording must not depend on legacy scalar backend'

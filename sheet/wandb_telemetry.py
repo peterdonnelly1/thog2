@@ -568,6 +568,9 @@ class WandbTelemetry:
 
     # vvv THOG start both telemetry sinks when requested while preserving existing single-sink behaviour
     def start(self) -> None:
+        from . import instra_integration
+        if instra_integration.enabled():
+            instra_integration.producer_for(self)
         if not self.enabled or self.backend in {"local", "none"}:
             return
         if self.backend == "both":
@@ -683,7 +686,8 @@ class WandbTelemetry:
                     premat_snapshot,
                 )
         # ^^^ THOG
-        if not self.enabled or self.backend == "none":
+        from . import instra_integration
+        if (not self.enabled or self.backend == "none") and not instra_integration.enabled():
             return
         metrics = _event_metrics(event, payload)
         if not metrics:
