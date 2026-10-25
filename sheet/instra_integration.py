@@ -14,9 +14,12 @@ def producer_for(telemetry):
     import instra
     source_root = Path(os.environ.get('INSTRA_SOURCE_ROOT', Path(__file__).resolve().parents[1]))
     context = telemetry.config.get('runner', {})
-    producer = instra.init(source_root, model_type_id='thog2',
+    producer = instra.init(source_root, model_type_id=instra.THOG2_MODEL_TYPE_ID,
                           run_id=context.get('run_id'), grid_id=context.get('grid_id'),
                           run_attempt_id=context.get('attempt_id'), config=telemetry.config)
+    from instra.resources import ProcessResources
+    telemetry._instra_resources = ProcessResources()
+    telemetry._instra_resource_sample_at = 0.0
     telemetry._instra_producer = producer
     return producer
 
@@ -35,7 +38,14 @@ def chart_store_for(telemetry, store_class):
 
 
 def record_scalars(telemetry, scalars, step):
-    return producer_for(telemetry).log(dict(scalars), step=int(step))
+    import time
+    producer = producer_for(telemetry)
+    values = dict(scalars)
+    now = time.monotonic()
+    if now - telemetry._instra_resource_sample_at >= 2:
+        values.update(telemetry._instra_resources.sample())
+        telemetry._instra_resource_sample_at = now
+    return producer.log(values, step=int(step))
 
 
 def finish(telemetry, state):

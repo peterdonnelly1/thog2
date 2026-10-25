@@ -570,7 +570,7 @@ class WandbTelemetry:
     def start(self) -> None:
         from . import instra_integration
         if instra_integration.enabled():
-            instra_integration.producer_for(self)
+            ensure_local_chart_store(self)
         if not self.enabled or self.backend in {"local", "none"}:
             return
         if self.backend == "both":
