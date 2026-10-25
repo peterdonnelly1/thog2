@@ -761,6 +761,9 @@ class WandbTelemetry:
 
     def _log_scalars(self, metrics: Mapping[str, Any], step: int) -> None:
         scalars = _scalar_metrics(metrics)
+        from . import instra_integration
+        if instra_integration.enabled():
+            instra_integration.record_scalars(self, scalars, step)
         if self.run is not None:
             wandb_scalars = _wandb_scalar_metrics(scalars)
             if wandb_scalars:

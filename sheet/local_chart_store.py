@@ -1100,6 +1100,9 @@ def ensure_local_chart_store(telemetry: Any) -> LocalChartStore:
     existing = getattr(telemetry, "_thog_local_chart_store", None)
     if existing is not None:
         return existing
+    from . import instra_integration
+    if instra_integration.enabled():
+        return instra_integration.chart_store_for(telemetry, LocalChartStore)
     run = getattr(telemetry, "run", None)
     wandb_run_id = str(getattr(run, "id", "") or "").strip()
     local_run_id = wandb_run_id or str(
@@ -1151,11 +1154,17 @@ def close_local_chart_store(
 ) -> None:
     store = getattr(telemetry, "_thog_local_chart_store", None)
     if store is None:
+        from . import instra_integration
+        if instra_integration.enabled():
+            instra_integration.finish(telemetry, final_state)
         return
     try:
         store.close(final_state=final_state)
     finally:
         setattr(telemetry, "_thog_local_chart_store", None)
+        from . import instra_integration
+        if instra_integration.enabled():
+            instra_integration.finish(telemetry, final_state)
 
 
 __all__ = [
