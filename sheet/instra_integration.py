@@ -29,7 +29,7 @@ def chart_store_for(telemetry, store_class):
     store = store_class(producer.artifact_path('charts.sqlite3'),
                         run_name=str(telemetry.name), run_id=producer.run_id,
                         config=telemetry.config)
-    for key in ('model_source_id', 'model_type_id', 'run_id', 'grid_id', 'run_attempt_id'):
+    for key in ('host_id', 'model_source_id', 'model_type_id', 'run_id', 'grid_id', 'run_attempt_id'):
         store.connection.execute('INSERT OR REPLACE INTO metadata(key,value) VALUES (?,?)',
                                  (key, str(producer.context[key])))
     store.connection.commit()
