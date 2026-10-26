@@ -12,6 +12,7 @@ from typing import Any, Dict, Mapping, Optional
 
 import torch
 import constants as _constants
+from .instra_integration import recording_guard
 
 from .depth_curve_diagnostics import (
     DEFAULT_DEPTH_CURVE_SAMPLE_ELEMENTS,
@@ -134,7 +135,9 @@ class _PrematLiveSink:
         database_path: Path,
         *,
         retain_detailed_history: bool = False,
+        recording_owner=None,
     ) -> None:
+        self._recording_owner = recording_owner
         self._database_path = Path(database_path)
         self._retain_detailed_history = bool(retain_detailed_history)
         self._queue: queue.Queue[object] = queue.Queue(maxsize=128)  # <<< THOG retain a bounded microstep window rather than dropping siblings from one update
@@ -148,6 +151,13 @@ class _PrematLiveSink:
         self._thread.start()
 
     def publish(self, optimizer_update: int, snapshot: Mapping[str, Any]) -> None:
+        if self._error is not None and self._recording_owner is not None:
+            from . import instra_integration
+            if instra_integration.failure_policy() == 'raise':
+                raise RuntimeError('Premat live telemetry writer failed') from self._error
+            producer = vars(self._recording_owner).get('_instra_producer')
+            if producer is not None:
+                producer.report_diagnostic_failure(self._error)
         if self._closed or self._error is not None:
             return
         stored_snapshot = _premat_snapshot_for_storage(
@@ -159,7 +169,14 @@ class _PrematLiveSink:
             self._queue.put_nowait(item)
             return
         except queue.Full:
-            pass
+            if self._recording_owner is not None:
+                from . import instra_integration
+                error = RuntimeError('Premat recording queue full; diagnostic snapshot dropped')
+                producer = vars(self._recording_owner).get('_instra_producer')
+                if producer is not None:
+                    producer.report_diagnostic_failure(error)
+                if instra_integration.failure_policy() == 'raise':
+                    raise error
         try:
             self._queue.get_nowait()
         except queue.Empty:
@@ -187,8 +204,9 @@ class _PrematLiveSink:
             raise RuntimeError("Premat live telemetry writer failed") from self._error
 
     def _run(self) -> None:
-        writer = LocalPrematLiveWriter(self._database_path)
+        writer = None
         try:
+            writer = LocalPrematLiveWriter(self._database_path)
             while True:
                 item = self._queue.get()
                 if item is self._STOP:
@@ -198,7 +216,18 @@ class _PrematLiveSink:
         except BaseException as error:  # pragma: no cover - filesystem failures are environment-specific
             self._error = error
         finally:
-            writer.close()
+            if writer is not None:
+                try:
+                    writer.close()
+                except BaseException as error:
+                    if self._error is None:
+                        self._error = error
+            if self._error is not None and self._recording_owner is not None:
+                import warnings
+                warnings.warn('Instra PREMAT recording degraded: ' + str(self._error), RuntimeWarning)
+                producer = vars(self._recording_owner).get('_instra_producer')
+                if producer is not None:
+                    producer.report_diagnostic_failure(self._error)
 # ^^^ THOG
 
 
@@ -567,6 +596,7 @@ class WandbTelemetry:
         self.sampler = _CudaSampler(str(self.config.get("device", "cuda")))
 
     # vvv THOG start both telemetry sinks when requested while preserving existing single-sink behaviour
+    @recording_guard
     def start(self) -> None:
         from . import instra_integration
         if instra_integration.enabled():
@@ -652,6 +682,7 @@ class WandbTelemetry:
             0,
         )
 
+    @recording_guard
     def log_event(self, event: str, payload: Mapping[str, Any]) -> None:
         # vvv THOG Processing duplicates the console tok/s scoreboard without adding another measurement
         # Training throughput is a small, generally useful run metric rather
@@ -890,11 +921,13 @@ class WandbTelemetry:
         exit_code: Optional[int] = None,
         final_state: str = "finished",
     ) -> None:
+        storage_failure = None
         live_sink = getattr(self, "_thog_premat_live_sink", None)
         if live_sink is not None:
             try:
                 live_sink.close()
             except Exception as error:
+                storage_failure = error
                 print(
                     "THOG2 WARNING: Premat live telemetry could not be closed cleanly; "
                     f"continuing telemetry shutdown: {error}",
@@ -904,6 +937,7 @@ class WandbTelemetry:
         try:
             close_local_chart_store(self, final_state=final_state)
         except Exception as error:
+            storage_failure = error
             print(
                 "THOG2 WARNING: local chart store could not be closed cleanly; "
                 f"continuing telemetry shutdown: {error}",
@@ -922,10 +956,18 @@ class WandbTelemetry:
             self.writer.flush()
             self.writer.close()
             self.writer = None
+        from . import instra_integration
+        if storage_failure is not None and instra_integration.enabled() and instra_integration.failure_policy() == 'raise':
+            raise storage_failure
     # ^^^ THOG
 
 
 def attach_telemetry(trainer: Any, telemetry: WandbTelemetry) -> None:
+    _attach_recording(telemetry, trainer)
+
+
+@recording_guard
+def _attach_recording(telemetry: WandbTelemetry, trainer: Any) -> None:
     # vvv THOG width metrics use this run's existing local/W&B destinations
     if vars(trainer.config).get("width_enabled", False):
         trainer._width_telemetry = telemetry
@@ -991,8 +1033,10 @@ def attach_telemetry(trainer: Any, telemetry: WandbTelemetry) -> None:
         and premat_instra_enabled
     ):
         local_store = ensure_local_chart_store(telemetry)
+        from . import instra_integration
         live_sink = _PrematLiveSink(
             local_store.path,
+            recording_owner=telemetry if instra_integration.enabled() else None,
             retain_detailed_history=bool(
                 getattr(trainer.config, "premat_retain_detailed_premat_history", False)
             ),
