@@ -1204,6 +1204,9 @@ def main() -> int:
                 exit_code=telemetry_exit_code,
                 final_state=telemetry_final_state,
             )
+            if telemetry_final_state == 'finished':
+                from instra_recovery import completed
+                completed(int(config.max_iters), int(trainer.state.completed_updates))
             print_dense_snapshot_completion(getattr(trainer, "dense_snapshot_metadata", None))                                                                                   # <<< THOG make the useful relative snapshot path the final trainer diagnostic
         trainer.close()
     # ^^^ THOG

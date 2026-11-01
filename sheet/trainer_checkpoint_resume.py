@@ -321,6 +321,8 @@ class TrainerCheckpointResumeMixin:
                 "checkpoint completed update counters disagree"
             )
         trainer.batch_source.load_state_dict(payload["batch_source"])
+        import instra_recovery
+        instra_recovery.consumed_tokens = vars(trainer.batch_source).get("training_tokens_seen", 0)
         # vvv THOG restore independent probe selection before training resumes
         if payload.get("width_instrumentation") is not None:
             from .width_instrumentation import width_instrumentation_for
@@ -330,6 +332,16 @@ class TrainerCheckpointResumeMixin:
             instrumentation.load_state_dict(payload["width_instrumentation"])
         # ^^^ THOG
         restore_rng_state(payload["rng_state"])
+        if payload.get('instra_grad_scaler') is not None:
+            trainer.scaler.load_state_dict(payload['instra_grad_scaler'])
+        rank_states = payload.get('instra_rank_states')
+        if rank_states:
+            if len(rank_states) != trainer.distributed.world_size:
+                raise ValueError('Checkpoint rank-state count differs from current world size')
+            rank_state = rank_states[trainer.distributed.rank]
+            trainer.batch_source.load_state_dict(rank_state['batch_source'])
+            trainer.scaler.load_state_dict(rank_state['scaler'])
+            restore_rng_state(rank_state['rng'])
         # vvv THOG restore optional COARSE/FINE phase state without changing legacy checkpoint semantics
         trainer.plastic_coarse_fine_state = payload.get("plastic_coarse_fine_state")
         trainer.plastic_coarse_provenance = payload.get("plastic_coarse_fine_state")
@@ -388,7 +400,19 @@ class TrainerCheckpointResumeMixin:
         if trainer.state.completed_updates != int(payload["completed_updates"]):
             raise ValueError("checkpoint completed update counters disagree")
         trainer.batch_source.load_state_dict(payload["batch_source"])
+        import instra_recovery
+        instra_recovery.consumed_tokens = vars(trainer.batch_source).get("training_tokens_seen", 0)
         restore_rng_state(payload["rng_state"])
+        if payload.get('instra_grad_scaler') is not None:
+            trainer.scaler.load_state_dict(payload['instra_grad_scaler'])
+        rank_states = payload.get('instra_rank_states')
+        if rank_states:
+            if len(rank_states) != trainer.distributed.world_size:
+                raise ValueError('Checkpoint rank-state count differs from current world size')
+            rank_state = rank_states[trainer.distributed.rank]
+            trainer.batch_source.load_state_dict(rank_state['batch_source'])
+            trainer.scaler.load_state_dict(rank_state['scaler'])
+            restore_rng_state(rank_state['rng'])
         # vvv THOG restore optional COARSE/FINE phase state without changing legacy checkpoint semantics
         trainer.plastic_coarse_fine_state = payload.get("plastic_coarse_fine_state")
         trainer.plastic_coarse_provenance = payload.get("plastic_coarse_fine_state")
@@ -457,3 +481,4 @@ class TrainerCheckpointResumeMixin:
         trainer._record("legacy_checkpoint_loaded", path=str(path))
         return trainer
 # ^^^ THOG
+

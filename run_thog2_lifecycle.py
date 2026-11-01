@@ -4,6 +4,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
+import uuid
 import os
 import socket
 import sqlite3                                                                                                                                             # <<< THOG recover pre-enhancement instrumentation from the run's local W&B-linked chart metadata
@@ -649,6 +651,7 @@ def _fork_lr_phase(
 ) -> Dict[str, Any]:
     return {
         "phase_type": RESTART_COSINE_SCHEDULE,
+        **({"phase_endpoint_version": 2} if os.environ.get("INSTRA_RECOVERY_CONTEXT") else {}),
         "phase_start_update": int(completed_updates),
         "phase_start_lr": float(phase_start_lr),
         "phase_peak_lr": float(phase_peak_lr),
@@ -831,7 +834,7 @@ def _target_updates_for_resume(
 ) -> int:
     values = vars(arguments)
     target = int(values["max_iters"]) if "max_iters" in explicit else int(lifecycle["target_updates"])
-    if target <= completed_updates:
+    if target < completed_updates or (target == completed_updates and not os.environ.get('INSTRA_RECOVERY_CONTEXT')):
         relation = "equal to" if target == completed_updates else "less than"
         raise ValueError(
             f"resume target {target} is {relation} completed_updates {completed_updates}; "
@@ -1130,7 +1133,7 @@ def _prepare_parent_context(
         phase_peak_lr = float(values["fork_learning_rate"])
         phase_min_lr = float(values["fork_min_lr"])
         phase_rewarm_iters = int(values["fork_rewarm_iters"])
-        if phase_peak_lr <= 0.0 or phase_min_lr < 0.0 or phase_min_lr > phase_peak_lr:
+        if not all(math.isfinite(rate) for rate in (phase_peak_lr, phase_min_lr)) or phase_peak_lr <= 0.0 or phase_min_lr < 0.0 or phase_min_lr > phase_peak_lr:
             raise ValueError("fork learning rates require peak > 0 and 0 <= min <= peak")
         if phase_rewarm_iters < 0:
             raise ValueError("fork rewarm iterations must be non-negative")
@@ -1139,6 +1142,10 @@ def _prepare_parent_context(
             parent_lifecycle,
             completed_updates,
         )
+        if os.environ.get('INSTRA_RECOVERY_CONTEXT') and phase_rewarm_iters >= target_updates-completed_updates:
+            raise ValueError('Fork target must exceed branch step plus rewarm duration')
+        if os.environ.get('INSTRA_RECOVERY_CONTEXT') and phase_rewarm_iters == 0 and phase_peak_lr != phase_start_lr:
+            raise ValueError('Zero rewarm requires peak equal to Parent boundary learning rate')
         root_start_label = parent_lifecycle.get("root_start_label") or parent_lifecycle.get("run_start_label")
         if not root_start_label:
             raise ValueError("fork requires a recoverable YYMMDD-HHMM root start label")
@@ -1249,6 +1256,18 @@ def prepare_context(
 
 
 def resolved_payload(context: Mapping[str, Any]) -> Dict[str, Any]:
+    if os.environ.get('INSTRA_RECOVERY_CONTEXT'):
+        recovery_request = json.loads(os.environ['INSTRA_RECOVERY_CONTEXT'])
+        output = Path(__file__).resolve().parent/'instra'/'recovery_outputs'/str(uuid.UUID(recovery_request['run_id']))/'attempts'/str(uuid.UUID(recovery_request['attempt_id']))
+        paths = dict(context['paths'])
+        for name, value in {'checkpoint_dir':output/'checkpoints', 'checkpoint_path':output/'checkpoints'/'ckpt.pt',
+                            'manifest_path':output/'checkpoints'/'run_manifest.json', 'log_dir':output/'logs',
+                            'log_path':output/'logs'/'train.log','result_dir':output/'results',
+                            'result_path':output/'results'/'result.json','tensorboard_dir':output/'curves'}.items():
+            paths[name] = value
+        context['paths'] = paths
+        context['lifecycle'].update(checkpoint_dir=str(paths['checkpoint_dir']), checkpoint_path=str(paths['checkpoint_path']),
+            log_path=str(paths['log_path']),result_path=str(paths['result_path']),tensorboard_dir=str(paths['tensorboard_dir']))
     config: OwtRunConfig = context["config"]
     lifecycle: Mapping[str, Any] = context["lifecycle"]
     paths: Mapping[str, Path] = context["paths"]
@@ -1450,6 +1469,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     train_tokens = core.load_tokens(dataset_dir / "train.bin")
     validation_tokens = core.load_tokens(dataset_dir / "val.bin")
+    if os.environ.get('INSTRA_RECOVERY_CONTEXT'):
+        from instra_recovery import data_signature
+        from types import SimpleNamespace
+        if data_signature(SimpleNamespace(train_tokens=train_tokens, validation_tokens=validation_tokens)) != json.loads(os.environ['INSTRA_RECOVERY_CONTEXT'])['checkpoint']['data_identity']:
+            raise ValueError('Checkpoint data/tokenizer fingerprint changed before model allocation')
     fresh_state = None
     coarse_fine_outcome = None
 
@@ -1676,6 +1700,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         )
         lifecycle = gathered_lifecycle[0]
         trainer.lifecycle_metadata = dict(lifecycle)
+        if os.environ.get('INSTRA_RECOVERY_CONTEXT'):
+            from instra_recovery import data_signature
+            if data_signature(trainer.batch_source) != json.loads(os.environ['INSTRA_RECOVERY_CONTEXT'])['checkpoint']['data_identity']:
+                raise ValueError('Checkpoint data/tokenizer fingerprint changed')
         trainer.distributed.barrier()
         core.attach_telemetry(trainer, telemetry)
 
@@ -1754,6 +1782,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 exit_code=telemetry_exit_code,
                 final_state=telemetry_final_state,
             )
+            if telemetry_final_state == 'finished':
+                from instra_recovery import completed
+                completed(int(lifecycle['target_updates']), int(trainer.state.completed_updates))
             print_dense_snapshot_completion(getattr(trainer, "dense_snapshot_metadata", None))                                                                                   # <<< THOG leave the relative snapshot path as the final trainer diagnostic
         trainer.close()
         if fresh_state is not None:
@@ -1765,3 +1796,4 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 if __name__ == "__main__":
     raise SystemExit(main())
 # ^^^ THOG
+
