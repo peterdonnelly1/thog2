@@ -44,13 +44,14 @@ def restart_cosine_learning_rate(
     phase_rewarm_iters: int,
     phase_end_update: int,
     phase_min_lr: float,
+    phase_endpoint_version: int = 1,
 ) -> float:
     if completed_updates < phase_start_update:
         return float(phase_start_lr)
     if phase_end_update <= phase_start_update:
         return float(phase_min_lr)
 
-    last_child_input = phase_end_update - 1
+    last_child_input = phase_end_update if phase_endpoint_version == 2 else phase_end_update - 1
     if completed_updates >= last_child_input:
         return float(phase_min_lr)
 
@@ -121,6 +122,7 @@ def learning_rate_for_lifecycle(
         phase_rewarm_iters=int(phase["phase_rewarm_iters"]),
         phase_end_update=int(phase["phase_end_update"]),
         phase_min_lr=float(phase["phase_min_lr"]),
+        phase_endpoint_version=int(phase.get("phase_endpoint_version", 1)),
     )
 
 
@@ -135,3 +137,4 @@ __all__ = [
     "restart_cosine_learning_rate",
 ]
 # ^^^ THOG
+

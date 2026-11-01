@@ -1,0 +1,211 @@
+"""Instra v2 checkpoint operations, executed solely in the THOG2 environment."""
+from __future__ import annotations
+import hashlib
+import json
+import math
+import os
+import re
+from pathlib import Path
+import shutil
+import sys
+import uuid
+
+ROOT = Path(__file__).resolve().parent
+consumed_tokens = 0
+
+
+def _atomic_json(path, value):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name+'.'+uuid.uuid4().hex+'.tmp')
+    with temporary.open('w') as stream:
+        json.dump(value, stream, allow_nan=False)
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(temporary, path)
+
+
+def _sha(path):
+    digest = hashlib.sha256()
+    with Path(path).open('rb') as stream:
+        for block in iter(lambda: stream.read(1024*1024), b''):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _identity():
+    metadata = json.loads(os.environ.get('THOG2_RUNNER_METADATA', '{}'))
+    context = json.loads(os.environ.get('INSTRA_RECOVERY_CONTEXT') or '{}')
+    run_id = context.get('run_id') or metadata.get('run_id')
+    attempt_id = context.get('attempt_id') or metadata.get('attempt_id')
+    if not run_id or not attempt_id:
+        return None
+    if context:
+        metadata = {**metadata, 'parameters': {**context.get('parameters', metadata.get('parameters', {})), '--max-iters': context['target']}, 'dtype': context.get('dtype', metadata.get('dtype'))}
+    return str(uuid.UUID(run_id)), str(uuid.UUID(attempt_id)), metadata
+
+
+def data_signature(source):
+    import numpy as np
+    values = []
+    for storage in (source.train_tokens, source.validation_tokens):
+        digest = hashlib.sha256()
+        for offset in range(0, len(storage), 1024*1024):
+            block = storage[offset:offset+1024*1024]
+            if hasattr(block, 'numpy'):
+                block = block.detach().cpu().numpy()
+            array = np.asarray(block)
+            digest.update(array.dtype.str.encode())
+            digest.update(array.tobytes())
+        values.append({'length': len(storage), 'sha256': digest.hexdigest()})
+    return values
+
+
+def publish(trainer, path):
+    identity = _identity()
+    if not identity:
+        return
+    from sheet.lr_schedule import learning_rate_for_lifecycle, active_lr_phase
+    run_id, attempt_id, metadata = identity
+    bundle_id = uuid.uuid4().hex
+    output = ROOT/'instra'/'runs'/run_id/'attempts'/attempt_id/'checkpoints'
+    output.mkdir(parents=True, exist_ok=True)
+    target = output/(f'step_{trainer.state.completed_updates:012d}_{bundle_id}.pt')
+    temporary = target.with_suffix('.tmp')
+    with Path(path).open('rb') as source, temporary.open('wb') as destination:
+        shutil.copyfileobj(source, destination, 1024*1024)
+        destination.flush()
+        os.fsync(destination.fileno())
+    os.replace(temporary, target)
+    lifecycle = vars(trainer).get('lifecycle_metadata')
+    identity_hash = vars(trainer).get('_instra_data_identity')
+    if identity_hash is None:
+        identity_hash = data_signature(trainer.batch_source)
+        trainer._instra_data_identity = identity_hash
+    descriptor = {'bundle_id': bundle_id, 'run_id': run_id, 'attempt_id': attempt_id,
+                  'completed_steps': trainer.state.completed_updates,
+                  'tokens_seen': vars(trainer.batch_source).get('training_tokens_seen'),
+                  'next_lr': learning_rate_for_lifecycle(trainer.config, lifecycle, trainer.state.completed_updates),
+                  'schedule': dict(active_lr_phase(lifecycle) or {'kind':'cosine','end':trainer.config.decay_updates}),
+                  'path': str(target), 'sha256': _sha(target), 'complete': True, 'compatible': True,
+                  'schema': 1, 'world_size': trainer.distributed.world_size,
+                  'submitted_parameters': metadata.get('parameters'), 'dtype': metadata.get('dtype'),
+                  'data_identity': identity_hash,
+                  'configuration_signature': trainer.config.compatibility_signature()}
+    _atomic_json(ROOT/'instra'/'recovery'/run_id/(bundle_id+'.json'), descriptor)
+
+
+def completed(target, completed_steps):
+    identity = _identity()
+    if identity and completed_steps >= target:
+        run_id, attempt_id, _ = identity
+        _atomic_json(ROOT/'instra'/'recovery'/run_id/'completion.json',
+                     {'target': target, 'completed_steps': completed_steps, 'attempt_id': attempt_id, 'finalised': True})
+
+
+def validate(request):
+    descriptor = request['checkpoint']
+    if not re.fullmatch(r'[a-f0-9]{32}', descriptor['bundle_id']):
+        raise ValueError('Invalid checkpoint bundle identity')
+    directory = ROOT/'instra'/'recovery'/str(uuid.UUID(descriptor['run_id']))
+    old = json.loads((directory/(descriptor['bundle_id']+'.json')).read_text())
+    material = lambda value: {key: item for key,item in value.items() if key not in {'compatible','incompatibility_reasons'}}
+    if material(old) != material(descriptor):
+        raise ValueError('Checkpoint descriptor changed')
+    path = Path(descriptor['path'])
+    owned = ROOT/'instra'/'runs'/str(uuid.UUID(descriptor['run_id']))/'attempts'/str(uuid.UUID(descriptor['attempt_id']))/'checkpoints'
+    if path.is_symlink() or not owned.resolve().is_relative_to(ROOT.resolve()) or not path.resolve(strict=True).is_relative_to(owned.resolve()) or _sha(path) != descriptor['sha256']:
+        raise ValueError('Checkpoint fingerprint or ownership changed')
+    return descriptor
+
+
+def evidence(request):
+    import sqlite3
+    from collections import deque
+    run_id = str(uuid.UUID(request['run_id']))
+    directory = ROOT/'instra'/'runs'/run_id/'attempts'
+    series = {}
+    count = 0
+    for path in sorted(directory.glob('*/records.sqlite3'))[-128:]:
+        if path.is_symlink() or not path.resolve().is_relative_to(directory.resolve()):
+            continue
+        with sqlite3.connect(path.resolve().as_uri()+'?mode=ro', uri=True) as connection:
+            rows = connection.execute("SELECT wall_time,process_elapsed,step,payload FROM records WHERE kind='measurements' ORDER BY sequence DESC LIMIT 512").fetchall()
+        remaining = 3000
+        for wall, elapsed, step, encoded in reversed(rows):
+            if step is None:
+                continue
+            values = json.loads(encoded)
+            for name,value in values.items():
+                if name == 'tokens_seen' or value is not None and (type(value) not in (int,float) or not math.isfinite(value)):
+                    continue
+                if len(series)>=128 and name not in series:
+                    continue
+                if remaining <= 0:
+                    continue
+                series.setdefault(name,deque(maxlen=128)).append({'attempt_id':path.parent.name,'step':step,'value':value,
+                    'tokens_seen':values.get('tokens_seen'),'timestamp':wall,'process_elapsed':elapsed})
+                remaining-=1;count+=1
+    return {'protocol':1,'record_count':count,'charts':[{'definition':{'id':name},'points':list(points)} for name,points in sorted(series.items())]}
+
+
+def rpc(request):
+    if request.get('protocol') != 1:
+        raise ValueError('Unsupported checkpoint protocol')
+    if request['operation'] == 'evidence':
+        return evidence(request)
+    if request['operation'] == 'validate':
+        validate(request)
+        return {'protocol':1, 'valid':True}
+    if request['operation'] != 'inspect':
+        raise ValueError('Unknown checkpoint operation')
+    directory = ROOT/'instra'/'recovery'/str(uuid.UUID(request['run_id']))
+    checkpoints = []
+    operational = {'--max-iters','--checkpoint-root','--log-root','--result-root','--wandb-root','--host-label'}
+    for path in sorted(directory.glob('*.json'))[:2001]:
+        if path.name == 'completion.json':
+            continue
+        if len(checkpoints) >= 2000:
+            raise ValueError('Checkpoint catalogue exceeds 2000 bundles')
+        descriptor = json.loads(path.read_text())
+        submitted = descriptor.get('submitted_parameters')
+        mismatch = submitted is None or any(value != submitted.get(key) for key,value in request['parameters'].items() if key not in operational)
+        descriptor['compatible'] = not mismatch and descriptor.get('dtype') == request.get('dtype') and descriptor['tokens_seen'] is not None and descriptor['world_size'] == 1
+        descriptor['incompatibility_reasons'] = ['submitted configuration/dtype, token state, or world size is unsupported'] if not descriptor['compatible'] else []
+        checkpoints.append(descriptor)
+    completion = json.loads((directory/'completion.json').read_text()) if (directory/'completion.json').is_file() else {}
+    return {'protocol':1, 'capabilities':{'protocol':1,'restore':True,'finalisation_only':True,'fork_operations':['restart_cosine'],'world_sizes':[1]},
+            'checkpoints':checkpoints, 'completed':completion.get('finalised') is True and completion.get('target') == request['parameters'].get('--max-iters'),
+            'completed_steps':completion.get('completed_steps', max((item['completed_steps'] for item in checkpoints),default=0))}
+
+
+def execute(request):
+    descriptor = validate(request)
+    if request['action'] not in {'resume','continue','fork'} or type(request['target']) is not int:
+        raise ValueError('Invalid recovery action or target')
+    old_target = (descriptor.get('submitted_parameters') or {}).get('--max-iters')
+    if request['action'] == 'resume' and request['target'] != old_target:
+        raise ValueError('Resume preserves the stopping target')
+    if request['action'] == 'continue' and (old_target is None or request['target'] <= max(old_target, descriptor['completed_steps'])):
+        raise ValueError('Continue requires a strictly larger target')
+    import run_thog2_lifecycle as lifecycle
+    arguments = ['--resume-from', descriptor['path'], '-q', 'fork' if request['action']=='fork' else 'resume',
+                 '-n', str(request['target']), '-I', 'none']
+    if request['action']=='fork':
+        phase = request['phase']
+        arguments += ['--fork-lr-mode','restart_cosine','--fork-learning-rate',str(phase['peak_lr']),
+                      '--fork-min-lr',str(phase['min_lr']),'--fork-rewarm-iters',str(phase['rewarm_steps'])]
+    os.environ['INSTRA_RECOVERY_CONTEXT'] = json.dumps(request)
+    return lifecycle.main(arguments)
+
+
+if __name__=='__main__':
+    try:
+        if sys.argv[1:] == ['--instra-recovery']:
+            print(json.dumps(rpc(json.load(sys.stdin)), allow_nan=False))
+        elif len(sys.argv)==3 and sys.argv[1]=='--instra-recovery-execute':
+            raise SystemExit(execute(json.loads(sys.argv[2])))
+        else:
+            raise ValueError('Unknown recovery invocation')
+    except (ValueError, OSError, KeyError) as error:
+        print(str(error),file=sys.stderr)
+        raise SystemExit(2)

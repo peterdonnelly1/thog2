@@ -33,7 +33,7 @@ def _session_consumed_tokens(
     session_completed_updates = completed_updates - starting_completed_updates
     if session_completed_updates < 0:
         raise ValueError("completed updates moved backwards during the training session")
-    return session_completed_updates * tokens_per_update
+    return session_vars(self.batch_source).get('training_tokens_seen', completed_updates * tokens_per_update)
 # ^^^ THOG
 
 
@@ -486,7 +486,7 @@ class Stage6Trainer(Stage4Trainer):
         evaluation_rows.append(
             {
                 "completed_updates": completed_updates,
-                "consumed_tokens": completed_updates * tokens_per_update,
+                "consumed_tokens": vars(self.batch_source).get('training_tokens_seen', completed_updates * tokens_per_update),
                 "session_consumed_tokens": session_consumed_tokens,
                 "training_seconds": training_seconds,
                 "wall_seconds": time.perf_counter() - wall_started,
@@ -498,7 +498,7 @@ class Stage6Trainer(Stage4Trainer):
             run_id,
             "evaluation_completed",
             completed_updates=completed_updates,
-            consumed_tokens=completed_updates * tokens_per_update,
+            consumed_tokens=vars(self.batch_source).get('training_tokens_seen', completed_updates * tokens_per_update),
             session_consumed_tokens=session_consumed_tokens,
             cumulative_training_seconds=training_seconds,                                                                                               # <<< THOG expose cumulative training time and tok/s on validation rows
             validation_loss=losses["val"],
@@ -517,6 +517,7 @@ class Stage6Trainer(Stage4Trainer):
         target = Path(result_path)
         target.parent.mkdir(parents=True, exist_ok=True)
         tokens_per_update = self.config.batch_size * self.config.gradient_accumulation_steps * self.config.block_size
+        starting_consumed_tokens = vars(self.batch_source).get('training_tokens_seen', 0)
         starting_completed_updates = self.state.completed_updates                                                                                        # <<< THOG anchor resumed-session timing before the first update in this process
         training_seconds = 0.0
         evaluation_seconds = 0.0
@@ -559,14 +560,14 @@ class Stage6Trainer(Stage4Trainer):
             metrics, elapsed = self._timed(self.train_one_update)
             training_seconds += elapsed
             completed_updates = self.state.completed_updates
-            current_session_consumed_tokens = _session_consumed_tokens(starting_completed_updates, completed_updates, tokens_per_update)                 # <<< THOG separate lifetime token accounting from tokens processed since this resume/start
+            current_session_consumed_tokens = vars(self.batch_source).get('training_tokens_seen', 0) - starting_consumed_tokens                 # <<< THOG separate lifetime token accounting from tokens processed since this resume/start
             update_rows.append(
                 {
                     **metrics,
                     "update_seconds": elapsed,
                     "cumulative_training_seconds": training_seconds,
                     "cumulative_wall_seconds": time.perf_counter() - wall_started,
-                    "consumed_tokens": completed_updates * tokens_per_update,
+                    "consumed_tokens": vars(self.batch_source).get('training_tokens_seen', completed_updates * tokens_per_update),
                     "session_consumed_tokens": current_session_consumed_tokens,
                 }
             )
@@ -596,7 +597,7 @@ class Stage6Trainer(Stage4Trainer):
                 #     run_id,
                 #     "optimizer_progress",
                 #     completed_updates=completed_updates,
-                #     consumed_tokens=completed_updates * tokens_per_update,
+                #     consumed_tokens=vars(self.batch_source).get('training_tokens_seen', completed_updates * tokens_per_update),
                 #     session_consumed_tokens=current_session_consumed_tokens,
                 #     training_loss=metrics["training_loss"],
                 #     learning_rate=metrics["learning_rate"],
@@ -605,7 +606,7 @@ class Stage6Trainer(Stage4Trainer):
                 # )
                 progress_payload = {
                     "completed_updates": completed_updates,
-                    "consumed_tokens": completed_updates * tokens_per_update,
+                    "consumed_tokens": vars(self.batch_source).get('training_tokens_seen', completed_updates * tokens_per_update),
                     "session_consumed_tokens": current_session_consumed_tokens,
                     "training_loss": metrics["training_loss"],
                     "learning_rate": metrics["learning_rate"],
@@ -642,7 +643,7 @@ class Stage6Trainer(Stage4Trainer):
                 _, save_elapsed = self._timed(lambda: self.save_checkpoint(Path(self.config.out_dir) / "ckpt.pt"))
                 checkpoint_seconds += save_elapsed
 
-        final_session_consumed_tokens = _session_consumed_tokens(starting_completed_updates, self.state.completed_updates, tokens_per_update)             # <<< THOG final session token count is independent of lifetime completed updates
+        final_session_consumed_tokens = vars(self.batch_source).get('training_tokens_seen', 0) - starting_consumed_tokens             # <<< THOG final session token count is independent of lifetime completed updates
         if self.config.eval_interval > 0 and (not evaluation_rows or evaluation_rows[-1]["completed_updates"] != self.state.completed_updates):
             evaluation_seconds = self._record_evaluation(
                 run_id=run_id,
@@ -695,7 +696,7 @@ class Stage6Trainer(Stage4Trainer):
             "budget": {
                 "completed_updates": self.state.completed_updates,
                 "tokens_per_update": tokens_per_update,
-                "consumed_tokens": self.state.completed_updates * tokens_per_update,
+                "consumed_tokens": vars(self.batch_source).get('training_tokens_seen', self.state.completed_updates * tokens_per_update),
                 "stop_reason": stop_reason,
                 "max_wall_minutes": self.config.max_wall_minutes,
                 "session_completed_updates": self.state.completed_updates - starting_completed_updates,
@@ -740,7 +741,7 @@ class Stage6Trainer(Stage4Trainer):
             run_id,
             "run_completed",
             completed_updates=self.state.completed_updates,
-            consumed_tokens=self.state.completed_updates * tokens_per_update,
+            consumed_tokens=vars(self.batch_source).get('training_tokens_seen', self.state.completed_updates * tokens_per_update),
             session_consumed_tokens=final_session_consumed_tokens,
             final_validation_loss=final_validation_loss,
             training_seconds=training_seconds,

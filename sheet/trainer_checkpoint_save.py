@@ -16,6 +16,7 @@ from .checkpoints import (
 from .checkpoints import PLASTIC_DEPTH_CHECKPOINT_FORMAT_VERSION
 # ^^^ THOG
 from .training_config import CHECKPOINT_SCHEMA_VERSION
+from instra_recovery import _identity
 
 
 class TrainerCheckpointSaveMixin:
@@ -23,6 +24,7 @@ class TrainerCheckpointSaveMixin:
         compact_identity = self.config.compact_identity_metadata()
         return {
             "schema_version": CHECKPOINT_SCHEMA_VERSION,
+            "instra_execution": _identity(),
             "model_type": self.config.model_type,
             "model_args": self.config.model_arguments(),
             "compatibility_signature": self.config.compatibility_signature(),
@@ -38,6 +40,8 @@ class TrainerCheckpointSaveMixin:
             "row_order_scaling_rule": self.config.row_order_scaling_rule,
             "model": compact_model_state(self.raw_model, self.config.model_type),
             "optimizer": self.optimizer.state_dict(),
+            "instra_grad_scaler": self.scaler.state_dict(),
+            "instra_rank_states": vars(self).get("_instra_rank_states"),
             # vvv THOG preserve dynamic loss scaling across thogopt restarts; old optimizer payloads are unchanged
             **({"thogopt_grad_scaler": self.scaler.state_dict()}
                if any(group.get("thog2_optimizer_name") == "thogopt" for group in self.optimizer.param_groups) else {}),
@@ -83,8 +87,13 @@ class TrainerCheckpointSaveMixin:
 
     def save_checkpoint(self, path: Union[str, Path]) -> Path:
         target = Path(path)
+        self._instra_rank_states = self.distributed.all_gather_object({
+            'rng': capture_rng_state(), 'batch_source': self.batch_source.state_dict(),
+            'scaler': self.scaler.state_dict()})
         if self.distributed.is_primary:
             target = save_payload(self.checkpoint_payload(), target)
+            from instra_recovery import publish
+            publish(self, target)
         self.distributed.barrier()
         self._record(
             "checkpoint_saved",
@@ -107,3 +116,4 @@ class TrainerCheckpointSaveMixin:
             sort_keys=True,
         )
 # ^^^ THOG
+

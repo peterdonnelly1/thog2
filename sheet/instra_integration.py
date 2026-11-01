@@ -101,6 +101,8 @@ def record_scalars(telemetry, scalars, step):
     import time
     producer = producer_for(telemetry)
     values = dict(scalars)
+    from instra_recovery import consumed_tokens
+    values["tokens_seen"] = consumed_tokens
     now = time.monotonic()
     if now - telemetry._instra_resource_sample_at >= 2:
         values.update(telemetry._instra_resources.sample())
@@ -124,3 +126,4 @@ def finish(telemetry, state):
     health = recording_health(telemetry)
     if health['error'] or health['dropped_records'] or health['diagnostic_failures']:
         print(f'Instra recording health: {health}', flush=True)
+

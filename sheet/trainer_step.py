@@ -836,6 +836,13 @@ class TrainerStepMixin:
 
     # vvv THOG disabled capture creates no hooks, samples or rolling buffers
     def train_one_update(self) -> Dict[str, Any]:
+        self.batch_source._instra_training = True
+        try:
+            return self._instra_train_one_update()
+        finally:
+            self.batch_source._instra_training = False
+
+    def _instra_train_one_update(self) -> Dict[str, Any]:
         if not vars(self.config).get("width_enabled", False):
             return self._train_one_update_without_width_capture()
         from .width_instrumentation import width_instrumentation_for
@@ -893,6 +900,9 @@ class TrainerStepMixin:
                     if prepared_batches is not None
                     else self.batch_source.get_batch("train", device=self.device)
                 )
+                self.batch_source.training_tokens_seen = vars(self.batch_source).get('training_tokens_seen', 0) + self.batch_source.batch_size*self.batch_source.block_size
+                import instra_recovery
+                instra_recovery.consumed_tokens = self.batch_source.training_tokens_seen
                 microbatch_starts.append(
                     tuple(int(value) for value in batch.starts)
                 )
@@ -1190,3 +1200,4 @@ class TrainerStepMixin:
 # if selected is None:
 # raise RuntimeError("PLASTIC DEPTH inline update completed without a selected count")
 # ^^^ THOG
+

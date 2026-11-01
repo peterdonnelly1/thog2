@@ -126,6 +126,7 @@ class DeterministicBatchSource:
 
     def state_dict(self) -> Dict[str, Any]:
         return {
+            "training_tokens_seen": vars(self).get("training_tokens_seen", 0),
             "train_generator_state": self.train_generator.get_state(),
             "validation_generator_state": self.validation_generator.get_state(),
             "trace": list(self.trace),
@@ -145,6 +146,7 @@ class DeterministicBatchSource:
                 "batch-source world_size is incompatible with checkpoint; "
                 f"checkpoint={checkpoint_world_size}, current={self.world_size}"
             )
+        self.training_tokens_seen = state.get("training_tokens_seen", 0)
         self.train_generator.set_state(state["train_generator_state"])
         self.validation_generator.set_state(state["validation_generator_state"])
         self.trace = list(state.get("trace", []))
@@ -181,3 +183,4 @@ class DeterministicBatchSource:
         payload = json.dumps(trace, separators=(",", ":")).encode("utf-8")
         return hashlib.sha256(payload).hexdigest()
 # ^^^ THOG
+
