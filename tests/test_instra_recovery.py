@@ -97,7 +97,7 @@ def test_managed_fresh_continue_fork_and_target_finalisation(tmp_path,monkeypatc
         assert recovery.execute(request)==0
         assert fingerprint.call_count==1
     assert Path(descriptor['path']).read_bytes()==before
-    request.update(action='continue',target=4,attempt_id=uuid.uuid4().hex)
+    request.update(action='continue',target=4,previous_target=2,parameters={'--max-iters':4},attempt_id=uuid.uuid4().hex)
     assert recovery.execute(request)==0
     request.update(action='resume',target=4,parameters={'--max-iters':4},attempt_id=uuid.uuid4().hex)
     assert recovery.execute(request)==0  # An older checkpoint may predate Continue's new target.

@@ -196,7 +196,8 @@ def execute(request):
     old_target = request.get('parameters', descriptor.get('submitted_parameters') or {}).get('--max-iters')
     if request['action'] == 'resume' and request['target'] != old_target:
         raise ValueError('Resume preserves the stopping target')
-    if request['action'] == 'continue' and (old_target is None or request['target'] <= max(old_target, descriptor['completed_steps'])):
+    previous_target = request.get('previous_target', (descriptor.get('submitted_parameters') or {}).get('--max-iters'))
+    if request['action'] == 'continue' and (type(previous_target) is not int or request['target'] <= max(previous_target, descriptor['completed_steps'])):
         raise ValueError('Continue requires a strictly larger target')
     import run_thog2_lifecycle as lifecycle
     arguments = ['--resume-from', descriptor['path'], '-q', 'fork' if request['action']=='fork' else 'resume',
