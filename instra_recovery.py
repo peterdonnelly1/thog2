@@ -193,7 +193,7 @@ def execute(request):
     descriptor = validate(request)
     if request['action'] not in {'resume','continue','fork'} or type(request['target']) is not int:
         raise ValueError('Invalid recovery action or target')
-    old_target = (descriptor.get('submitted_parameters') or {}).get('--max-iters')
+    old_target = request.get('parameters', descriptor.get('submitted_parameters') or {}).get('--max-iters')
     if request['action'] == 'resume' and request['target'] != old_target:
         raise ValueError('Resume preserves the stopping target')
     if request['action'] == 'continue' and (old_target is None or request['target'] <= max(old_target, descriptor['completed_steps'])):

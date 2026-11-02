@@ -99,8 +99,12 @@ def test_managed_fresh_continue_fork_and_target_finalisation(tmp_path,monkeypatc
     assert Path(descriptor['path']).read_bytes()==before
     request.update(action='continue',target=4,attempt_id=uuid.uuid4().hex)
     assert recovery.execute(request)==0
+    request.update(action='resume',target=4,parameters={'--max-iters':4},attempt_id=uuid.uuid4().hex)
+    assert recovery.execute(request)==0  # An older checkpoint may predate Continue's new target.
+    import run_thog2_owt_core as core
+    monkeypatch.delattr(core,'artifact_paths',raising=False)  # Direct adapter entry does not prime this alias.
     request.update(action='fork',target=6,run_id=uuid.uuid4().hex,attempt_id=uuid.uuid4().hex,
-        phase={'kind':'restart_cosine','start':2,'start_lr':descriptor['next_lr'],'peak_lr':.001,'min_lr':.0001,'rewarm_steps':1,'end':6})
+        phase={'kind':'restart_cosine','start':2,'start_lr':descriptor['next_lr'],'peak_lr':.001,'min_lr':.0001,'rewarm_steps':0,'end':6})
     assert recovery.execute(request)==0
     assert Path(descriptor['path']).read_bytes()==before
 

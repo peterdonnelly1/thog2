@@ -40,6 +40,7 @@ from sheet.run_lifecycle import (
     update_wandb_identity,
     validate_start_label,
 )
+from sheet.run_naming import artifact_paths
 from sheet.run_manifest import write_run_manifest
 from sheet.dense_snapshot import print_dense_snapshot_completion                                                                                                                    # <<< THOG repeat the relative snapshot path after lifecycle telemetry shutdown
 # vvv THOG PLASTIC COARSE/FINE one-shot discovery, fresh FINE reconstruction and review-pause resume
@@ -662,7 +663,7 @@ def _fork_lr_phase(
 
 
 def _paths_for_artifact(config: OwtRunConfig, artifact_name: str) -> Dict[str, Path]:
-    paths = core.artifact_paths(
+    paths = artifact_paths(
         artifact_name,
         checkpoint_root=Path(config.checkpoint_root),
         log_root=Path(config.log_root),
@@ -1143,9 +1144,7 @@ def _prepare_parent_context(
             completed_updates,
         )
         if os.environ.get('INSTRA_RECOVERY_CONTEXT') and phase_rewarm_iters >= target_updates-completed_updates:
-            raise ValueError('Fork target must exceed branch step plus rewarm duration')
-        if os.environ.get('INSTRA_RECOVERY_CONTEXT') and phase_rewarm_iters == 0 and phase_peak_lr != phase_start_lr:
-            raise ValueError('Zero rewarm requires peak equal to Parent boundary learning rate')
+            raise ValueError('New target steps must be greater than existing steps plus rewarm steps')
         root_start_label = parent_lifecycle.get("root_start_label") or parent_lifecycle.get("run_start_label")
         if not root_start_label:
             raise ValueError("fork requires a recoverable YYMMDD-HHMM root start label")
