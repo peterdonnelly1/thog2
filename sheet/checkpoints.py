@@ -348,10 +348,21 @@ def compact_model_state(model: torch.nn.Module, model_type: str) -> Mapping[str,
 def save_payload(payload: Mapping[str, Any], path: Union[str, Path]) -> Path:
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(dict(payload), target)
+    import os
+    import uuid
+    temporary = target.with_name(target.name + '.' + uuid.uuid4().hex + '.tmp')
+    try:
+        with temporary.open('wb') as stream:
+            torch.save(dict(payload), stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, target)
+    finally:
+        temporary.unlink(missing_ok=True)
     return target
 
 
 def load_payload(path: Union[str, Path], *, map_location: str = "cpu") -> Dict[str, Any]:
     return torch.load(Path(path), map_location=map_location, weights_only=False)
 # ^^^ THOG
+

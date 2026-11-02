@@ -71,11 +71,22 @@ def publish(trainer, path):
     output.mkdir(parents=True, exist_ok=True)
     target = output/(f'step_{trainer.state.completed_updates:012d}_{bundle_id}.pt')
     temporary = target.with_suffix('.tmp')
-    with Path(path).open('rb') as source, temporary.open('wb') as destination:
-        shutil.copyfileobj(source, destination, 1024*1024)
-        destination.flush()
-        os.fsync(destination.fileno())
-    os.replace(temporary, target)
+    # Published bundles retain an immutable inode. Atomic trainer saves replace
+    # the source path, so a later checkpoint cannot overwrite an earlier bundle.
+    import errno
+    try:
+        try:
+            os.link(path, temporary)
+        except OSError as error:
+            if error.errno not in {errno.EXDEV, errno.EPERM, errno.EACCES, errno.ENOTSUP}:
+                raise
+            with Path(path).open('rb') as source, temporary.open('wb') as destination:
+                shutil.copyfileobj(source, destination, 1024*1024)
+                destination.flush()
+                os.fsync(destination.fileno())
+        os.replace(temporary, target)
+    finally:
+        temporary.unlink(missing_ok=True)
     lifecycle = vars(trainer).get('lifecycle_metadata')
     identity_hash = vars(trainer).get('_instra_data_identity')
     if identity_hash is None:
