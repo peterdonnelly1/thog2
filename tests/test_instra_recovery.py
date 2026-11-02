@@ -92,7 +92,10 @@ def test_managed_fresh_continue_fork_and_target_finalisation(tmp_path,monkeypatc
     assert evidence['completed']
     descriptor=max(evidence['checkpoints'],key=lambda value:value['completed_steps']);before=Path(descriptor['path']).read_bytes()
     request={'protocol':1,'action':'resume','checkpoint':descriptor,'target':2,'run_id':run_id,'attempt_id':uuid.uuid4().hex,'phase':None,'parameters':metadata['parameters']}
-    assert recovery.execute(request)==0
+    from unittest.mock import patch
+    with patch.object(recovery,'data_signature',wraps=recovery.data_signature) as fingerprint:
+        assert recovery.execute(request)==0
+        assert fingerprint.call_count==1
     assert Path(descriptor['path']).read_bytes()==before
     request.update(action='continue',target=4,attempt_id=uuid.uuid4().hex)
     assert recovery.execute(request)==0

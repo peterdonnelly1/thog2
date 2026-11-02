@@ -1469,10 +1469,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     train_tokens = core.load_tokens(dataset_dir / "train.bin")
     validation_tokens = core.load_tokens(dataset_dir / "val.bin")
+    verified_data_identity = None
     if os.environ.get('INSTRA_RECOVERY_CONTEXT'):
         from instra_recovery import data_signature
         from types import SimpleNamespace
-        if data_signature(SimpleNamespace(train_tokens=train_tokens, validation_tokens=validation_tokens)) != json.loads(os.environ['INSTRA_RECOVERY_CONTEXT'])['checkpoint']['data_identity']:
+        verified_data_identity = data_signature(SimpleNamespace(train_tokens=train_tokens, validation_tokens=validation_tokens))
+        if verified_data_identity != json.loads(os.environ['INSTRA_RECOVERY_CONTEXT'])['checkpoint']['data_identity']:
             raise ValueError('Checkpoint data/tokenizer fingerprint changed before model allocation')
     fresh_state = None
     coarse_fine_outcome = None
@@ -1700,10 +1702,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         )
         lifecycle = gathered_lifecycle[0]
         trainer.lifecycle_metadata = dict(lifecycle)
-        if os.environ.get('INSTRA_RECOVERY_CONTEXT'):
-            from instra_recovery import data_signature
-            if data_signature(trainer.batch_source) != json.loads(os.environ['INSTRA_RECOVERY_CONTEXT'])['checkpoint']['data_identity']:
-                raise ValueError('Checkpoint data/tokenizer fingerprint changed')
+        if verified_data_identity is not None:
+            trainer._instra_data_identity = verified_data_identity
         trainer.distributed.barrier()
         core.attach_telemetry(trainer, telemetry)
 
