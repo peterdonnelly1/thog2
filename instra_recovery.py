@@ -9,6 +9,7 @@ from pathlib import Path
 import shutil
 import sys
 import uuid
+from instra_checkpoint_store import CheckpointStore, management_queue, management_worker, management_sync_directory
 
 ROOT = Path(__file__).resolve().parent
 consumed_tokens = 0
@@ -23,6 +24,7 @@ def _atomic_json(path, value):
         stream.flush()
         os.fsync(stream.fileno())
     os.replace(temporary, path)
+    management_sync_directory(path.parent)
 
 
 def _sha(path):
@@ -61,7 +63,7 @@ def data_signature(source):
     return values
 
 
-def publish(trainer, path):
+def _publish_unlocked(trainer, path):
     identity = _identity()
     if not identity:
         return
@@ -86,6 +88,7 @@ def publish(trainer, path):
                 destination.flush()
                 os.fsync(destination.fileno())
         os.replace(temporary, target)
+        management_sync_directory(target.parent)
     finally:
         temporary.unlink(missing_ok=True)
     lifecycle = vars(trainer).get('lifecycle_metadata')
@@ -104,6 +107,25 @@ def publish(trainer, path):
                   'data_identity': identity_hash,
                   'configuration_signature': trainer.config.compatibility_signature()}
     _atomic_json(ROOT/'instra'/'recovery'/run_id/(bundle_id+'.json'), descriptor)
+    CheckpointStore(ROOT,run_id).register(descriptor,aliases=[path],context=json.loads(os.environ.get('INSTRA_RECOVERY_CONTEXT') or '{}'))
+    return descriptor
+
+
+def publish(trainer,path):
+    identity=_identity()
+    if not identity: return
+    with CheckpointStore(ROOT,identity[0]).locked():
+        descriptor=_publish_unlocked(trainer,path)
+    management_queue(ROOT,'instra_recovery',{'run_id':identity[0],'parameters':identity[2].get('parameters',{}),'dtype':identity[2].get('dtype')})
+    return descriptor
+
+
+def _management_compatible(request,descriptor):
+    operational={'--max-iters','--checkpoint-root','--log-root','--result-root','--wandb-root','--host-label'}
+    submitted=descriptor.get('submitted_parameters')
+    return (submitted is not None and not any(value!=submitted.get(key) for key,value in request['parameters'].items() if key not in operational)
+            and descriptor.get('dtype')==request.get('dtype') and descriptor.get('tokens_seen') is not None
+            and descriptor.get('world_size')==1 and descriptor.get('schema')==1)
 
 
 def completed(target, completed_steps):
@@ -116,6 +138,7 @@ def completed(target, completed_steps):
 
 def validate(request):
     descriptor = request['checkpoint']
+    CheckpointStore(ROOT,descriptor['run_id']).check_readable(descriptor['bundle_id'])
     if not re.fullmatch(r'[a-f0-9]{32}', descriptor['bundle_id']):
         raise ValueError('Invalid checkpoint bundle identity')
     directory = ROOT/'instra'/'recovery'/str(uuid.UUID(descriptor['run_id']))
@@ -163,6 +186,8 @@ def evidence(request):
 def rpc(request):
     if request.get('protocol') != 1:
         raise ValueError('Unsupported checkpoint protocol')
+    if request['operation'] == 'management':
+        return {'protocol':1,**CheckpointStore(ROOT,request['run_id']).rpc(request,lambda d:_management_compatible(request,d))}
     if request['operation'] == 'evidence':
         return evidence(request)
     if request['operation'] == 'validate':
@@ -175,26 +200,24 @@ def rpc(request):
     if request['operation'] != 'inspect':
         raise ValueError('Unknown checkpoint operation')
     directory = ROOT/'instra'/'recovery'/str(uuid.UUID(request['run_id']))
-    checkpoints = []
-    operational = {'--max-iters','--checkpoint-root','--log-root','--result-root','--wandb-root','--host-label'}
-    for path in sorted(directory.glob('*.json'))[:2001]:
-        if path.name == 'completion.json':
-            continue
-        if len(checkpoints) >= 2000:
-            raise ValueError('Checkpoint catalogue exceeds 2000 bundles')
-        descriptor = json.loads(path.read_text())
-        submitted = descriptor.get('submitted_parameters')
-        mismatch = submitted is None or any(value != submitted.get(key) for key,value in request['parameters'].items() if key not in operational)
-        descriptor['compatible'] = not mismatch and descriptor.get('dtype') == request.get('dtype') and descriptor['tokens_seen'] is not None and descriptor['world_size'] == 1
-        descriptor['incompatibility_reasons'] = ['submitted configuration/dtype, token state, or world size is unsupported'] if not descriptor['compatible'] else []
-        checkpoints.append(descriptor)
+    store=CheckpointStore(ROOT,request['run_id'])
+    with store.locked(),store.database() as db:
+        rows=store.inventory(db,lambda d:_management_compatible(request,d),validate=True)
+    offset=request.get('offset',0)
+    if type(offset) is not int or offset<0: raise ValueError('Invalid recovery page')
+    usable=[r['descriptor'] for r in rows if r['availability']=='available' and r['validated']]
+    limit=request.get('limit',2000)
+    if type(limit) is not int or not 1<=limit<=2000:raise ValueError('Invalid recovery page limit')
+    if 'limit' not in request and len(usable)>2000:raise ValueError('Legacy checkpoint catalogue exceeds 2000; upgrade bridge for pagination')
+    checkpoints=[{**d,'compatible':True,'incompatibility_reasons':[]} for d in usable[offset:offset+limit]]
+    next_offset=offset+limit if offset+limit<len(usable) else None
     completion = json.loads((directory/'completion.json').read_text()) if (directory/'completion.json').is_file() else {}
     return {'protocol':1, 'capabilities':{'protocol':1,'restore':True,'finalisation_only':True,'fork_operations':['restart_cosine'], 'fork_parameters':FORK_PARAMETERS,'world_sizes':[1]},
-            'checkpoints':checkpoints, 'completed':completion.get('finalised') is True and completion.get('target') == request['parameters'].get('--max-iters'),
+            'management_version':1,'next_offset':next_offset,'checkpoints':checkpoints, 'completed':completion.get('finalised') is True and completion.get('target') == request['parameters'].get('--max-iters'),
             'completed_steps':completion.get('completed_steps', max((item['completed_steps'] for item in checkpoints),default=0))}
 
 
-def execute(request):
+def _execute_unreserved(request):
     descriptor = validate(request)
     if request['action'] not in {'resume','continue','fork'} or type(request['target']) is not int:
         raise ValueError('Invalid recovery action or target')
@@ -220,9 +243,20 @@ def execute(request):
     return lifecycle.main(arguments)
 
 
+def execute(request):
+    source=request['checkpoint']
+    store=CheckpointStore(ROOT,source['run_id'])
+    owner='reader:'+request.get('operation_id',uuid.uuid4().hex)
+    store.reserve(owner,source['bundle_id'],'active_read','submitted')
+    try: return _execute_unreserved(request)
+    finally: store.release(owner)
+
+
 if __name__=='__main__':
     try:
-        if sys.argv[1:] == ['--instra-recovery']:
+        if len(sys.argv)==3 and sys.argv[1]=='--instra-checkpoint-worker':
+            management_worker(ROOT,sys.argv[2],_management_compatible)
+        elif sys.argv[1:] == ['--instra-recovery']:
             print(json.dumps(rpc(json.load(sys.stdin)), allow_nan=False))
         elif len(sys.argv)==3 and sys.argv[1]=='--instra-recovery-execute':
             raise SystemExit(execute(json.loads(sys.argv[2])))

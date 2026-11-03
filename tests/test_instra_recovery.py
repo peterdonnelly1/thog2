@@ -115,6 +115,19 @@ def test_managed_fresh_continue_fork_and_target_finalisation(tmp_path,monkeypatc
     assert payload['trainer_config']['eval_interval']==2
     assert payload['trainer_config']['checkpoint_segment_size']>0
     assert Path(descriptor['path']).read_bytes()==before
+    from instra_checkpoint_store import CheckpointStore
+    source_store=CheckpointStore(recovery.ROOT,descriptor['run_id'])
+    removed=source_store.rpc({'management_operation':'remove','active':False,'bundle_ids':[descriptor['bundle_id']],
+                             'operation_id':uuid.uuid4().hex},lambda d:True)
+    assert removed['status']=='confirmed'
+    child_descriptor=max(child_descriptors,key=lambda d:d['completed_steps'])
+    parent_path=Path(descriptor['path']);held=parent_path.with_suffix('.held');parent_path.rename(held)
+    try:
+        child_request={**request,'action':'resume','checkpoint':child_descriptor,'attempt_id':uuid.uuid4().hex,
+                       'parameter_overrides':{},'parameters':{'--max-iters':6}}
+        assert recovery.execute(child_request)==0
+    finally:held.rename(parent_path)
+
 
 
 def test_nonfinite_skip_counts_actual_consumption(tmp_path,monkeypatch):
@@ -128,3 +141,47 @@ def test_nonfinite_skip_counts_actual_consumption(tmp_path,monkeypatch):
     assert trainer.state.completed_updates==2 and trainer.state.skipped_nonfinite_updates==1
     assert trainer.batch_source.training_tokens_seen==96
     trainer.close()
+
+
+@pytest.mark.parametrize('model_type',['dense','thog2_sheet'])
+def test_stage3d_real_retention_restore_trajectory(tmp_path,monkeypatch,model_type):
+    from instra_checkpoint_store import CheckpointStore
+    monkeypatch.setattr(recovery,'ROOT',tmp_path);run_id=str(uuid.uuid4());attempt=str(uuid.uuid4())
+    monkeypatch.setenv('THOG2_RUNNER_METADATA',json.dumps({'run_id':run_id,'attempt_id':attempt,'parameters':{'--max-iters':4},'dtype':'float32'}));monkeypatch.setenv('INSTRA_RECOVERY_CONTEXT','')
+    tokens=torch.arange(512)%32;trainer=SharedTrainer(config(tmp_path,model_type),tokens,tokens)
+    for step in (1,2,3):trainer.run(target_updates=step);trainer.save_checkpoint(tmp_path/f'original_{step}.pt')
+    trainer.close();store=CheckpointStore(tmp_path,run_id)
+    def rpc(operation,**arguments):return store.rpc({'management_operation':operation,'active':False,**arguments},lambda d:True)
+    bundles=sorted(rpc('list')['rows'],key=lambda row:row['completed_steps']);assert len(bundles)==3
+    first,middle,last=[row['descriptor'] for row in bundles]
+    rpc('protect',bundle_ids=[first['bundle_id']],operation_id=uuid.uuid4().hex);rpc('policy',policy={'mode':'n','n':1});plan=rpc('preview')
+    assert [d['bundle_id'] for d in plan['decisions'] if d['decision']=='remove']==[middle['bundle_id']]
+    assert rpc('apply',token=plan['token'],operation_id=uuid.uuid4().hex)['status']=='confirmed' and Path(middle['path']).exists()
+    rpc('restore',bundle_ids=[middle['bundle_id']],operation_id=uuid.uuid4().hex)
+    reference=SharedTrainer.from_checkpoint(middle['path'],tokens,tokens);reference.run(target_updates=4)
+    expected=copy.deepcopy(reference.raw_model.state_dict());optimizer=copy.deepcopy(reference.optimizer.state_dict());batch=reference.batch_source.state_dict();reference.close()
+    actual=SharedTrainer.from_checkpoint(middle['path'],tokens,tokens);actual.run(target_updates=4)
+    equal(expected,actual.raw_model.state_dict());equal(optimizer,actual.optimizer.state_dict());equal(batch,actual.batch_source.state_dict());actual.close()
+
+
+@pytest.mark.parametrize('model_type',['dense','thog2_sheet'])
+def test_stage3d_detached_automatic_cleanup_without_agent(tmp_path,monkeypatch,model_type):
+    import shutil,time
+    from instra_checkpoint_store import CheckpointStore
+    model_root=Path(recovery.__file__).resolve().parent
+    for name in ('instra_recovery.py','instra_checkpoint_store.py'):shutil.copy2(model_root/name,tmp_path/name)
+    monkeypatch.setattr(recovery,'ROOT',tmp_path);run_id=str(uuid.uuid4());attempt_id=str(uuid.uuid4())
+    monkeypatch.setenv('THOG2_RUNNER_METADATA',json.dumps({'run_id':run_id,'attempt_id':attempt_id,'parameters':{'--max-iters':4},'dtype':'float32'}))
+    monkeypatch.setenv('INSTRA_RECOVERY_CONTEXT','');store=CheckpointStore(tmp_path,run_id)
+    store.rpc({'management_operation':'policy','policy':{'mode':'latest','automatic':True}},lambda d:True)
+    tokens=torch.arange(512)%32;trainer=SharedTrainer(config(tmp_path,model_type),tokens,tokens)
+    for step in (1,2,3):trainer.run(target_updates=step);trainer.save_checkpoint(tmp_path/f'auto_{step}.pt')
+    trainer.close();deadline=time.monotonic()+10
+    while time.monotonic()<deadline:
+        with store.database() as db:job=store.get(db,'automatic','pending',{})
+        if job.get('status')=='confirmed':break
+        time.sleep(.05)
+    listing=store.rpc({'management_operation':'list'},lambda d:True)['rows']
+    assert len([r for r in listing if r['availability']=='available'])==1
+    assert len([r for r in listing if r['availability']=='removed'])==2
+    assert all(Path(r['descriptor']['path']).exists() for r in listing)
