@@ -249,6 +249,7 @@ class CheckpointStore:
             bundle_id = file.stem
             row = {'bundle_id':bundle_id,'run_id':self.run_id,'availability':'incomplete','compatible':False,
                    'validated':False,'size_bytes':None,'saved_at':None,'lineage':'unknown','ownership':'unknown','protections':[],'roles':[]}
+            row['management_revision']=removed.get(bundle_id,{}).get('revision',0)
             try:
                 record = registered.get(bundle_id)
                 external=bool(record and record['ownership']=='external')
@@ -351,7 +352,7 @@ class CheckpointStore:
             rows=self.inventory(db,compatible,validate=operation in {'validate','preview','apply','automatic'})
             policy=self.get(db,'policy','effective',management_policy())
             snapshot=management_digest([{'id':r['bundle_id'],'fp':r.get('fingerprint'),'availability':r['availability'],'lineage':r['lineage'],
-                                         'validated':r['validated'],'pins':r['protections']} for r in rows])
+                                         'validated':r['validated'],'pins':r['protections'],'revision':r.get('management_revision',0)} for r in rows])
             if operation in {'list','validate'}:
                 offset=request.get('offset',0);limit=request.get('limit',100)
                 if type(offset) is not int or offset<0 or type(limit) is not int or not 1<=limit<=200: raise ValueError('Invalid checkpoint page')
@@ -411,11 +412,12 @@ class CheckpointStore:
                             self.put(db,'removed',bundle_id,removed)
                         else:
                             if row['availability'] not in {'available','incompatible','unvalidated'}: raise ValueError('Bundle is unavailable or already removed')
-                            removal={'state':'removed','revision':1,'identity':{'run_id':self.run_id,'bundle_id':bundle_id},'fingerprint':row['fingerprint'],
+                            previous_revision=self.get(db,'removed',bundle_id,{}).get('revision',0)
+                            removal={'state':'removed','revision':previous_revision+1,'identity':{'run_id':self.run_id,'bundle_id':bundle_id},'fingerprint':row['fingerprint'],
                                      'record':record,'reason':'automatic_retention' if operation=='automatic' else 'retention' if operation=='apply' else 'manual',
                                      'removed_at':management_now(),'prior_roles':row['roles'],'operation_id':key,'bytes_retained':True}
                             self.put(db,'removed',bundle_id,removal)
-                    outcomes.append({'bundle_id':bundle_id,'status':'confirmed'})
+                    outcomes.append({'bundle_id':bundle_id,'status':'confirmed','revision':self.get(db,'removed',bundle_id,{}).get('revision',0)})
                 except (ValueError,OSError,KeyError) as error: outcomes.append({'bundle_id':bundle_id,'status':'blocked','reason':str(error)})
             result={'operation_id':key,'outcomes':outcomes,'status':'partial' if any(o['status']!='confirmed' for o in outcomes) else 'confirmed','reclaimed_bytes':0}
             self.put(db,'operation',key,{'request_hash':request_hash,'result':result,'at':management_now()})

@@ -220,3 +220,27 @@ def test_fork_pin_persists_child_provenance(environment):
     store,publish,rpc=environment;descriptor=publish(1);child=uuid.uuid4().hex;owner='fork:'+uuid.uuid4().hex
     rpc('fork_pin',owner=owner,bundle_id=descriptor['bundle_id'],child_run_id=child)
     with store.database() as db:assert store.get(db,'pin',owner)['child_run_ids']==[child]
+
+
+@pytest.mark.parametrize('adapter',['thog2','nanogpt'])
+def test_repeated_remove_restore_has_monotonic_receipts_and_stales_preview(environment,adapter):
+    original,publish,_=environment
+    if adapter=='nanogpt':
+        helper=MODEL_ROOT.parent/'nanogpt'/'instra_producer.py'
+        if not helper.is_file():pytest.skip('Requires the nanoGPT helper for cross-adapter verification')
+        spec=importlib.util.spec_from_file_location('stage3d_nano_revision',helper)
+        module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+        candidate=module.CheckpointStore
+    else:candidate=Store
+    store=candidate(original.root,original.run_id)
+    def rpc(operation,**arguments):return store.rpc({'management_operation':operation,'active':False,**arguments},lambda d:True)
+    first=publish(1);publish(2);rpc('policy',policy={'mode':'latest'})
+    preview=rpc('preview');key=uuid.uuid4().hex
+    request={'bundle_ids':[first['bundle_id']],'operation_id':key}
+    removed=rpc('remove',**request);assert removed['outcomes'][0]['revision']==1
+    restored=mutate(rpc,'restore',[first]);assert restored['outcomes'][0]['revision']==2
+    with pytest.raises(ValueError,match='changed'):rpc('apply',token=preview['token'],operation_id=uuid.uuid4().hex)
+    assert mutate(rpc,'remove',[first])['outcomes'][0]['revision']==3
+    assert mutate(rpc,'restore',[first])['outcomes'][0]['revision']==4
+    assert rpc('remove',**request)==removed  # Lost-ack replay cannot re-remove a restored bundle.
+    assert next(r for r in rpc('list')['rows'] if r['bundle_id']==first['bundle_id'])['management_revision']==4
