@@ -77,6 +77,24 @@ MODEL_TYPES = ("dense", "thog2_sheet")
 # vvv THOG processing capture is diagnostic execution state, never checkpoint model identity
 # EXECUTION_OVERRIDE_FIELDS = {"instrumentation__optimizer_histories__full_matrix_every_n_steps", "device", "dtype", "max_updates", "max_wall_minutes", "eval_interval", "eval_batches", "checkpoint_interval", "checkpoint_segment_size", "out_dir", "log_interval", "nonfinite_update_policy", "max_nonfinite_update_skips", "premat_enable_gpu_timing_diagnostic"}
 EXECUTION_OVERRIDE_FIELDS = {"instrumentation__optimizer_histories__full_matrix_every_n_steps", "device", "dtype", "max_updates", "max_wall_minutes", "eval_interval", "eval_batches", "checkpoint_interval", "checkpoint_segment_size", "save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step", "out_dir", "log_interval", "nonfinite_update_policy", "max_nonfinite_update_skips", "premat_enable_gpu_timing_diagnostic", "premat_processing_logging", "premat_processing_logging_capture_frequency_hz", "premat_processing_logging_capture_update", "premat_instra_microsteps", "premat_instra_playback"}                         # <<< THOG processing and relay controls are execution state, never checkpoint model identity
+# Capture scope and local logging do not change model, optimiser or data identity.
+EXECUTION_OVERRIDE_FIELDS.update({
+    'premat_logging',
+    'instrumentation__delta_loss_v_layer_heatmap',
+    'instrumentation__delta_loss_v_layer_heatmap__destination',
+    'instrumentation__delta_loss_v_layer_heatmap_abs_limit',
+    'instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes',
+    'instrumentation__width_activation_curves__end_step',
+    'instrumentation__width_activation_curves__feature_evaluation_points',
+    'instrumentation__width_activation_curves__history_length',
+    'instrumentation__width_activation_curves__log_every_n_steps',
+    'instrumentation__width_activation_curves__mode',
+    'instrumentation__width_activation_curves__probe_every_n_steps',
+    'instrumentation__width_activation_curves__probe_orders',
+    'instrumentation__width_activation_curves__sample_tokens_per_layer',
+    'instrumentation__width_activation_curves__start_step',
+})
+
 # ^^^ THOG
 # vvv THOG PLASTIC DEPTH fields are omitted from persistent disabled-run metadata to preserve the exact pre-feature identity
 PLASTIC_TRAINING_CONFIG_FIELDS = (

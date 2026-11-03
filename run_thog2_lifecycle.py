@@ -10,6 +10,7 @@ import os
 import socket
 import sqlite3                                                                                                                                             # <<< THOG recover pre-enhancement instrumentation from the run's local W&B-linked chart metadata
 import sys
+import time
 from dataclasses import asdict, fields, replace
 from datetime import datetime
 from pathlib import Path
@@ -455,6 +456,16 @@ _ARGUMENT_TO_CONFIG.update({WIDTH_CAPTURE_PREFIX + suffix: WIDTH_CAPTURE_PREFIX 
 # ^^^ THOG
 
 
+# Instra Fork changes operational capture settings without altering checkpoint geometry.
+_OPERATIONAL_CONFIG_DESTINATIONS.update(
+    name for name in _ARGUMENT_TO_CONFIG
+    if name.startswith('instrumentation__') or name in {
+        'premat_logging', 'premat_processing_logging',
+        'premat_processing_logging_capture_frequency_hz', 'premat_processing_logging_capture_update',
+        'premat_instra__full_step_timing_capture_and_chart', 'premat_instra__full_step_timing_capture_and_chart_capture',
+    }
+)
+
 def _run_config_field_names() -> Set[str]:
     return {field.name for field in fields(OwtRunConfig)}
 
@@ -824,6 +835,14 @@ def _apply_operational_config(
             changes["eval_iters"] = int(values[destination])
         else:
             changes[destination] = values[destination]
+    context = json.loads(os.environ.get('INSTRA_RECOVERY_CONTEXT') or '{}')
+    if context.get('action') == 'fork':
+        from instra_recovery import FORK_PARAMETERS
+        overrides = context.get('parameter_overrides', {})
+        if set(overrides) - set(FORK_PARAMETERS):
+            raise ValueError('Unsupported Fork parameter overrides')
+        config_fields = {field.name for field in fields(parent_config)}
+        changes.update({name[2:].replace('-', '_'): value for name, value in overrides.items() if name[2:].replace('-', '_') in config_fields})
     return replace(parent_config, **changes)
 
 
@@ -1306,6 +1325,12 @@ def _configure_instrumentation_environment(context: Mapping[str, Any]) -> None:
         for name in _INSTRUMENTATION_ENVIRONMENT_NAMES:
             if name in recorded_instrumentation:
                 os.environ[name] = str(recorded_instrumentation[name])
+    recovery_request = json.loads(os.environ.get('INSTRA_RECOVERY_CONTEXT') or '{}')
+    for key, value in recovery_request.get('parameter_overrides', {}).items():
+        environment_name = _LOCAL_CONFIGURATION_TO_INSTRUMENTATION_ENVIRONMENT.get(key[2:].replace('-', '_'))
+        if environment_name:
+            os.environ[environment_name] = str(value)
+            context['lifecycle'].setdefault('instrumentation_configuration', {})[environment_name] = str(value)
     # ^^^ THOG
 
     wandb_continue_run = bool(context["wandb_continue_run"])
@@ -1380,7 +1405,10 @@ def _training_config_for_context(context: Mapping[str, Any], dataset: Mapping[st
 
 
 def _resume_overrides(training_config: TrainingConfig) -> Dict[str, Any]:
+    from instra_recovery import FORK_PARAMETERS
+    operational_names = _OPERATIONAL_CONFIG_DESTINATIONS | {key[2:].replace('-', '_') for key in FORK_PARAMETERS}
     return {
+        **{name: value for name, value in vars(training_config).items() if name in operational_names},
         "instrumentation__optimizer_histories__full_matrix_every_n_steps": training_config.instrumentation__optimizer_histories__full_matrix_every_n_steps,
         "device": training_config.device,
         "dtype": training_config.dtype,
@@ -1767,6 +1795,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         sort_keys=True,
                     )
                 )
+        print("Instra finalising: training and final checkpoint complete; closing telemetry and process resources", flush=True)
         telemetry_final_state = "finished"
         return 0
     except KeyboardInterrupt:
@@ -1777,10 +1806,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 130
     finally:
         if rank == 0:
+            finalisation_started = time.monotonic()
             telemetry.finish(
                 exit_code=telemetry_exit_code,
                 final_state=telemetry_final_state,
             )
+            print(f'Instra finalisation: telemetry shutdown took {time.monotonic()-finalisation_started:.3f}s', flush=True)
             if telemetry_final_state == 'finished':
                 from instra_recovery import completed
                 completed(int(lifecycle['target_updates']), int(trainer.state.completed_updates))

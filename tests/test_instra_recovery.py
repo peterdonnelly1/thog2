@@ -104,8 +104,16 @@ def test_managed_fresh_continue_fork_and_target_finalisation(tmp_path,monkeypatc
     import run_thog2_owt_core as core
     monkeypatch.delattr(core,'artifact_paths',raising=False)  # Direct adapter entry does not prime this alias.
     request.update(action='fork',target=6,run_id=uuid.uuid4().hex,attempt_id=uuid.uuid4().hex,
+        parameter_overrides={'--log-interval':2,'--checkpoint-interval':2,'--eval-interval':2,'--premat_logging':'disabled','--activation-checkpointing':True},
         phase={'kind':'restart_cosine','start':2,'start_lr':descriptor['next_lr'],'peak_lr':.001,'min_lr':.0001,'rewarm_steps':0,'end':6})
     assert recovery.execute(request)==0
+    child_bundles=list((recovery.ROOT/'instra'/'recovery'/str(uuid.UUID(request['run_id']))).glob('*.json'))
+    child_descriptors=[json.loads(path.read_text()) for path in child_bundles if path.name!='completion.json']
+    payload=torch.load(child_descriptors[-1]['path'],weights_only=False)
+    assert payload['trainer_config']['log_interval']==2
+    assert payload['trainer_config']['checkpoint_interval']==2
+    assert payload['trainer_config']['eval_interval']==2
+    assert payload['trainer_config']['checkpoint_segment_size']>0
     assert Path(descriptor['path']).read_bytes()==before
 
 

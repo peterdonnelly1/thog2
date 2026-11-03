@@ -12,6 +12,7 @@ import uuid
 
 ROOT = Path(__file__).resolve().parent
 consumed_tokens = 0
+FORK_PARAMETERS = ['--instrumentation__depth_weight_curves__destination', '--activation-checkpointing', '--checkpoint-interval', '--checkpoint-segment-size', '--eval-interval', '--eval-iters', '--instrumentation__delta_loss_v_layer_heatmap', '--instrumentation__delta_loss_v_layer_heatmap__destination', '--instrumentation__delta_loss_v_layer_heatmap_abs_limit', '--instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes', '--instrumentation__optimizer_histories__full_matrix_every_n_steps', '--instrumentation__width_activation_curves__end_step', '--instrumentation__width_activation_curves__feature_evaluation_points', '--instrumentation__width_activation_curves__history_length', '--instrumentation__width_activation_curves__log_every_n_steps', '--instrumentation__width_activation_curves__mode', '--instrumentation__width_activation_curves__probe_every_n_steps', '--instrumentation__width_activation_curves__probe_orders', '--instrumentation__width_activation_curves__sample_tokens_per_layer', '--instrumentation__width_activation_curves__start_step', '--log-interval', '--max-wall-minutes', '--premat_instra_microsteps', '--premat_logging', '--premat_processing_logging', '--premat_processing_logging_capture_frequency_hz', '--premat_processing_logging_capture_update', '--save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step', '--wandb-entity', '--wandb-mode', '--wandb-project']
 
 
 def _atomic_json(path, value):
@@ -167,6 +168,10 @@ def rpc(request):
     if request['operation'] == 'validate':
         validate(request)
         return {'protocol':1, 'valid':True}
+    if request['operation'] == 'completion':
+        directory = ROOT/'instra'/'recovery'/str(uuid.UUID(request['run_id']))
+        receipt = json.loads((directory/'completion.json').read_text()) if (directory/'completion.json').is_file() else {}
+        return {'protocol':1, 'capabilities':{'protocol':1}, 'completed':receipt.get('finalised') is True and receipt.get('target') == request['parameters'].get('--max-iters')}
     if request['operation'] != 'inspect':
         raise ValueError('Unknown checkpoint operation')
     directory = ROOT/'instra'/'recovery'/str(uuid.UUID(request['run_id']))
@@ -184,7 +189,7 @@ def rpc(request):
         descriptor['incompatibility_reasons'] = ['submitted configuration/dtype, token state, or world size is unsupported'] if not descriptor['compatible'] else []
         checkpoints.append(descriptor)
     completion = json.loads((directory/'completion.json').read_text()) if (directory/'completion.json').is_file() else {}
-    return {'protocol':1, 'capabilities':{'protocol':1,'restore':True,'finalisation_only':True,'fork_operations':['restart_cosine'],'world_sizes':[1]},
+    return {'protocol':1, 'capabilities':{'protocol':1,'restore':True,'finalisation_only':True,'fork_operations':['restart_cosine'], 'fork_parameters':FORK_PARAMETERS,'world_sizes':[1]},
             'checkpoints':checkpoints, 'completed':completion.get('finalised') is True and completion.get('target') == request['parameters'].get('--max-iters'),
             'completed_steps':completion.get('completed_steps', max((item['completed_steps'] for item in checkpoints),default=0))}
 
@@ -206,6 +211,11 @@ def execute(request):
         phase = request['phase']
         arguments += ['--fork-lr-mode','restart_cosine','--fork-learning-rate',str(phase['peak_lr']),
                       '--fork-min-lr',str(phase['min_lr']),'--fork-rewarm-iters',str(phase['rewarm_steps'])]
+    overrides = request.get('parameter_overrides', {})
+    if set(overrides) - set(FORK_PARAMETERS):
+        raise ValueError('Unsupported Fork parameters')
+    if overrides and request['action'] != 'fork':
+        raise ValueError('Only Fork may change parameters')
     os.environ['INSTRA_RECOVERY_CONTEXT'] = json.dumps(request)
     return lifecycle.main(arguments)
 
