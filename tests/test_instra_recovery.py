@@ -121,12 +121,12 @@ def test_managed_fresh_continue_fork_and_target_finalisation(tmp_path,monkeypatc
                              'operation_id':uuid.uuid4().hex},lambda d:True)
     assert removed['status']=='confirmed'
     child_descriptor=max(child_descriptors,key=lambda d:d['completed_steps'])
-    parent_path=Path(descriptor['path']);held=parent_path.with_suffix('.held');parent_path.rename(held)
-    try:
-        child_request={**request,'action':'resume','checkpoint':child_descriptor,'attempt_id':uuid.uuid4().hex,
-                       'parameter_overrides':{},'parameters':{'--max-iters':6}}
-        assert recovery.execute(child_request)==0
-    finally:held.rename(parent_path)
+    purged=source_store.rpc({'management_operation':'purge','active':False,'bundle_ids':[descriptor['bundle_id']],
+                            'operation_id':uuid.uuid4().hex},lambda d:True)
+    assert purged['status']=='confirmed' and not Path(descriptor['path']).exists()
+    child_request={**request,'action':'resume','checkpoint':child_descriptor,'attempt_id':uuid.uuid4().hex,
+                   'parameter_overrides':{},'parameters':{'--max-iters':6}}
+    assert recovery.execute(child_request)==0
 
 
 

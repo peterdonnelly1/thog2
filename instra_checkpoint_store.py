@@ -165,6 +165,8 @@ class CheckpointStore:
     def register(self, descriptor, *, aliases=(), context=None, members=None, best_evaluation=None):
         """Only the model publisher calls this, while holding its Run lock."""
         bundle_id = descriptor['bundle_id']
+        with self.database() as db:
+            if self.get(db,'removed',bundle_id,{}).get('state') in {'removed','purging','purged'}: raise ValueError('Bundle identity is removed; publication refused')
         self.descriptor(bundle_id)
         paths = members or [descriptor['path']]
         owned = self.root/'instra'/'runs'/self.run_id/'attempts'/str(uuid.UUID(descriptor['attempt_id']))/'checkpoints'
@@ -247,6 +249,7 @@ class CheckpointStore:
         for file in paths:
             if file.name == 'completion.json': continue
             bundle_id = file.stem
+            if removed.get(bundle_id,{}).get('state') in {'purging','purged'}: continue
             row = {'bundle_id':bundle_id,'run_id':self.run_id,'availability':'incomplete','compatible':False,
                    'validated':False,'size_bytes':None,'saved_at':None,'lineage':'unknown','ownership':'unknown','protections':[],'roles':[]}
             row['management_revision']=removed.get(bundle_id,{}).get('revision',0)
@@ -302,7 +305,7 @@ class CheckpointStore:
         if not isinstance(owner,str) or not re.fullmatch('[a-zA-Z0-9:_-]{16,128}',owner): raise ValueError('Invalid reservation owner')
         with self.locked(), self.database() as db:
             descriptor = self.descriptor(bundle_id)
-            if self.get(db,'removed',bundle_id,{}).get('state')=='removed': raise ValueError('Checkpoint has been removed')
+            if self.get(db,'removed',bundle_id,{}).get('state') in {'removed','purging','purged'}: raise ValueError('Checkpoint has been removed')
             self.fresh(db,descriptor,self.get(db,'bundle',bundle_id))
             old = self.get(db,'pin',owner)
             if require_existing and not old: raise ValueError('Draft protection was lost; select and reserve again')
@@ -321,13 +324,111 @@ class CheckpointStore:
 
     def check_readable(self, bundle_id):
         with self.locked(),self.database() as db:
-            if self.get(db,'removed',bundle_id,{}).get('state')=='removed': raise ValueError('Checkpoint is recoverably removed; Restore it first')
+            if self.get(db,'removed',bundle_id,{}).get('state') in {'removed','purging','purged'}: raise ValueError('Checkpoint is recoverably removed; Restore it first')
+
+    def purge(self, request, compatible):
+        """Journal exact registered effects before unlink; resume the same intent.
+
+        The per-Run publisher/reader lock covers validation and each file effect.
+        No automatic retention path invokes this irreversible manual operation.
+        """
+        key=request.get('operation_id')
+        if not isinstance(key,str) or not 16<=len(key)<=128: raise ValueError('Durable operation identity required')
+        selected=request.get('bundle_ids')
+        if not isinstance(selected,list) or not 1<=len(selected)<=4096 or len(set(selected))!=len(selected): raise ValueError('Invalid purge selection')
+        request_hash=management_digest(request)
+        with self.locked():
+            with self.database() as db:
+                old=self.get(db,'purge_operation',key)
+                if old and old['request_hash']!=request_hash: raise ValueError('Purge key reused with changed scope')
+                if old and old['status']=='confirmed': return old['result']
+                if not old:
+                    old={'request_hash':request_hash,'status':'applying','outcomes':[]}
+                    self.put(db,'purge_operation',key,old)
+            outcomes=[]
+            for bundle_id in selected:
+                journal=None
+                try:
+                    with self.database() as db:
+                        removed=self.get(db,'removed',bundle_id,{})
+                        journal=self.get(db,'purge',bundle_id)
+                        if journal and journal['operation_id']!=key: raise ValueError('Purge already reserved by another operation')
+                        if journal and journal['status']=='confirmed':
+                            outcomes.append(journal['result']);continue
+                        if removed.get('state') not in {'removed','purging'}: raise ValueError('Remove this bundle to Rubbish before permanent deletion')
+                        pins=[p for p in self.records(db,'pin').values() if p['bundle_id']==bundle_id]
+                        if pins: raise ValueError('Checkpoint is protected or reserved: '+', '.join(p['reason'] for p in pins))
+                        if request.get('active',True): raise ValueError('Run is active or uncertain; permanent deletion blocked')
+                        record=self.get(db,'bundle',bundle_id)
+                        if not record or record['ownership'] not in {'managed','external'}: raise ValueError('Unknown checkpoint ownership')
+                        if not journal:
+                            descriptor=self.descriptor(bundle_id,external=record['ownership']=='external')
+                            if removed['fingerprint']!=management_digest(descriptor): raise ValueError('Removed descriptor changed')
+                            if request.get('fingerprints',{}).get(bundle_id,removed['fingerprint'])!=removed['fingerprint']: raise ValueError('Purge selection fingerprint changed')
+                            self.fresh(db,descriptor,record)
+                            members=[]
+                            if record['ownership']=='managed':
+                                shared={m['path'] for ident,r in self.records(db,'bundle').items() if ident!=bundle_id for m in r['members']}
+                                inodes=set()
+                                for member in record['members']:
+                                    path=self.safe(member['path']);info=path.stat();inodes.add((info.st_dev,info.st_ino))
+                                    if str(path) in shared: raise ValueError('Member is shared by a surviving bundle')
+                                    members.append({'path':str(path),'signature':[info.st_dev,info.st_ino,info.st_size,info.st_mtime_ns],'done':False})
+                                for alias in record.get('aliases',[]):
+                                    path=self.safe(alias)
+                                    if path.exists():
+                                        info=path.stat()
+                                        if (info.st_dev,info.st_ino) in inodes and str(path) not in shared and str(path) not in {m['path'] for m in members}:
+                                            members.append({'path':str(path),'signature':[info.st_dev,info.st_ino,info.st_size,info.st_mtime_ns],'done':False})
+                            path=self.safe(self.directory/(bundle_id+'.json'));info=path.stat()
+                            members.append({'path':str(path),'signature':[info.st_dev,info.st_ino,info.st_size,info.st_mtime_ns],'done':False})
+                            journal={'operation_id':key,'status':'applying','members':members,'revision':removed['revision'],'unlinked_bytes':0,'external':record['ownership']=='external'}
+                            self.put(db,'purge',bundle_id,journal)
+                            removed.update(state='purging',revision=removed['revision']+1,purge_operation_id=key)
+                            self.put(db,'removed',bundle_id,removed)
+                    # Intent committed before the first unlink. Every effect is
+                    # descriptor-relative and is reconciled on restart/retry.
+                    for index,member in enumerate(journal['members']):
+                        if member['done']: continue
+                        path=self.safe(member['path'])
+                        descriptors=[]
+                        try:
+                            fd=os.open('/',os.O_RDONLY|os.O_DIRECTORY);descriptors.append(fd)
+                            for part in path.parts[1:-1]:
+                                fd=os.open(part,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=fd);descriptors.append(fd)
+                            try: info=os.stat(path.name,dir_fd=fd,follow_symlinks=False)
+                            except FileNotFoundError: info=None
+                            if info is not None:
+                                import stat
+                                if not stat.S_ISREG(info.st_mode) or [info.st_dev,info.st_ino,info.st_size,info.st_mtime_ns]!=member['signature']:
+                                    raise ValueError('Registered purge member changed; reconciliation required')
+                                os.unlink(path.name,dir_fd=fd);os.fsync(fd)
+                                journal['unlinked_bytes']+=info.st_size
+                        finally:
+                            for fd in reversed(descriptors):os.close(fd)
+                        journal['members'][index]['done']=True
+                        with self.database() as db:self.put(db,'purge',bundle_id,journal)
+                    result={'bundle_id':bundle_id,'status':'confirmed','unlinked_bytes':journal['unlinked_bytes'],'filesystem_space_freed':'unknown','reference_only':journal['external']}
+                    with self.database() as db:
+                        tombstone={'state':'purged','revision':journal['revision']+2,'identity':{'run_id':self.run_id,'bundle_id':bundle_id},'operation_id':key,'purged_at':management_now()}
+                        self.put(db,'removed',bundle_id,tombstone)
+                        for kind in ('bundle','validation'):db.execute('DELETE FROM records WHERE run=? AND kind=? AND key=?',(self.run_id,kind,bundle_id))
+                        journal.update(status='confirmed',result=result,members=[])
+                        self.put(db,'purge',bundle_id,journal)
+                    outcomes.append(result)
+                except (OSError,ValueError,KeyError) as error:
+                    outcomes.append({'bundle_id':bundle_id,'status':'blocked','reason':str(error),'irreversible_started':bool(journal)})
+            result={'operation_id':key,'outcomes':outcomes,'status':'confirmed' if all(r['status']=='confirmed' for r in outcomes) else 'partial','reclaimed_bytes':0}
+            with self.database() as db:
+                self.put(db,'purge_operation',key,{'request_hash':request_hash,'status':result['status'],'result':result})
+            return result
 
     def rpc(self, request, compatible):
         operation=request['management_operation']
+        if operation=='purge': return self.purge(request,compatible)
         if operation=='capabilities':
             return {'management_version':1,'inventory':True,'recoverable_removal':True,'restore_removed':True,'best_evaluation':False,
-                    'external_deregistration':True,'permanent_deletion':False,'world_sizes':[1]}
+                    'external_deregistration':True,'permanent_deletion':True,'lifecycle_version':1,'world_sizes':[1]}
         if operation=='reserve':
             pin=self.reserve(request['owner'],request['bundle_id'],request.get('reason','recovery'),request.get('status','draft'),request.get('require_existing',False))
             return {'protection':pin}
